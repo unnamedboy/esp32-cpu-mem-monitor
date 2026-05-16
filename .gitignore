@@ -1,0 +1,77 @@
+.pio
+.vscode/*
+# ==========================================
+# 1. C# / .NET 9 (ResourceMonitorDaemon)
+# ==========================================
+# 编译产物与临时目录
+[Db]in/
+[Ob]j/
+**/[Bb]in/
+**/[Oo]bj/
+/artifacts/
+
+# 运行时的本地日志（如 daemon.log）
+*.log
+
+# Visual Studio 用户/团队配置
+.vs/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.sln.docstates
+
+# Rider / JetBrains 缓存
+.idea/
+
+# ==========================================
+# 2. Python (venv 虚拟环境)
+# ==========================================
+# 虚拟环境目录（匹配常见命名：venv, .venv, env等）
+venv/
+.venv/
+env/
+ENV/
+
+# Python 编译字节码缓存
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook 缓存
+.ipynb_checkpoints/
+
+# Poetry / Pipenv 等依赖工具缓存
+.pytest_cache/
+.tox/
+.mypy_cache/
+
+# ==========================================
+# 3. ESP32 (Arduino IDE / PlatformIO)
+# ==========================================
+# Arduino IDE 编译临时文件
+/build/
+/libraries/
+
+# PlatformIO 编译产物与本地环境缓存
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+.mxproject
+
+# ==========================================
+# 4. 操作系统与通用配置 (Windows / macOS)
+# ==========================================
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 敏感本地配置文件（如本地测试用的密钥或特定环境配置）
+*.local
+.env
+firmware/src/secrets.h
