@@ -6,6 +6,11 @@ This project is an ESP32 edge display for Windows CPU and memory usage. The
 Windows daemon publishes metric percentages over MQTT; the ESP32 receives those
 values and drives two analogue gauge outputs through an external I2C DAC.
 
+A front-panel faceplate option is available as an SVG asset at
+[assets/SQ52_CPU_MEM_1to1.svg](assets/SQ52_CPU_MEM_1to1.svg). This is intended as a
+replacement face for a generic voltmeter-style housing and is designed to label
+CPU and memory as a paired 1:1 gauge set rather than a voltage meter.
+
 ## Confirmed Hardware
 
 | Item | Status | Notes |

@@ -8,7 +8,15 @@ ESP32 owns display behavior, including DAC mapping and stale-data fade-out.
 
 ## Current State
 
-Phase 1 is complete.
+Status as of 2026-08-16:
+
+- Phase 1: Complete
+- Phase 2: Complete
+- Phase 3: In progress / not complete
+- Phase 4: Planned
+- Phase 5: Planned
+
+Completed implementation summary:
 
 - MQTT is the only supported runtime transport.
 - The ESP32 hosts the MQTT broker for this single-device, trusted-LAN setup.
@@ -18,7 +26,8 @@ Phase 1 is complete.
 - Firmware Wi-Fi credentials are no longer tracked. Local development uses
   ignored `firmware/src/secrets.h`, copied from
   `firmware/src/secrets.example.h`.
-- C++ PlatformIO Unity tests cover metric payload parsing and DAC value mapping.
+- A top-level README documents the real project state and local setup flow.
+- C++ PlatformIO tests cover metric payload parsing and DAC value mapping.
 - C# tests cover MQTT percentage payload formatting and clamping.
 
 See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
@@ -44,6 +53,8 @@ visually consistent stale-data state.
 
 ## Phase 2: Configuration and Credential Safety
 
+Status: Complete
+
 ### Goal
 
 Remove Wi-Fi credentials from tracked source files and establish a secure,
@@ -55,16 +66,16 @@ reproducible configuration path for development.
 - `firmware/src/secrets.example.h` provides placeholder values only.
 - `.gitignore` excludes `firmware/src/secrets.h`, `bin/`, and `obj/` output folders.
 - Startup diagnostics print Wi-Fi state but not Wi-Fi passwords.
-- The root commit no longer contains the previously tracked Wi-Fi password.
 
 ### Remaining Work
 
-1. Add a short setup section to a top-level README once the repo has one.
-2. Add a firmware diagnostic for missing `WIFI_SSID` so an unconfigured build
+1. Add a firmware diagnostic for missing `WIFI_SSID` so an unconfigured build
    fails visibly instead of waiting forever for Wi-Fi.
-3. Avoid printing SSID values unless useful for diagnosis; never print passwords.
+2. Avoid printing SSID values unless useful for diagnosis; never print passwords.
 
 ## Phase 3: Windows Configuration Module
+
+Status: In progress / not complete
 
 ### Goal
 
@@ -99,6 +110,8 @@ only the ciphertext under the application's LocalAppData directory. This is an
 opt-in feature, not a prerequisite for the wizard.
 
 ## Phase 4: ESP32 Provisioning and Secure Storage
+
+Status: Planned
 
 ### Goal
 
@@ -188,6 +201,8 @@ Do not implement custom BLE credential encryption unless there is a documented
 reason the supported provisioning paths cannot be used.
 
 ## Phase 5: Additional Metrics and Hardware Expansion
+
+Status: Planned
 
 ### Scope
 
