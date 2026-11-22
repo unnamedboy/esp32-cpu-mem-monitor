@@ -304,8 +304,14 @@ Privacy notes:
   applied live, and the confirmation balloon names any field still overridden by
   an environment variable. The Language drop-down lists "Automatic (system)" and
   each language in its own name ("English", "简体中文"); it is read-only when
-  `RESMON_Ui__Language` is set. A changed language is applied when the dialog
-  closes, so the menu and the confirmation balloon already use it.
+  `RESMON_Ui__Language` is set. A changed language is saved first and on its own,
+  and the Device section is written only when a device field changed, so an
+  invalid hand-edited value in the user file cannot block a language change. The
+  language is applied when the dialog closes, so the menu and the confirmation
+  balloon already use it. A failed save shows a localized generic message
+  (`SettingsSaveFailure`: "the settings file already contains invalid values" for
+  a validation error, otherwise "could not save"); the exception text goes to the
+  log. The Observability dialog does the same.
 - "Pair device… (配对设备…)" opens the pairing wizard (one instance at a time; see
   "Pairing wizard"). On the first connection failure of an unconfigured PC, the
   failure balloon is shown once as a "click to pair" balloon instead. It keeps
@@ -372,6 +378,15 @@ The UI is available in English (neutral language) and Simplified Chinese
     The existing string APIs (`DeviceSettingsValidator.ValidateHost`, `Validate`,
     `LokiSettingsValidator.Validate`, `LokiUrl.Validate`, …) still return the
     English text; dialogs call the `*Problem`/`Problems` variants;
+  - a `UiMessage` can only be created through its typed factories
+    (`UiMessage.Factories.cs`, e.g. `UiMessage.Settings_ErrorRange(field, value, min, max)`),
+    so the argument count always matches the placeholders. Fields are passed as
+    `UiField`s (`DeviceSettingsFields`, the Loki range fields): the log gets the
+    configuration key (`CpuTopic and MemTopic must be different.`), the dialog the
+    label (`CPU 主题和内存主题不能相同。`);
+  - MQTT notifications are built as `UiMessage`s and formatted with one snapshot
+    of `Strings.Culture` when shown, so title and text never mix languages; the
+    endpoint text is also logged, in English;
   - provisioning exceptions keep English messages (logged by the wizard).
     `PairingOutcomePresenter` maps them by type and code: `ProvisioningTransportError`,
     `PairingCodeRejectionReason`, `ProvisioningRetryRejectedException.PreviousAttemptFailed`,
@@ -380,15 +395,20 @@ The UI is available in English (neutral language) and Simplified Chinese
   - Loki push results: `Detail` (English) is logged; `LocalizedDetail` is shown for
     the daemon's own texts.
 - **Not translated**: the product name, the example Loki URLs, enum values such as
-  the auth modes `None`/`Basic`/`Bearer`, configuration key names inside messages
-  (`CpuTopic`, `FallbackAddress`), server responses and .NET exception texts shown as
-  detail (for example the start-up failure). The OK/Yes/No buttons of message
+  the auth modes `None`/`Basic`/`Bearer`, the `(env)` marker (kept literally, with
+  ASCII parentheses, in every language; noted in the resx comments), environment
+  variable names, server responses and .NET exception texts shown as detail (for
+  example the start-up failure). The OK/Yes/No buttons of message
   boxes are drawn by Windows in the Windows display language.
 - **Tests** (`LocalizationTests.cs`): same keys in both files and no empty values;
   `Strings` has exactly one member per key with one parameter per placeholder;
   identical placeholder sets per key; English texts without CJK and Chinese texts
   without bilingual "中文 (English)" labels; culture resolution; the satellite
-  assembly is built and loaded; `UiMessage` English vs. localized; invariant
+  assembly is built and loaded; `UiMessage` English vs. localized, private
+  constructor and factories matching the placeholders; field names (labels in zh
+  dialog messages, configuration keys in logs); single-culture MQTT balloon texts;
+  localized save failures and a language save that succeeds while the Device
+  section is invalid (drives `SettingsForm.OnSave`); invariant
   `MetricPayloadFormatter` output under zh-Hans and de-DE; the `Ui` section of the
   store; `UiLanguageMonitor` reloads; and a source scan that fails on any CJK
   character or bilingual label in `daemon/ResourceMonitorDaemon/**/*.cs` outside
@@ -410,8 +430,9 @@ To add a language (for example `zh-Hant`):
    automatically.
 
 To add a text, add the key to `Strings.resx` (with a placeholder comment) and to
-every translation, then add the matching member to `Strings.cs`; the tests fail
-until all three agree.
+every translation, then add the matching member to `Strings.cs` (and, for a text
+that is also logged, a factory in `UiMessage.Factories.cs`); the tests fail until
+they agree.
 
 ## Project Structure
 
