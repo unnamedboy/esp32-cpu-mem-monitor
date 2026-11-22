@@ -182,9 +182,10 @@ because the BLE client uses the WinRT `Windows.Devices.Bluetooth` APIs.
 ## Provisioning client
 
 Namespace `ResourceMonitorDaemon.Provisioning`. It is the Windows side of the
-pairing contract (`PROVISIONING.md` on the firmware branch): Arduino-ESP32
-`WiFiProv` BLE provisioning with protocomm **Security1** and a proof of
-possession (the 8-character pairing code). It is a library only; there is no
+pairing contract (`PROVISIONING.md` on the firmware branch): BLE provisioning
+with the ESP-IDF 4.4 `wifi_provisioning` manager (which the firmware calls
+directly), using protocomm **Security1** and a proof of possession (the
+8-character pairing code). It is a library only; there is no
 wizard UI yet and nothing in `Program.cs` uses it.
 
 Wire formats and behaviour were taken from ESP-IDF **v4.4.7**, the IDF bundled
@@ -204,8 +205,9 @@ transport/ble_cli.py}` at
 | `BleProvisioningTransport` | WinRT GATT client. Finds service `021a9004-0382-4aea-bff4-6b3f1c5adfb4`, maps endpoints by their 0x2901 user description, sends each request as write-with-response then reads the response from the same characteristic. |
 | `IProvisioningTransport` | `SendAsync(endpoint, data, ct)` seam; the tests use an in-memory fake device behind it. |
 | `Security1Session` | X25519 key exchange, key = shared secret XOR SHA-256(pairing code), AES-256-CTR with IV = device random and one keystream for all traffic, Command0/1 handshake and verifier check. |
-| `WifiConfigClient` | GetStatus (earlier-failure check) -> SetConfig -> ApplyConfig -> GetStatus polling (at most 1 per second, at most 30 s including an in-flight exchange). Result: `Connected(ip4)`, `Failed(AuthError or NetworkNotFound)`, `Timeout`, or `ConnectionLost` (lost contact with the device after the settings were applied, through a disconnect, GATT error or timeout; the device may have joined Wi-Fi). |
-| `SerialPopReader`, `PopLineParser`, `PairingCode` | USB serial pairing-code query (`RESMON?POP`), reply parsing and pairing-code validation. |
+| `WifiConfigClient` | `ConfigureAsync`: GetStatus check -> SetConfig -> ApplyConfig -> GetStatus polling (at most 1 per second, at most 30 s including an in-flight exchange). Result: `Connected(ip4)` (with `JoinedSsid`, `AlreadyConnected`, `JoinedDifferentNetwork`), `Failed(AuthError or NetworkNotFound)`, `Timeout`, or `ConnectionLost` (lost contact with the device after the settings were applied, through a disconnect, GATT error or timeout; the device may have joined Wi-Fi). `Ip4Address` is null unless it is a usable unicast IPv4 address (0.0.0.0/8, loopback, multicast/reserved and broadcast are rejected). |
+| `ProvisioningService.ProvisionAsync` | Uses the same `ConfigureAsync` path, so the already-connected check exists only once. |
+| `SerialPopReader`, `PopLineParser`, `PairingCode` | USB serial pairing-code query (`RESMON?POP`), reply parsing (the line must start with `RESMON-POP `; only leading whitespace is tolerated) and pairing-code validation. |
 | `ProtoWriter` / `ProtoReader`, `Sec1Messages`, `WifiConfigMessages` | Minimal hand-written protobuf codec for just these messages. |
 
 Errors: `PairingCodeRejectedException` (wrong pairing code),
@@ -213,7 +215,8 @@ Errors: `PairingCodeRejectedException` (wrong pairing code),
 unavailable, device not found or disconnected, timeout, service or endpoint
 missing, GATT error), and `ProvisioningProtocolException` (unexpected device
 answers), including `ProvisioningRetryRejectedException` when the device
-refuses a new attempt after a failed one. Messages can be shown to the user.
+refuses new settings because an earlier attempt is still in progress or
+failed. Messages can be shown to the user.
 
 Secrets: the Wi-Fi password arrives as a .NET `string`, which cannot be wiped,
 so the caller (the wizard) should drop its references as soon as
@@ -253,14 +256,14 @@ key until it is disposed.
 - **BLE teardown after success.** In IDF v4.4.7, the GetStatus handler calls
   `wifi_prov_mgr_done()` as soon as it reports Connected (`handlers.c`). With
   the default auto-stop, BLE then goes down after `max(cleanup_delay, 100 ms)`
-  (`manager.c`). The 30 s auto-stop timer is only a fallback. The contract
-  therefore requires the firmware to call `wifi_prov_mgr_disable_auto_stop(5000)`
-  or longer, and the client relies on that. The client also copes when the
-  firmware does not: a disconnect right after a Connected read still returns
-  `Connected`. Losing contact while still waiting (disconnect, GATT error or
-  timeout) returns `ConnectionLost`, and
-  the wizard should then try the normal MQTT connection to `resmon.local`
-  before reporting failure.
+  (`manager.c`). The firmware therefore calls `wifi_prov_mgr_disable_auto_stop`
+  and stops provisioning itself about 30 s after success, so BLE stays up for
+  roughly 35 s after the device reports Connected. The client does not depend
+  on that window:
+  - a disconnect right after a Connected read still returns `Connected`;
+  - losing contact while still waiting (disconnect, GATT error or timeout)
+    returns `ConnectionLost`, and the wizard should then try the normal MQTT
+    connection to `resmon.local` before reporting failure.
 - **Retry after a failure.** After a failed attempt, `wifi_prov_mgr` rejects
   new credentials (ApplyConfig returns InternalError) unless the firmware calls
   `wifi_prov_mgr_reset_sm_state_on_failure()`, which the contract requires.
@@ -272,18 +275,29 @@ key until it is disposed.
     Connecting (`wifi_state` 0).
   - If this check returns Connected, the device already joined Wi-Fi after an
     earlier attempt ended in `Timeout` or `ConnectionLost`. The client then
-    sends no credentials and returns `Connected(ip4)` directly, because a new
-    ApplyConfig would fail and the user would be told to restart a device that
-    is working. On a real device, answering Connected also makes the firmware
-    finish provisioning and stop BLE.
-  - In v4.4.7, ApplyConfig only returns InternalError when
-    `wifi_prov_mgr_configure_sta` fails or no config was set. The client
-    therefore always turns it into `ProvisioningRetryRejectedException`.
-    `PreviousAttemptFailed` on the exception says whether an earlier failure
-    was seen.
-  - The message tells the user to power-cycle the device, or hold its BOOT
-    button for 5–15 seconds and then release it (holds longer than 15 s are
-    ignored by the firmware).
+    sends no credentials, because a new ApplyConfig would fail and the user
+    would be told to restart a device that is working. It returns `Connected`
+    with `AlreadyConnected = true` and `JoinedSsid` (from
+    `WifiConnectedState.ssid`).
+    - `JoinedDifferentNetwork` is true when that SSID differs from the one the
+      user just entered. The wizard should then say "the device is already on
+      network X" instead of reporting success for the requested network.
+    - If the device does not report its SSID, the flag stays false.
+    - The SSID is never logged; the log only says whether it matched.
+    - On a real device, answering Connected also starts the firmware's
+      end-of-provisioning countdown.
+  - In v4.4.7, ApplyConfig returns InternalError when
+    `wifi_prov_mgr_configure_sta` fails, which happens once `prov_state` has
+    reached CRED_RECV, or when no config was set. CRED_RECV covers two cases:
+    an earlier attempt is still connecting (for example after a client
+    `Timeout`), or it failed without a reset. The client always turns this
+    into `ProvisioningRetryRejectedException`. `PreviousAttemptFailed` on the
+    exception says whether an earlier failure was seen.
+  - The message tells the user to hold the BOOT button for 5–15 seconds and
+    then release it (holds longer than 15 s are ignored by the firmware). It
+    deliberately does not suggest power-cycling. `configure_sta` has already
+    stored the earlier credentials in NVS, so after a power-cycle the device
+    would start as a plain Wi-Fi station with those credentials and no BLE.
 - An empty GetStatus response is not treated as Connected, even though
   Connected is the protobuf default value. The client only reports Connected
   when the `connected` sub-message is present.
@@ -314,7 +328,8 @@ Covered by unit tests (all in-memory):
   independently; the byte-level ProtoWire tests cover that. Cases covered:
   Connected, wrong pairing code (dropped link or stale Response0), forged
   verifier, AuthError, NetworkNotFound, timeout (including a hung exchange),
-  a link lost while waiting, retry after a failure, an empty GetStatus,
+  a link lost while waiting, retry after a failure, an already-connected
+  device (same, different or unreported SSID), an empty GetStatus,
   disposal during an exchange, and the session becoming unusable;
 - no golden transcript from the reference Python client: neither the system
   Python nor PlatformIO's Python has the `cryptography` package installed;
@@ -332,9 +347,9 @@ a physical ESP32 yet. In particular:
 - the USB serial query: whether opening the port with DTR/RTS deasserted
   avoids resetting this board's USB-UART bridge, and how Bluetooth virtual COM
   ports behave (probes are abandoned after 1.5 s);
-- the real BLE teardown timing after `Connected` and after
-  `wifi_prov_mgr_disable_auto_stop`. The fake device only simulates a link
-  drop right after the Connected read, or while still connecting.
+- the real BLE teardown timing after `Connected` (the firmware's window of
+  about 35 s). The fake device only simulates a link drop right after the
+  Connected read, or while still connecting.
 
 ## Tests
 
