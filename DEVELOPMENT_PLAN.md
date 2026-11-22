@@ -24,6 +24,12 @@ Completed implementation summary:
 - CPU and memory use `resmon/cpu` and `resmon/mem`.
 - Each payload is an ASCII decimal percentage in the range `0..100`.
 - The ESP32 rejects invalid values and fades each stale metric independently.
+- Optional observability (daemon side): the daemon subscribes to the optional
+  device status topic `resmon/status` and can push its log, a metrics line and
+  the device status to the user's own Grafana Loki. This is disabled by
+  default, and the token is stored DPAPI-encrypted. Firmware publishing of
+  `resmon/status` is implemented separately against the same contract
+  (COMMUNICATION.md).
 - Firmware Wi-Fi credentials are no longer tracked. Local development uses
   ignored `firmware/src/secrets.h`, copied from
   `firmware/src/secrets.example.h`.

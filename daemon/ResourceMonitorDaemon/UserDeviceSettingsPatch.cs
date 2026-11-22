@@ -16,6 +16,7 @@ namespace ResourceMonitorDaemon
             nameof(DeviceSettings.Port),
             nameof(DeviceSettings.CpuTopic),
             nameof(DeviceSettings.MemTopic),
+            nameof(DeviceSettings.StatusTopic),
             nameof(DeviceSettings.SampleIntervalMs),
             nameof(DeviceSettings.ReconnectInitialBackoffMs),
             nameof(DeviceSettings.ReconnectMaxBackoffMs),
@@ -37,6 +38,7 @@ namespace ResourceMonitorDaemon
         public int? Port { get; set; }
         public string? CpuTopic { get; set; }
         public string? MemTopic { get; set; }
+        public string? StatusTopic { get; set; }
         public int? SampleIntervalMs { get; set; }
         public int? ReconnectInitialBackoffMs { get; set; }
         public int? ReconnectMaxBackoffMs { get; set; }
@@ -52,6 +54,7 @@ namespace ResourceMonitorDaemon
             Port = Port ?? lowerLayers.Port,
             CpuTopic = CpuTopic ?? lowerLayers.CpuTopic,
             MemTopic = MemTopic ?? lowerLayers.MemTopic,
+            StatusTopic = StatusTopic ?? lowerLayers.StatusTopic,
             SampleIntervalMs = SampleIntervalMs ?? lowerLayers.SampleIntervalMs,
             ReconnectInitialBackoffMs = ReconnectInitialBackoffMs ?? lowerLayers.ReconnectInitialBackoffMs,
             ReconnectMaxBackoffMs = ReconnectMaxBackoffMs ?? lowerLayers.ReconnectMaxBackoffMs,
@@ -139,6 +142,15 @@ namespace ResourceMonitorDaemon
                 errors.Add("CpuTopic and MemTopic must be different.");
             }
 
+            if (StatusTopic != null)
+            {
+                Add(DeviceSettingsValidator.ValidateTopic(StatusTopic, nameof(StatusTopic)));
+                if (StatusTopic == CpuTopic || StatusTopic == MemTopic)
+                {
+                    errors.Add("StatusTopic must differ from CpuTopic and MemTopic.");
+                }
+            }
+
             if (SampleIntervalMs is { } interval)
             {
                 Add(DeviceSettingsValidator.ValidateRange(interval, DeviceSettingsValidator.MinSampleIntervalMs, DeviceSettingsValidator.MaxSampleIntervalMs, nameof(SampleIntervalMs)));
@@ -184,6 +196,7 @@ namespace ResourceMonitorDaemon
             Add(nameof(Port), Port);
             Add(nameof(CpuTopic), CpuTopic);
             Add(nameof(MemTopic), MemTopic);
+            Add(nameof(StatusTopic), StatusTopic);
             Add(nameof(SampleIntervalMs), SampleIntervalMs);
             Add(nameof(ReconnectInitialBackoffMs), ReconnectInitialBackoffMs);
             Add(nameof(ReconnectMaxBackoffMs), ReconnectMaxBackoffMs);

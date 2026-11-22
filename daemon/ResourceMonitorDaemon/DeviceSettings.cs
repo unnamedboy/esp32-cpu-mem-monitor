@@ -17,6 +17,7 @@ namespace ResourceMonitorDaemon
         public const int DefaultPort = 1883;
         public const string DefaultCpuTopic = "resmon/cpu";
         public const string DefaultMemTopic = "resmon/mem";
+        public const string DefaultStatusTopic = "resmon/status";
         public const int DefaultSampleIntervalMs = 1000;
         public const int DefaultReconnectInitialBackoffMs = 1000;
         public const int DefaultReconnectMaxBackoffMs = 30000;
@@ -39,6 +40,12 @@ namespace ResourceMonitorDaemon
 
         /// <summary>MQTT topic for the memory percentage. No wildcards.</summary>
         public string MemTopic { get; set; } = DefaultMemTopic;
+
+        /// <summary>
+        /// MQTT topic the daemon subscribes to for the optional device status JSON
+        /// (see COMMUNICATION.md). No wildcards; must differ from the metric topics.
+        /// </summary>
+        public string StatusTopic { get; set; } = DefaultStatusTopic;
 
         /// <summary>Sampling/publish period in milliseconds.</summary>
         public int SampleIntervalMs { get; set; } = DefaultSampleIntervalMs;
@@ -66,6 +73,7 @@ namespace ResourceMonitorDaemon
             target.Port = Port;
             target.CpuTopic = CpuTopic;
             target.MemTopic = MemTopic;
+            target.StatusTopic = StatusTopic;
             target.SampleIntervalMs = SampleIntervalMs;
             target.ReconnectInitialBackoffMs = ReconnectInitialBackoffMs;
             target.ReconnectMaxBackoffMs = ReconnectMaxBackoffMs;
@@ -75,7 +83,7 @@ namespace ResourceMonitorDaemon
         /// <summary>Single-line description for diagnostics. Contains no secrets.</summary>
         public string Describe() =>
             $"host={Host}, fallback={(string.IsNullOrEmpty(FallbackAddress) ? "(none)" : FallbackAddress)}, " +
-            $"port={Port}, cpuTopic={CpuTopic}, memTopic={MemTopic}, intervalMs={SampleIntervalMs}, " +
+            $"port={Port}, cpuTopic={CpuTopic}, memTopic={MemTopic}, statusTopic={StatusTopic}, intervalMs={SampleIntervalMs}, " +
             $"backoffMs={ReconnectInitialBackoffMs}..{ReconnectMaxBackoffMs}, connectTimeoutMs={ConnectTimeoutMs}";
     }
 }

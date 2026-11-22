@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ResourceMonitorDaemon.Pairing;
+using ResourceMonitorDaemon.Observability;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -18,6 +19,7 @@ namespace ResourceMonitorDaemon
         private readonly ISettingsStore _settingsStore;
         private readonly IOptionsMonitor<DeviceSettings> _settingsMonitor;
         private readonly ILoggerFactory _loggerFactory;
+        private readonly IServiceProvider _services;   // dialog dependencies only; the host is owned by Program.Main
         private readonly SynchronizationContext? _uiContext;
         private readonly System.Windows.Forms.Timer _updateTimer;
         private ToolStripMenuItem? _pauseResumeItem;
@@ -25,6 +27,7 @@ namespace ResourceMonitorDaemon
         private PairingWizardForm? _pairingWizard;
         private readonly FirstRunPairingPrompt _firstRunPrompt;
         private bool _pairingBalloonShown;
+        private ObservabilityForm? _observabilityForm;
         private bool _exiting;
 
         public TrayContext(IHost host, string logFilePath, MonitorService monitorService, ISettingsStore settingsStore)
@@ -37,6 +40,7 @@ namespace ResourceMonitorDaemon
             _firstRunPrompt = new FirstRunPairingPrompt(
                 FirstRunPairingPrompt.DefaultMarkerPath,
                 _loggerFactory.CreateLogger<FirstRunPairingPrompt>());
+            _services = host.Services;
 
             var contextMenu = new ContextMenuStrip();
 
@@ -55,6 +59,7 @@ namespace ResourceMonitorDaemon
             contextMenu.Items.Add("⚙ 设置 (Settings)…", null, OnSettingsClick);
             contextMenu.Items.Add(PairingText.TrayMenuItem, null, (_, _) => OpenPairingWizard());
             contextMenu.Items.Add("查看日志 (Log)", null, OnViewLog);
+            contextMenu.Items.Add(ObservabilityText.TrayMenuItem, null, OnObservabilityClick);
             contextMenu.Items.Add("-");
             contextMenu.Items.Add("退出 (Exit)", null, OnExit);
 
@@ -218,6 +223,37 @@ namespace ResourceMonitorDaemon
             _settingsForm.Activate();
         }
 
+        private void OnObservabilityClick(object? sender, EventArgs e)
+        {
+            if (_observabilityForm is { IsDisposed: false })
+            {
+                _observabilityForm.Activate();
+                return;
+            }
+
+            var services = _services;
+            var store = services.GetRequiredService<IObservabilitySettingsStore>();
+            _observabilityForm = new ObservabilityForm(
+                services.GetRequiredService<IOptionsMonitor<LokiSettings>>().CurrentValue,
+                DaemonConfiguration.LoadLowerLokiLayers(AppContext.BaseDirectory),
+                store.LoadLoki(),
+                store,
+                services.GetRequiredService<ISecretProtector>(),
+                DaemonConfiguration.GetEnvironmentOverriddenLokiFields());
+            _observabilityForm.FormClosed += (_, _) =>
+            {
+                if (_observabilityForm?.DialogResult == DialogResult.OK)
+                {
+                    ShowBalloon(3000, ObservabilityText.SavedBalloonTitle, ObservabilityText.SavedBalloonText, ToolTipIcon.Info);
+                }
+
+                _observabilityForm?.Dispose();
+                _observabilityForm = null;
+            };
+            _observabilityForm.Show();
+            _observabilityForm.Activate();
+        }
+
         private void OnViewLog(object? sender, EventArgs e)
         {
             if (File.Exists(_logFilePath))
@@ -240,6 +276,7 @@ namespace ResourceMonitorDaemon
             _updateTimer.Dispose();
             _settingsForm?.Close();
             _pairingWizard?.Close();
+            _observabilityForm?.Close();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
         }
@@ -263,6 +300,7 @@ namespace ResourceMonitorDaemon
             _notifyIcon.Visible = false;
             _settingsForm?.Close();
             _pairingWizard?.Close();
+            _observabilityForm?.Close();
             Application.ExitThread();
         }
     }

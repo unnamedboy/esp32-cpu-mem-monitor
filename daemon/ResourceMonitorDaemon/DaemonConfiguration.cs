@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ResourceMonitorDaemon.Observability;
 
 namespace ResourceMonitorDaemon
 {
@@ -63,23 +64,40 @@ namespace ResourceMonitorDaemon
         /// (built-in defaults + <c>appsettings.json</c>). The settings dialog compares against
         /// this so it only writes values that actually differ.
         /// </summary>
-        public static DeviceSettings LoadLowerLayers(string appSettingsDirectory)
-        {
-            var configuration = new ConfigurationBuilder()
+        public static DeviceSettings LoadLowerLayers(string appSettingsDirectory) =>
+            DeviceSettingsLoader.Load(BuildLowerLayers(appSettingsDirectory), new List<string>());
+
+        /// <summary>
+        /// Resolves <see cref="LokiSettings"/> from defaults + <c>appsettings.json</c> (no token:
+        /// tokens live only in the user file or the environment). Used by the Observability dialog.
+        /// </summary>
+        public static LokiSettings LoadLowerLokiLayers(string appSettingsDirectory) =>
+            LokiSettingsLoader.Load(BuildLowerLayers(appSettingsDirectory), new List<string>(), protector: null);
+
+        private static IConfiguration BuildLowerLayers(string appSettingsDirectory) =>
+            new ConfigurationBuilder()
                 .AddJsonFile(source =>
                     ConfigureJsonSource(source, Path.Combine(appSettingsDirectory, AppSettingsFileName), reloadOnChange: false, onLoadError: null))
                 .Build();
-            return DeviceSettingsLoader.Load(configuration, new List<string>());
-        }
 
         /// <summary>
         /// <see cref="DeviceSettings"/> property names currently overridden by
         /// <c>RESMON_Device__*</c> environment variables (case-insensitive set).
         /// </summary>
-        public static IReadOnlySet<string> GetEnvironmentOverriddenDeviceFields()
+        public static IReadOnlySet<string> GetEnvironmentOverriddenDeviceFields() =>
+            GetEnvironmentOverriddenFields(DeviceSettings.SectionName, UserDeviceSettingsPatch.FieldNames);
+
+        /// <summary>
+        /// <c>Observability:Loki</c> keys overridden by <c>RESMON_Observability__Loki__*</c>
+        /// environment variables, including <c>Token</c>.
+        /// </summary>
+        public static IReadOnlySet<string> GetEnvironmentOverriddenLokiFields() =>
+            GetEnvironmentOverriddenFields(LokiSettings.SectionName, UserLokiSettingsPatch.FieldNames.Append(LokiSettings.TokenKey).ToList());
+
+        private static IReadOnlySet<string> GetEnvironmentOverriddenFields(string sectionPath, IReadOnlyList<string> fieldNames)
         {
             var fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var prefix = DeviceSettings.SectionName + ConfigurationPath.KeyDelimiter;
+            var prefix = sectionPath + ConfigurationPath.KeyDelimiter;
             foreach (var name in GetEnvironmentOverrideNames())
             {
                 var key = name[EnvironmentPrefix.Length..].Replace("__", ConfigurationPath.KeyDelimiter, StringComparison.Ordinal);
@@ -88,7 +106,7 @@ namespace ResourceMonitorDaemon
                     continue;
                 }
 
-                var field = UserDeviceSettingsPatch.FieldNames.FirstOrDefault(
+                var field = fieldNames.FirstOrDefault(
                     f => string.Equals(f, key[prefix.Length..], StringComparison.OrdinalIgnoreCase));
                 if (field != null)
                 {
@@ -202,6 +220,7 @@ namespace ResourceMonitorDaemon
                 Port = ReadInt(section, nameof(DeviceSettings.Port), defaults.Port, warnings),
                 CpuTopic = section[nameof(DeviceSettings.CpuTopic)] ?? defaults.CpuTopic,
                 MemTopic = section[nameof(DeviceSettings.MemTopic)] ?? defaults.MemTopic,
+                StatusTopic = section[nameof(DeviceSettings.StatusTopic)] ?? defaults.StatusTopic,
                 SampleIntervalMs = ReadInt(section, nameof(DeviceSettings.SampleIntervalMs), defaults.SampleIntervalMs, warnings),
                 ReconnectInitialBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectInitialBackoffMs), defaults.ReconnectInitialBackoffMs, warnings),
                 ReconnectMaxBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectMaxBackoffMs), defaults.ReconnectMaxBackoffMs, warnings),
