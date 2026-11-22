@@ -53,7 +53,7 @@ namespace ResourceMonitorDaemon
             
             contextMenu.Items.Add("-");
             contextMenu.Items.Add("⚙ 设置 (Settings)…", null, OnSettingsClick);
-            contextMenu.Items.Add("配对设备 (Pair device)…", null, (_, _) => OpenPairingWizard());
+            contextMenu.Items.Add(PairingText.TrayMenuItem, null, (_, _) => OpenPairingWizard());
             contextMenu.Items.Add("查看日志 (Log)", null, OnViewLog);
             contextMenu.Items.Add("-");
             contextMenu.Items.Add("退出 (Exit)", null, OnExitAsync);
@@ -105,12 +105,12 @@ namespace ResourceMonitorDaemon
             if (_monitorService.IsPaused)
             {
                 _monitorService.Resume();
-                _notifyIcon.ShowBalloonTip(2000, "已恢复", "监控发送已恢复运行", ToolTipIcon.Info);
+                ShowBalloon(2000, "已恢复", "监控发送已恢复运行", ToolTipIcon.Info);
             }
             else
             {
                 _monitorService.Pause();
-                _notifyIcon.ShowBalloonTip(2000, "已暂停", "监控发送已暂停", ToolTipIcon.Info);
+                ShowBalloon(2000, "已暂停", "监控发送已暂停", ToolTipIcon.Info);
             }
         }
 
@@ -132,20 +132,17 @@ namespace ResourceMonitorDaemon
 
         /// <summary>
         /// Shows a connection notification. The first connection failure on an unconfigured PC
-        /// (no fallback address, never connected, prompt never shown) is replaced by a one-time
-        /// "click to pair" balloon; see <see cref="FirstRunPairingPrompt"/>.
+        /// (no fallback address, never connected, prompt never shown) is shown as a one-time
+        /// "click to pair" balloon that keeps the failure's title and states the failure; see
+        /// <see cref="FirstRunPairingPrompt"/>. The prompt is recorded as shown even if Windows
+        /// suppresses the balloon (Focus Assist / notifications off): at most once, by design.
         /// </summary>
         private void ShowNotification(string title, string message, ToolTipIcon icon)
         {
             var isFailure = icon == ToolTipIcon.Error && !_monitorService.IsConnected;
             if (!_exiting && _firstRunPrompt.TryClaim(isFailure, _settingsMonitor.CurrentValue.FallbackAddress))
             {
-                ShowBalloon(
-                    15000,
-                    "未找到设备 (No device found)",
-                    "未找到设备，点击进行配对 (No device found — click to pair)\n" +
-                    "也可以右键托盘图标 → 配对设备 (or tray menu → Pair device)",
-                    ToolTipIcon.Info);
+                ShowBalloon(15000, PairingText.FirstRunBalloonTitle(title), PairingText.FirstRunBalloonText, icon);
                 _pairingBalloonShown = true;
                 return;
             }

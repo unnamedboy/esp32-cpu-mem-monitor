@@ -193,36 +193,59 @@ namespace ResourceMonitorDaemon.Tests
                     }
                 }
             }),
-            ("Pairing: netsh output parser finds one SSID and its band, ignores BSSID and odd output", () =>
+            ("Pairing: SSID selection needs exactly one connected, plausible SSID", () =>
             {
-                const string connected =
+                AssertEqual("Home Net: 2", CurrentWifiNetwork.SelectSsid(new[] { "Home Net: 2" }));
+                AssertEqual("家里的网络", CurrentWifiNetwork.SelectSsid(new[] { "家里的网络", "家里的网络", null, "" }));
+                AssertEqual("Café?", CurrentWifiNetwork.SelectSsid(new[] { "Café?" }));
+                AssertTrue(CurrentWifiNetwork.SelectSsid(new[] { "A", "B" }) is null, "two networks: ambiguous");
+                AssertTrue(CurrentWifiNetwork.SelectSsid(new string?[] { null, "" }) is null, "none");
+                AssertTrue(CurrentWifiNetwork.SelectSsid(new[] { "bad\uFFFD" }) is null, "replacement character");
+                AssertTrue(CurrentWifiNetwork.SelectSsid(new[] { new string('s', ProvisioningConstants.MaxSsidBytes + 1) }) is null, "too long");
+            }),
+            ("Pairing: netsh band hint from Band or channel lines (English), unknown when ambiguous", () =>
+            {
+                const string english =
                     "There is 1 interface on the system: \r\n\r\n" +
                     "    Name                   : Wi-Fi\r\n" +
-                    "    State                  : connected\r\n" +
                     "    SSID                   : Home Net: 2\r\n" +
                     "    AP BSSID               : 00:00:5e:00:53:01\r\n" +
                     "    Band                   : 5 GHz\r\n" +
                     "    Channel                : 40\r\n" +
-                    "    Profile                : Home Net: 2 \r\n";
-                var info = CurrentWifiNetwork.ParseNetshInterfaces(connected);
-                AssertTrue(info is not null, "parsed");
-                AssertEqual("Home Net: 2", info!.Ssid);
-                AssertEqual("5 GHz", info.Band);
-                AssertTrue(info.IsNot24GHz, "5 GHz flagged");
+                    "    Rssi                   : -30\r\n";
+                AssertEqual<bool?>(false, CurrentWifiNetwork.ParseIs24GHz(english));
+                AssertEqual<bool?>(true, CurrentWifiNetwork.ParseIs24GHz(english.Replace("5 GHz", "2.4 GHz").Replace(": 40", ": 6")));
+                AssertEqual<bool?>(false, CurrentWifiNetwork.ParseIs24GHz(english.Replace("5 GHz", "6 GHz").Replace(": 40", ": 5")));
+                var noBand = english.Replace("    Band                   : 5 GHz\r\n", string.Empty);
+                AssertEqual<bool?>(false, CurrentWifiNetwork.ParseIs24GHz(noBand));
+                AssertEqual<bool?>(true, CurrentWifiNetwork.ParseIs24GHz(noBand.Replace(": 40", ": 11")));
+                AssertEqual<bool?>(null, CurrentWifiNetwork.ParseIs24GHz(noBand.Replace("Channel", "Kanal")));
+                AssertEqual<bool?>(null, CurrentWifiNetwork.ParseIs24GHz(english + "    SSID : Other\r\n    Channel : 6\r\n"));
+                AssertEqual<bool?>(null, CurrentWifiNetwork.ParseIs24GHz("    Name : Wi-Fi\n    State : disconnected\n"));
+                AssertEqual<bool?>(null, CurrentWifiNetwork.ParseIs24GHz(
+                    "Network shell commands need location permission to access WLAN information.\n"));
+                AssertEqual<bool?>(null, CurrentWifiNetwork.ParseIs24GHz(null));
+            }),
+            ("Pairing: netsh output from Chinese Windows (CP936 bytes) is decoded and parsed", () =>
+            {
+                const string chinese =
+                    "系统上有 1 个接口:\r\n\r\n" +
+                    "    名称                   : WLAN\r\n" +
+                    "    状态                   : 已连接\r\n" +
+                    "    SSID                   : 家里的网络\r\n" +
+                    "    信道                   : 149\r\n" +
+                    "    信号                   : 90%\r\n";
+                var cp936 = System.Text.CodePagesEncodingProvider.Instance.GetEncoding(936)!;
+                var bytes = cp936.GetBytes(chinese);
+                var decoded = CurrentWifiNetwork.DecodeConsoleOutput(bytes, 936);
+                AssertTrue(decoded.Contains("家里的网络") && decoded.Contains("信道"), "CP936 round trip");
+                AssertEqual<bool?>(false, CurrentWifiNetwork.ParseIs24GHz(decoded));
+                AssertEqual<bool?>(true, CurrentWifiNetwork.ParseIs24GHz(decoded.Replace(": 149", ": 6")));
+                AssertEqual<bool?>(false, CurrentWifiNetwork.ParseIs24GHz(decoded.Replace("    信道", "    波段                   : 5 GHz\r\n    信道")));
 
-                var on24 = CurrentWifiNetwork.ParseNetshInterfaces(connected.Replace("5 GHz", "2.4 GHz"));
-                AssertTrue(on24 is not null && !on24.IsNot24GHz, "2.4 GHz not flagged");
-
-                var localized = CurrentWifiNetwork.ParseNetshInterfaces("    名称 : WLAN\n    SSID : 家里\n    波段 : 5 GHz\n");
-                AssertTrue(localized is not null && localized.Ssid == "家里" && localized.Band is null && !localized.IsNot24GHz, "localized keys");
-
-                AssertTrue(CurrentWifiNetwork.ParseNetshInterfaces("    Name : Wi-Fi\n    State : disconnected\n") is null, "disconnected");
-                AssertTrue(CurrentWifiNetwork.ParseNetshInterfaces(
-                    "Network shell commands need location permission to access WLAN information.\n") is null, "location permission");
-                AssertTrue(CurrentWifiNetwork.ParseNetshInterfaces("    SSID : A\n    SSID : B\n") is null, "two adapters: ambiguous");
-                AssertTrue(CurrentWifiNetwork.ParseNetshInterfaces("    SSID : Caf? Wi-Fi\n") is null, "garbled code page");
-                AssertTrue(CurrentWifiNetwork.ParseNetshInterfaces("    SSID : \n") is null, "empty");
-                AssertTrue(CurrentWifiNetwork.ParseNetshInterfaces(null) is null, "null");
+                // Decoding with the wrong code page (the user's format culture instead of the system OEM
+                // code page) loses the Chinese label: the hint becomes unknown instead of wrong.
+                AssertEqual<bool?>(null, CurrentWifiNetwork.ParseIs24GHz(CurrentWifiNetwork.DecodeConsoleOutput(bytes, 437)));
             }),
             ("Pairing: broker probe reports a listening port, an already-connected daemon, and gives up on its budget", () =>
             {

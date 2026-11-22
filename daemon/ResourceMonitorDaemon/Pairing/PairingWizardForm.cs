@@ -31,16 +31,6 @@ namespace ResourceMonitorDaemon.Pairing
         private const int StepSave = 4;
         private const int StepDaemon = 5;
 
-        private static readonly string[] StepTexts =
-        {
-            "连接设备 (Connect to device)",
-            "建立加密会话 (Secure session)",
-            "发送 Wi-Fi 设置 (Send Wi-Fi settings)",
-            "等待设备连接 Wi-Fi (Wait for Wi-Fi)",
-            "保存设备地址 (Save device address)",
-            "守护进程连接设备 (Daemon connects)",
-        };
-
         private enum StepState { Pending, Running, Done, Failed, Skipped, Warning }
 
         private enum CodeSource { None, Usb, User }
@@ -97,7 +87,7 @@ namespace ResourceMonitorDaemon.Pairing
             SuspendLayout();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
-            Text = "配对设备 (Pair device) - Resource Monitor";
+            Text = PairingText.WindowTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -117,9 +107,7 @@ namespace ResourceMonitorDaemon.Pairing
             root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
             AddRow(root, NewLabel(
-                "通过蓝牙为设备配置 Wi-Fi。设备需处于配对模式（首次启动，或" + PairingOutcomePresenter.ReprovisionInstructionZh + "）。\n" +
-                "Set up the device's Wi-Fi over Bluetooth. The device must be in pairing mode (first start, or " +
-                ProvisioningConstants.ReprovisionInstruction + ").",
+                PairingText.Intro,
                 SystemColors.ControlText,
                 2 * ContentWidth));
 
@@ -140,7 +128,7 @@ namespace ResourceMonitorDaemon.Pairing
             AddRow(root, columns);
 
             // 1. Device
-            var deviceGroup = NewGroup("1. 选择设备 (Select device)", out var deviceLayout);
+            var deviceGroup = NewGroup(PairingText.DeviceGroup, out var deviceLayout);
             _devices = new ListView
             {
                 View = View.Details,
@@ -150,11 +138,11 @@ namespace ResourceMonitorDaemon.Pairing
                 HeaderStyle = ColumnHeaderStyle.Nonclickable,
                 Size = new Size(ContentWidth, 96),
             };
-            _devices.Columns.Add("设备 (Device)", 300);
-            _devices.Columns.Add("信号 (Signal)", 120);
+            _devices.Columns.Add(PairingText.DeviceColumn, 300);
+            _devices.Columns.Add(PairingText.SignalColumn, 120);
             _devices.SelectedIndexChanged += OnDeviceSelectionChanged;
             AddRow(deviceLayout, _devices);
-            _rescan = new Button { Text = "重新扫描 (Rescan)", AutoSize = true };
+            _rescan = new Button { Text = PairingText.RescanButton, AutoSize = true };
             _rescan.Click += async (_, _) => await RunSafelyAsync(ScanAsync);
             AddRow(deviceLayout, _rescan);
             _scanStatus = NewLabel(string.Empty, SystemColors.ControlText);
@@ -162,7 +150,7 @@ namespace ResourceMonitorDaemon.Pairing
             AddRow(left, deviceGroup);
 
             // 2. Pairing code
-            var codeGroup = NewGroup("2. 配对码 (Pairing code)", out var codeLayout);
+            var codeGroup = NewGroup(PairingText.CodeGroup, out var codeLayout);
             var codeRow = NewFlow();
             _code = new TextBox { Width = 150, CharacterCasing = CharacterCasing.Upper, MaxLength = 16 };
             _code.TextChanged += OnCodeTextChanged;
@@ -171,42 +159,37 @@ namespace ResourceMonitorDaemon.Pairing
             codeRow.Controls.Add(_code);
             codeRow.Controls.Add(_codeLink);
             AddRow(codeLayout, codeRow);
-            _codeStatus = NewLabel("请先选择设备 (select a device first)", SystemColors.ControlText);
+            _codeStatus = NewLabel(PairingText.CodeSelectDeviceFirst, SystemColors.ControlText);
             AddRow(codeLayout, _codeStatus);
-            AddRow(codeLayout, NewLabel(
-                "配对码共 8 位，在设备的 USB 串口日志中（115200 波特）：Provisioning: name=PROV_RESMON_… pop=…\n" +
-                "The 8-character code is in the device's USB serial log (115200 baud), line \"Provisioning: name=... pop=...\".",
-                SystemColors.GrayText));
+            AddRow(codeLayout, NewLabel(PairingText.CodeHint, SystemColors.GrayText));
             AddRow(left, codeGroup);
 
             // 3. Wi-Fi
-            var wifiGroup = NewGroup("3. Wi-Fi", out var wifiLayout);
+            var wifiGroup = NewGroup(PairingText.WifiGroup, out var wifiLayout);
             var wifiGrid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             wifiGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             wifiGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             _ssid = new TextBox { Width = 230 };
             _ssid.TextChanged += (_, _) => _ssidNote!.Visible = _prefilledSsid is not null && _ssid.Text == _prefilledSsid;
             _password = new TextBox { Width = 230, UseSystemPasswordChar = true };
-            _showPassword = new CheckBox { Text = "显示 (Show)", AutoSize = true, Margin = new Padding(8, 5, 3, 3) };
+            _showPassword = new CheckBox { Text = PairingText.ShowPassword, AutoSize = true, Margin = new Padding(8, 5, 3, 3) };
             _showPassword.CheckedChanged += (_, _) => _password.UseSystemPasswordChar = !_showPassword.Checked;
             var passwordRow = NewFlow();
             passwordRow.Controls.Add(_password);
             passwordRow.Controls.Add(_showPassword);
-            AddGridRow(wifiGrid, "网络名称 (SSID):", _ssid);
-            AddGridRow(wifiGrid, "密码 (Password):", passwordRow);
+            AddGridRow(wifiGrid, PairingText.SsidLabel, _ssid);
+            AddGridRow(wifiGrid, PairingText.PasswordLabel, passwordRow);
             AddRow(wifiLayout, wifiGrid);
             _ssidNote = NewLabel(string.Empty, SystemColors.GrayText);
             _ssidNote.Visible = false;
             AddRow(wifiLayout, _ssidNote);
-            AddRow(wifiLayout, NewLabel(
-                "ESP32 仅支持 2.4 GHz Wi-Fi (2.4 GHz only)。密码只用于本次配对，不会保存 (the password is used for this attempt only and never saved).",
-                SystemColors.GrayText));
+            AddRow(wifiLayout, NewLabel(PairingText.WifiNote, SystemColors.GrayText));
             AddRow(right, wifiGroup);
 
             // 4. Progress
-            var progressGroup = NewGroup("4. 配对 (Pair)", out var progressLayout);
-            _steps = new Label[StepTexts.Length];
-            for (var i = 0; i < StepTexts.Length; i++)
+            var progressGroup = NewGroup(PairingText.ProgressGroup, out var progressLayout);
+            _steps = new Label[PairingText.Steps.Count];
+            for (var i = 0; i < _steps.Length; i++)
             {
                 _steps[i] = NewLabel(string.Empty, SystemColors.GrayText);
                 _steps[i].Margin = new Padding(3, 1, 3, 1);
@@ -222,9 +205,9 @@ namespace ResourceMonitorDaemon.Pairing
             AddRow(right, progressGroup);
 
             // Buttons
-            _pair = new Button { Text = "开始配对 (Pair)", AutoSize = true };
+            _pair = new Button { Text = PairingText.PairButton, AutoSize = true };
             _pair.Click += async (_, _) => await RunSafelyAsync(PairAsync);
-            _cancel = new Button { Text = "关闭 (Close)", AutoSize = true };
+            _cancel = new Button { Text = PairingText.CloseButton, AutoSize = true };
             _cancel.Click += OnCancelClick;
             var buttons = new FlowLayoutPanel
             {
@@ -334,7 +317,7 @@ namespace ResourceMonitorDaemon.Pairing
 
             _scanning = true;
             UpdateControls();
-            _scanStatus.Text = "正在扫描蓝牙设备… (Scanning for devices…)";
+            _scanStatus.Text = PairingText.Scanning;
             var progress = new Progress<ProvisioningDeviceInfo>(device =>
             {
                 if (!_closed && ReferenceEquals(_scanCts, cts))
@@ -401,7 +384,7 @@ namespace ResourceMonitorDaemon.Pairing
 
         private void AddOrUpdateDevice(ProvisioningDeviceInfo device)
         {
-            var signal = $"{device.Rssi} dBm";
+            var signal = PairingText.SignalStrength(device.Rssi);
             foreach (ListViewItem existing in _devices.Items)
             {
                 if (existing.Tag is ProvisioningDeviceInfo known && known.BluetoothAddress == device.BluetoothAddress)
@@ -443,7 +426,7 @@ namespace ResourceMonitorDaemon.Pairing
             using var cts = NewOperationSource();
             _popCts = cts;
             _codeStatus.ForeColor = SystemColors.ControlText;
-            _codeStatus.Text = "正在通过 USB 查找配对码… (looking for the pairing code over USB…)";
+            _codeStatus.Text = PairingText.CodeReadingUsb;
             UpdateCodeLink();
             try
             {
@@ -472,12 +455,12 @@ namespace ResourceMonitorDaemon.Pairing
                     }
 
                     _codeStatus.ForeColor = Color.DarkGreen;
-                    _codeStatus.Text = "已通过 USB 自动读取配对码 (read automatically over USB)";
+                    _codeStatus.Text = PairingText.CodeReadOverUsb;
                     _logger.LogInformation("Pairing wizard: pairing code for {Device} read over USB.", device.Name);
                 }
                 else
                 {
-                    _codeStatus.Text = "未能通过 USB 读取，请手动输入 (not found over USB — enter it manually)";
+                    _codeStatus.Text = PairingText.CodeNotFoundOverUsb;
                 }
 
                 UpdateCodeLink();
@@ -487,7 +470,7 @@ namespace ResourceMonitorDaemon.Pairing
                 // Another device selected, pairing started or wizard closed.
                 if (!_closed && ReferenceEquals(_popCts, cts))
                 {
-                    _codeStatus.Text = "未通过 USB 读取配对码 (pairing code not read over USB)";
+                    _codeStatus.Text = PairingText.CodeUsbQueryStopped;
                 }
             }
             finally
@@ -546,12 +529,12 @@ namespace ResourceMonitorDaemon.Pairing
         {
             if (_codeSource == CodeSource.Usb)
             {
-                _codeLink.Text = "手动输入 (Enter manually)";
+                _codeLink.Text = PairingText.CodeEnterManually;
                 _codeLink.Visible = true;
             }
             else if (_usbPop is not null)
             {
-                _codeLink.Text = "使用 USB 读取的配对码 (Use the code read over USB)";
+                _codeLink.Text = PairingText.CodeUseUsb;
                 _codeLink.Visible = true;
             }
             else
@@ -581,11 +564,8 @@ namespace ResourceMonitorDaemon.Pairing
 
             _prefilledSsid = info.Ssid;
             _ssid.Text = info.Ssid;
-            _ssidNote.ForeColor = info.IsNot24GHz ? Color.DarkOrange : SystemColors.GrayText;
-            _ssidNote.Text = info.IsNot24GHz
-                ? $"已填入此电脑当前的 Wi-Fi；它当前使用 {info.Band}。ESP32 只能连接 2.4 GHz，请确认路由器同时提供 2.4 GHz。\n" +
-                  $"Prefilled with this PC's Wi-Fi, currently on {info.Band}. The ESP32 needs 2.4 GHz: make sure the router also offers it."
-                : "已填入此电脑当前连接的 Wi-Fi (prefilled with this PC's current Wi-Fi)";
+            _ssidNote.ForeColor = info.IsKnownNot24GHz ? Color.DarkOrange : SystemColors.GrayText;
+            _ssidNote.Text = info.IsKnownNot24GHz ? PairingText.SsidPrefilledNot24GHz : PairingText.SsidPrefilled;
             _ssidNote.Visible = true;
         }
 
@@ -609,6 +589,10 @@ namespace ResourceMonitorDaemon.Pairing
             }
 
             var settings = _settingsMonitor.CurrentValue;
+
+            // Only an MQTT connection established after this point counts as "the daemon reached the
+            // device": an older session may still belong to the previous network or device.
+            var startGeneration = _monitor.ConnectionGeneration;
             _scanCts?.Cancel();   // a running scan competes with the connection for the radio
             _popCts?.Cancel();
             using var cts = NewOperationSource();
@@ -617,13 +601,13 @@ namespace ResourceMonitorDaemon.Pairing
             UpdateControls();
             ResetSteps();
             _finalStatus.Text = string.Empty;
-            ShowResult("正在配对… (Pairing…)", Tone.Info);
+            ShowResult(PairingText.Pairing, Tone.Info);
 
             var progress = new StepProgress(this);
             PairingOutcome outcome;
             try
             {
-                outcome = await ProvisionAsync(device, pairingCode, settings, progress, cts.Token);
+                outcome = await ProvisionAsync(device, pairingCode, settings, startGeneration, progress, cts.Token);
                 if (_closed)
                 {
                     return;
@@ -632,7 +616,7 @@ namespace ResourceMonitorDaemon.Pairing
                 ShowResult(outcome.Message, ToneOf(outcome.Kind));
                 if (outcome.Kind == PairingOutcomeKind.Succeeded)
                 {
-                    await FinishSuccessAsync(outcome, settings, cts.Token);
+                    await FinishSuccessAsync(outcome, settings, startGeneration, cts.Token);
                 }
                 else
                 {
@@ -656,7 +640,12 @@ namespace ResourceMonitorDaemon.Pairing
 
         /// <summary>Runs one provisioning attempt and maps it to an outcome (never throws except when closed).</summary>
         private async Task<PairingOutcome> ProvisionAsync(
-            ProvisioningDeviceInfo device, string pairingCode, DeviceSettings settings, StepProgress progress, CancellationToken cancellationToken)
+            ProvisioningDeviceInfo device,
+            string pairingCode,
+            DeviceSettings settings,
+            int startGeneration,
+            StepProgress progress,
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -688,14 +677,18 @@ namespace ResourceMonitorDaemon.Pairing
 
                 // The link dropped after the settings were applied: the device may have joined Wi-Fi.
                 ShowResult(outcome.Message, Tone.Info);
-                SetStep(StepSave, StepState.Running, "检查网络连接 (Check network connection)");
+                SetStep(StepSave, StepState.Running, PairingText.StepCheckNetwork);
                 var reachable = await BrokerProbe.WaitForBrokerAsync(
-                    settings.Host, settings.Port, () => _monitor.IsConnected, PairingOutcomePresenter.BrokerCheckBudget, cancellationToken);
+                    settings.Host,
+                    settings.Port,
+                    () => IsNewDaemonConnection(startGeneration),
+                    PairingOutcomePresenter.BrokerCheckBudget,
+                    cancellationToken);
                 _logger.LogInformation("Pairing wizard: broker {Host}:{Port} {State} after the Bluetooth link was lost.",
                     settings.Host, settings.Port, reachable ? "reachable" : "not reachable");
                 if (!_closed)
                 {
-                    SetStep(StepSave, reachable ? StepState.Done : StepState.Failed, "检查网络连接 (Check network connection)");
+                    SetStep(StepSave, reachable ? StepState.Done : StepState.Failed, PairingText.StepCheckNetwork);
                 }
 
                 return PairingOutcomePresenter.PresentBrokerCheck(reachable, settings.Host, settings.Port);
@@ -721,7 +714,7 @@ namespace ResourceMonitorDaemon.Pairing
             }
         }
 
-        private async Task FinishSuccessAsync(PairingOutcome outcome, DeviceSettings settings, CancellationToken cancellationToken)
+        private async Task FinishSuccessAsync(PairingOutcome outcome, DeviceSettings settings, int startGeneration, CancellationToken cancellationToken)
         {
             string? savedAddress = null;
             if (outcome.AddressToSave is { } address)
@@ -743,7 +736,7 @@ namespace ResourceMonitorDaemon.Pairing
                     }
 
                     SetStep(StepSave, StepState.Failed);
-                    ShowResult($"{outcome.Message}\n无法保存设备地址 (Could not save the device address): {ex.Message}", Tone.Warning);
+                    ShowResult($"{outcome.Message}\n{PairingText.SaveFailed(ex.Message)}", Tone.Warning);
                 }
 
                 if (_closed)
@@ -753,29 +746,26 @@ namespace ResourceMonitorDaemon.Pairing
 
                 if (savedAddress is not null)
                 {
-                    SetStep(StepSave, StepState.Done, $"保存设备地址 {savedAddress} (Saved {savedAddress})");
+                    SetStep(StepSave, StepState.Done, PairingText.StepSaved(savedAddress));
                 }
             }
             else if (_steps[StepSave].Tag is StepState.Pending)
             {
-                SetStep(StepSave, StepState.Skipped, "保存设备地址：设备未报告 IP (no IP reported, nothing saved)");
+                SetStep(StepSave, StepState.Skipped, PairingText.StepNoAddress);
             }
 
             var environmentOverride = savedAddress is not null
                 && DaemonConfiguration.GetEnvironmentOverriddenDeviceFields().Contains(nameof(DeviceSettings.FallbackAddress));
             if (environmentOverride)
             {
-                ShowResult(
-                    $"{outcome.Message}\n注意：FallbackAddress 由环境变量 RESMON_Device__FallbackAddress 决定，保存的值不会生效。\n" +
-                    "Note: FallbackAddress is overridden by the RESMON_Device__FallbackAddress environment variable; the saved value is not used.",
-                    Tone.Warning);
+                ShowResult($"{outcome.Message}\n{PairingText.FallbackOverriddenByEnvironment}", Tone.Warning);
             }
 
             SetStep(StepDaemon, StepState.Running);
             bool connected;
             try
             {
-                connected = await WaitForDaemonConnectionAsync(environmentOverride ? null : savedAddress, cancellationToken);
+                connected = await WaitForDaemonConnectionAsync(environmentOverride ? null : savedAddress, startGeneration, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -800,10 +790,11 @@ namespace ResourceMonitorDaemon.Pairing
         }
 
         /// <summary>
-        /// Waits until the daemon applied the saved address (when one was saved) and its MQTT connection
-        /// is up on two consecutive polls, or until it is paused or the wait times out.
+        /// Waits until the daemon applied the saved address (when one was saved) and has an MQTT
+        /// connection that was established after the attempt started, on two consecutive polls; or
+        /// until it is paused or the wait times out.
         /// </summary>
-        private async Task<bool> WaitForDaemonConnectionAsync(string? expectedFallback, CancellationToken cancellationToken)
+        private async Task<bool> WaitForDaemonConnectionAsync(string? expectedFallback, int startGeneration, CancellationToken cancellationToken)
         {
             var deadline = DateTime.UtcNow + DaemonConnectWait;
             var consecutive = 0;
@@ -816,7 +807,7 @@ namespace ResourceMonitorDaemon.Pairing
 
                 var applied = expectedFallback is null
                     || string.Equals(_monitor.CurrentSettings.FallbackAddress, expectedFallback, StringComparison.OrdinalIgnoreCase);
-                consecutive = applied && _monitor.IsConnected ? consecutive + 1 : 0;
+                consecutive = applied && IsNewDaemonConnection(startGeneration) ? consecutive + 1 : 0;
                 if (consecutive >= 2)
                 {
                     return true;
@@ -827,6 +818,13 @@ namespace ResourceMonitorDaemon.Pairing
 
             return false;
         }
+
+        /// <summary>
+        /// True when the daemon is connected through a connection made after <paramref name="startGeneration"/>
+        /// was read. Note: with several devices on the network, resmon.local may still name another one.
+        /// </summary>
+        private bool IsNewDaemonConnection(int startGeneration) =>
+            _monitor.IsConnected && _monitor.ConnectionGeneration != startGeneration;
 
         private void OnCancelClick(object? sender, EventArgs e)
         {
@@ -862,7 +860,7 @@ namespace ResourceMonitorDaemon.Pairing
             };
             var label = _steps[index];
             label.Tag = state;
-            label.Text = $"{glyph}  {text ?? StepTexts[index]}";
+            label.Text = $"{glyph}  {text ?? PairingText.Steps[index]}";
             label.ForeColor = state switch
             {
                 StepState.Running => SystemColors.ControlText,
@@ -980,7 +978,7 @@ namespace ResourceMonitorDaemon.Pairing
             _password.Enabled = !_busy;
             _showPassword.Enabled = !_busy;
             _pair.Enabled = !_busy;
-            _cancel.Text = _busy ? "取消 (Cancel)" : "关闭 (Close)";
+            _cancel.Text = _busy ? PairingText.CancelButton : PairingText.CloseButton;
         }
 
         // ---- Layout helpers -------------------------------------------------------------------
