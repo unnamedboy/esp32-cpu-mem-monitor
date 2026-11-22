@@ -84,7 +84,6 @@ uint32_t seenDisconnectCount = 0;
 uint32_t restartAtMs = 0;
 
 // ---- resmon/status publishing (owned by loop()) ----
-bool statusPublishDue = false;      // set when the broker starts
 bool statusEverPublished = false;
 bool statusFormatErrorLogged = false;
 uint32_t lastStatusPublishMs = 0;
@@ -600,7 +599,9 @@ void startNetworkServicesOnce() {
     }
 
     mqtt.begin();
-    statusPublishDue = ENABLE_STATUS_TOPIC != 0;  // first status right after the broker starts
+    // First status STATUS_INTERVAL_MS after the broker starts: a publish in
+    // this loop pass could not reach any subscriber yet.
+    lastStatusPublishMs = millis();
 
     printDebugLine("========== ESP32 CPU Monitor network ready ==========");
     printDebugLine("MQTT broker:");
@@ -758,18 +759,18 @@ bool readStaRssi(int32_t* rssi) {
 }
 
 // Publishes resmon/status into the hosted broker (delivered to subscribed
-// clients only; QoS 0, not retained): once right after the broker starts,
-// then every STATUS_INTERVAL_MS while Wi-Fi is connected. No serial output
-// per publish; the periodic Status line reports the last publish.
+// clients only; QoS 0, not retained) every STATUS_INTERVAL_MS while Wi-Fi
+// is connected; the first one STATUS_INTERVAL_MS after the broker starts. No
+// serial output per publish; the periodic Status line reports the last
+// publish.
 void serviceStatusTopic(uint32_t now) {
 #if ENABLE_STATUS_TOPIC
     if (!networkServicesStarted || networkState != NetworkState::Connected) {
         return;
     }
-    if (!statusPublishDue && (uint32_t)(now - lastStatusPublishMs) < STATUS_INTERVAL_MS) {
+    if ((uint32_t)(now - lastStatusPublishMs) < STATUS_INTERVAL_MS) {
         return;
     }
-    statusPublishDue = false;
     lastStatusPublishMs = now;
 
     StatusSnapshot snapshot;

@@ -19,8 +19,9 @@ The ESP32 validates each payload and ignores malformed or out-of-range values. C
 - Topic: `resmon/status` (`STATUS_TOPIC` in
   [firmware/src/config.h](firmware/src/config.h); daemon setting
   `StatusTopic`, default the same).
-- QoS 0, not retained. Published every 10 s (`STATUS_INTERVAL_MS`), plus once
-  immediately after the broker starts, and only while Wi-Fi is connected.
+- QoS 0, not retained. Published every 10 s (`STATUS_INTERVAL_MS`), only
+  while Wi-Fi is connected; the first status arrives within
+  `STATUS_INTERVAL_MS` after the broker starts.
   Firmware feature flag `ENABLE_STATUS_TOPIC` (default `1`).
 - Payload: compact UTF-8 JSON object, at most 256 bytes
   (`STATUS_PAYLOAD_MAX`), built with `snprintf` into a fixed buffer.
@@ -70,6 +71,7 @@ firmware does not publish it.
 Known limitation: publishing writes to each subscriber's TCP connection from
 `loop()`. A subscriber that keeps its connection alive but stops reading could,
 once the ESP32 send buffer fills (about 20 status messages), stall `loop()` for
-up to about 10 s per publish (`WiFiClient::write` retries). Keep-alive normally
+about 10 s or longer per publish (`WiFiClient::write` retries, and restarts
+its retry count whenever part of the data is sent). Keep-alive normally
 drops such clients first. The `resmon/cpu` and `resmon/mem` contract above
 is unchanged.

@@ -289,8 +289,8 @@ gauges are known and documented.
 
 Status: Firmware side implemented (2026-11-22); not yet validated on hardware
 
-- Firmware: `resmon/status` (QoS 0, not retained, every 10 s plus once after
-  the broker starts, only while Wi-Fi is connected) carries schema version,
+- Firmware: `resmon/status` (QoS 0, not retained, every 10 s while Wi-Fi is
+  connected, the first one 10 s after the broker starts) carries schema version,
   build id, uptime, free/minimum heap, RSSI, Wi-Fi and provisioning state and
   DAC presence. Contract: [COMMUNICATION.md](COMMUNICATION.md). Formatting is
   a pure, unit-tested header (`firmware/include/status_payload.h`); feature

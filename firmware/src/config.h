@@ -93,8 +93,8 @@ const char* MEM_TOPIC = "resmon/mem";
 
 // Device status topic (COMMUNICATION.md "Device status"). The firmware
 // publishes a compact JSON health snapshot into its own broker: QoS 0, not
-// retained, once right after the broker starts and then every
-// STATUS_INTERVAL_MS, only while Wi-Fi is connected. Build with
+// retained, every STATUS_INTERVAL_MS while Wi-Fi is connected (the first one
+// STATUS_INTERVAL_MS after the broker starts). Build with
 // -DENABLE_STATUS_TOPIC=0 to disable.
 #ifndef ENABLE_STATUS_TOPIC
 #define ENABLE_STATUS_TOPIC 1
