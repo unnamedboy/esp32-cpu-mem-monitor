@@ -4,6 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Log level >= 3 (info) makes the provisioning manager / WiFiProv print the
+// PoP, and level 5 (verbose) makes the Arduino core print received Wi-Fi
+// passwords. platformio.ini pins CORE_DEBUG_LEVEL=1 (errors only).
+#if defined(CORE_DEBUG_LEVEL) && CORE_DEBUG_LEVEL >= 3
+#error "CORE_DEBUG_LEVEL >= 3 would log the provisioning PoP (and >= 5 the Wi-Fi password); keep it <= 2"
+#elif !defined(CORE_DEBUG_LEVEL) && defined(CONFIG_ARDUHAL_LOG_DEFAULT_LEVEL) && CONFIG_ARDUHAL_LOG_DEFAULT_LEVEL >= 3
+#error "Arduino default log level >= 3 would log the provisioning PoP; set -DCORE_DEBUG_LEVEL=1"
+#endif
+
 // ================= 1. Build / Wi-Fi 配置 =================
 const char* FIRMWARE_BUILD_ID = "phase4-ble-prov";
 
