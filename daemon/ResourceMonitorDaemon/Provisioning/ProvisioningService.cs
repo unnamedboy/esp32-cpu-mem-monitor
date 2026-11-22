@@ -125,7 +125,10 @@ namespace ResourceMonitorDaemon.Provisioning
             WifiConfigClient.ValidateCredentials(ssid, password);
 
             progress?.Report(ProvisioningStep.ConnectingToDevice);
-            _logger.LogInformation("Provisioning {Device} ({Address}): connecting.", device.Name, device.AddressText);
+            // Device identifiers (Bluetooth address, Wi-Fi IP) are logged at Debug only, so the
+            // default Information level — which may be forwarded to Loki — carries neither.
+            _logger.LogInformation("Provisioning {Device}: connecting.", device.Name);
+            _logger.LogDebug("Provisioning {Device}: Bluetooth address {Address}.", device.Name, device.AddressText);
             var transport = await _transportFactory(device, cancellationToken).ConfigureAwait(false);
             await using (transport.ConfigureAwait(false))
             {
@@ -153,15 +156,15 @@ namespace ResourceMonitorDaemon.Provisioning
                 {
                     case WifiProvisioningResult.Connected { AlreadyConnected: true } already:
                         _logger.LogInformation(
-                            "Provisioning {Device}: device already connected to Wi-Fi ({Network}); credentials were not sent again. Address {Address}.",
+                            "Provisioning {Device}: device already connected to Wi-Fi ({Network}); credentials were not sent again.",
                             device.Name,
                             already.JoinedDifferentNetwork ? "a different network than requested"
-                                : already.JoinedSsid is null ? "network not reported" : "the requested network",
-                            already.Ip4Address ?? "(not reported)");
+                                : already.JoinedSsid is null ? "network not reported" : "the requested network");
+                        _logger.LogDebug("Provisioning {Device}: device address {Address}.", device.Name, already.Ip4Address ?? "(not reported)");
                         break;
                     case WifiProvisioningResult.Connected connected:
-                        _logger.LogInformation("Provisioning {Device}: joined Wi-Fi, address {Address}.",
-                            device.Name, connected.Ip4Address ?? "(not reported)");
+                        _logger.LogInformation("Provisioning {Device}: joined Wi-Fi.", device.Name);
+                        _logger.LogDebug("Provisioning {Device}: device address {Address}.", device.Name, connected.Ip4Address ?? "(not reported)");
                         break;
                     case WifiProvisioningResult.Failed failed:
                         _logger.LogWarning("Provisioning {Device}: Wi-Fi connection failed ({Reason}).", device.Name, failed.Reason);
