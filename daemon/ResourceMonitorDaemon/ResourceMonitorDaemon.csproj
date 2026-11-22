@@ -13,4 +13,9 @@
     <PackageReference Include="MQTTnet" Version="4.3.2.930" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Non-secret defaults; per-user overrides live in %LocalAppData%\ResourceMonitorDaemon\settings.json -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
