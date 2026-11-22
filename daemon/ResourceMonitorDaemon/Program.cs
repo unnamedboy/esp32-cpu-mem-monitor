@@ -58,7 +58,7 @@ namespace ResourceMonitorDaemon
             host.StartAsync().GetAwaiter().GetResult();
 
             var svc = host.Services.GetRequiredService<MonitorService>();
-            var tray = new TrayContext(host, _logFilePath, svc);
+            var tray = new TrayContext(host, _logFilePath, svc, settingsStore);
 
             Application.Run();
 

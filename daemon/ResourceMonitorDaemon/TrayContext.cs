@@ -12,15 +12,23 @@ namespace ResourceMonitorDaemon
         private readonly string _logFilePath;
         private readonly NotifyIcon _notifyIcon;
         private readonly MonitorService _monitorService;
+        private readonly ISettingsStore _settingsStore;
+        private readonly SynchronizationContext? _uiContext;
         private ToolStripMenuItem? _pauseResumeItem;
+        private SettingsForm? _settingsForm;
 
-        public TrayContext(IHost host, string logFilePath, MonitorService monitorService)
+        public TrayContext(IHost host, string logFilePath, MonitorService monitorService, ISettingsStore settingsStore)
         {
             _host = host;
             _logFilePath = logFilePath;
             _monitorService = monitorService;
+            _settingsStore = settingsStore;
 
             var contextMenu = new ContextMenuStrip();
+
+            // Creating the first control installs the WinForms synchronization context;
+            // background notifications are marshalled through it to the UI thread.
+            _uiContext = SynchronizationContext.Current;
             
             _pauseResumeItem = new ToolStripMenuItem(
                 _monitorService.IsPaused ? "▶ 恢复发送 (Resume)" : "⏸ 暂停发送 (Pause)",
@@ -30,6 +38,7 @@ namespace ResourceMonitorDaemon
             contextMenu.Items.Add(_pauseResumeItem);
             
             contextMenu.Items.Add("-");
+            contextMenu.Items.Add("⚙ 设置 (Settings)…", null, OnSettingsClick);
             contextMenu.Items.Add("查看日志 (Log)", null, OnViewLog);
             contextMenu.Items.Add("-");
             contextMenu.Items.Add("退出 (Exit)", null, OnExitAsync);
@@ -46,7 +55,14 @@ namespace ResourceMonitorDaemon
             
             _monitorService.OnNotification = (title, message, icon) =>
             {
-                _notifyIcon.ShowBalloonTip(5000, title, message, icon);
+                if (_uiContext != null)
+                {
+                    _uiContext.Post(_ => ShowBalloon(5000, title, message, icon), null);
+                }
+                else
+                {
+                    ShowBalloon(5000, title, message, icon);
+                }
             };
             
             var updateTimer = new System.Windows.Forms.Timer();
@@ -84,6 +100,44 @@ namespace ResourceMonitorDaemon
             }
         }
 
+        private void ShowBalloon(int timeoutMs, string title, string message, ToolTipIcon icon)
+        {
+            try
+            {
+                if (_notifyIcon.Visible)
+                {
+                    _notifyIcon.ShowBalloonTip(timeoutMs, title, message, icon);
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Notification raced with exit.
+            }
+        }
+
+        private void OnSettingsClick(object? sender, EventArgs e)
+        {
+            if (_settingsForm is { IsDisposed: false })
+            {
+                _settingsForm.Activate();
+                return;
+            }
+
+            _settingsForm = new SettingsForm(_monitorService.CurrentSettings, _settingsStore);
+            _settingsForm.FormClosed += (_, _) =>
+            {
+                if (_settingsForm?.DialogResult == DialogResult.OK)
+                {
+                    ShowBalloon(2000, "设置已保存 (Settings saved)", "新设置已生效，无需重启 (applied without restart)", ToolTipIcon.Info);
+                }
+
+                _settingsForm?.Dispose();
+                _settingsForm = null;
+            };
+            _settingsForm.Show();
+            _settingsForm.Activate();
+        }
+
         private void OnViewLog(object? sender, EventArgs e)
         {
             if (File.Exists(_logFilePath))
@@ -98,6 +152,7 @@ namespace ResourceMonitorDaemon
 
         private async void OnExitAsync(object? sender, EventArgs e)
         {
+            _settingsForm?.Close();
             await _host.StopAsync(TimeSpan.FromSeconds(3));
             _host.Dispose();
 
