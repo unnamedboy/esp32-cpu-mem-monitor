@@ -19,6 +19,7 @@ var tests = new (string Name, Action Run)[]
         AssertEqual("0.0", MetricPayloadFormatter.FormatPercentPayload(-0.1));
         AssertEqual("100.0", MetricPayloadFormatter.FormatPercentPayload(100.1));
     }),
+
     // ---- DeviceSettings validation -------------------------------------------------------
     ("DeviceSettings defaults match the MQTT contract and are valid", () =>
     {
