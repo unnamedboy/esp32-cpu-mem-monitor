@@ -592,7 +592,8 @@ namespace ResourceMonitorDaemon.Tests
 
                 var ex = await AssertThrowsAsync<ProvisioningRetryRejectedException>(
                     () => client.ConfigureAsync("home", "right-pass", CancellationToken.None));
-                AssertTrue(ex.Message.Contains("BOOT"), "message should explain how to restart provisioning");
+                AssertTrue(ex.Message.Contains("BOOT button for 5–15 seconds, then release"), "message should explain how to restart provisioning");
+                AssertTrue(ex.PreviousAttemptFailed, "previous failure not detected");
                 AssertTrue(!ex.ToString().Contains("right-pass"), "passphrase leaked");
             })),
             ("Retry after Failed with device reset_sm_state_on_failure succeeds", () => RunAsync(async () =>
@@ -611,8 +612,8 @@ namespace ResourceMonitorDaemon.Tests
                 var device = new FakeProvisioningDevice("ABCDEFGH");
                 var hooked = new HookedTransport(device)
                 {
-                    // 1 = SetConfig, 2 = ApplyConfig, 3+ = GetStatus: the first poll never gets an answer.
-                    BeforeConfig = (n, ct) => n >= 3 ? Task.Delay(Timeout.Infinite, ct) : Task.CompletedTask,
+                    // 1 = initial GetStatus, 2 = SetConfig, 3 = ApplyConfig, 4+ = polls: the first poll never gets an answer.
+                    BeforeConfig = (n, ct) => n >= 4 ? Task.Delay(Timeout.Infinite, ct) : Task.CompletedTask,
                 };
                 using var session = await Security1Session.EstablishAsync(hooked, "ABCDEFGH", CancellationToken.None);
                 var client = new WifiConfigClient(session, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(300));
@@ -620,6 +621,60 @@ namespace ResourceMonitorDaemon.Tests
                 var result = await client.ConfigureAsync("home", "password1", CancellationToken.None);
                 AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Timeout(WifiStationState.Connecting), result);
                 AssertTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"overran budget: {stopwatch.Elapsed}");
+            })),
+            ("ProvisionAsync twice: device without failure reset -> ProvisioningRetryRejectedException", () => RunAsync(async () =>
+            {
+                // One fake device across two connections: session state resets on Command0, Wi-Fi state persists.
+                var device = new FakeProvisioningDevice("K7M3P9QX") { FinalState = WifiStationState.ConnectionFailed };
+                var service = new ProvisioningService(null, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
+
+                var first = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "wrong-pass", null, CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), first);
+
+                var ex = await AssertThrowsAsync<ProvisioningRetryRejectedException>(
+                    () => service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "right-pass", null, CancellationToken.None));
+                AssertTrue(ex.PreviousAttemptFailed, "earlier failure from the previous session was not detected");
+                AssertTrue(ex.Message.Contains("5–15 seconds, then release"), "missing BOOT instructions");
+                AssertTrue(!ex.ToString().Contains("right-pass"), "passphrase leaked");
+            })),
+            ("ProvisionAsync twice: device with failure reset -> second attempt Connected", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("K7M3P9QX")
+                {
+                    FinalState = WifiStationState.ConnectionFailed,
+                    ResetStateOnFailure = true,
+                };
+                var service = new ProvisioningService(null, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
+
+                var first = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "wrong-pass", null, CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), first);
+
+                device.FinalState = WifiStationState.Connected;
+                var second = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "right-pass", null, CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), second);
+                AssertEqual("right-pass", device.ReceivedPassphrase);
+            })),
+            ("ApplyConfig InternalError always gives restart guidance", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("K7M3P9QX") { ApplyStatusOverride = ProtocommStatus.InternalError };
+                var service = new ProvisioningService(null, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
+                var ex = await AssertThrowsAsync<ProvisioningRetryRejectedException>(
+                    () => service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "password1", null, CancellationToken.None));
+                AssertTrue(!ex.PreviousAttemptFailed, "no earlier failure was reported by the device");
+                AssertTrue(ex.Message.Contains("Power-cycle the device"), "missing restart guidance");
+
+                device.ApplyStatusOverride = ProtocommStatus.InvalidArgument;
+                var other = await AssertThrowsAsync<ProvisioningProtocolException>(
+                    () => service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "password1", null, CancellationToken.None));
+                AssertTrue(other is not ProvisioningRetryRejectedException, "only InternalError means a stuck state machine");
+            })),
+            ("ConnectionLost wording does not assume a disconnect", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { DisconnectWhileConnecting = true };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var result = await new WifiConfigClient(session, FastPoll, FastTimeout).ConfigureAsync("home", "password1", CancellationToken.None);
+                var lost = (WifiProvisioningResult.ConnectionLost)result;
+                AssertTrue(lost.Reason.StartsWith("Lost contact with the device"), lost.Reason);
             })),
             ("Security1Session.Dispose during an in-flight exchange is safe", () => RunAsync(async () =>
             {

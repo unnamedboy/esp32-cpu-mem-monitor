@@ -96,7 +96,7 @@ namespace ResourceMonitorDaemon.Provisioning
                     throw new ProvisioningTransportException(
                         ProvisioningTransportError.ServiceNotFound,
                         "The device does not offer the Wi-Fi provisioning service. It may already be configured; " +
-                        "hold its BOOT button for 5 seconds to re-enter provisioning mode.");
+                        ProvisioningConstants.ReprovisionInstruction + " to re-enter provisioning mode.");
                 }
 
                 service = servicesResult.Services[0];

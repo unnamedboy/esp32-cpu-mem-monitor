@@ -49,6 +49,7 @@ namespace ResourceMonitorDaemon.Tests
         public bool DisconnectWhileConnecting { get; set; }
         public bool CloseLinkAfterConnected { get; set; }
         public int EmptyStatusPolls { get; set; }
+        public ProtocommStatus? ApplyStatusOverride { get; set; }
 
         // Observations
         public string? ReceivedSsid { get; private set; }
@@ -135,6 +136,7 @@ namespace ResourceMonitorDaemon.Tests
             var devicePrivate = new X25519PrivateKeyParameters(random);
             _devicePubkey = devicePrivate.GeneratePublicKey().GetEncoded();
             _clientPubkey = clientPubkey;
+            _sessionEstablished = false; // new session (new connection); Wi-Fi/provisioning state persists
 
             var agreement = new X25519Agreement();
             agreement.Init(devicePrivate);
@@ -258,7 +260,8 @@ namespace ResourceMonitorDaemon.Tests
                 case 4: // TypeCmdApplyConfig -> TypeRespApplyConfig(5), resp_apply_config(15)
                     // wifi_prov_mgr_configure_sta fails (-> InternalError) after a failed attempt unless the
                     // firmware called wifi_prov_mgr_reset_sm_state_on_failure().
-                    var applyStatus = _failedAttempt && !ResetStateOnFailure ? ProtocommStatus.InternalError : ProtocommStatus.Success;
+                    var applyStatus = ApplyStatusOverride
+                        ?? (_failedAttempt && !ResetStateOnFailure ? ProtocommStatus.InternalError : ProtocommStatus.Success);
                     if (applyStatus == ProtocommStatus.Success)
                     {
                         Applied = true;

@@ -67,9 +67,29 @@ namespace ResourceMonitorDaemon.Provisioning
         /// </summary>
         public async Task<WifiProvisioningResult> ConfigureAsync(string ssid, string passphrase, CancellationToken cancellationToken)
         {
+            await DetectPreviousFailureAsync(cancellationToken).ConfigureAwait(false);
             await SetConfigAsync(ssid, passphrase, cancellationToken).ConfigureAwait(false);
             await ApplyConfigAsync(cancellationToken).ConfigureAwait(false);
             return await WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Best effort: asks for the current status once, before sending credentials, to learn whether an
+        /// earlier attempt (possibly from an earlier session) failed. The device keeps reporting
+        /// ConnectionFailed until a new attempt starts, even after wifi_prov_mgr_reset_sm_state_on_failure().
+        /// Returns true if it did. A non-success or malformed answer is ignored; transport errors propagate.
+        /// </summary>
+        public async Task<bool> DetectPreviousFailureAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+                return status.State == WifiStationState.ConnectionFailed;
+            }
+            catch (ProvisioningProtocolException)
+            {
+                return false;
+            }
         }
 
         public async Task SetConfigAsync(string ssid, string passphrase, CancellationToken cancellationToken)
@@ -85,7 +105,7 @@ namespace ResourceMonitorDaemon.Provisioning
                 ValidateLengths(ssidBytes.Length, passphraseBytes.Length);
                 plaintext = WifiConfigMessages.EncodeSetConfig(ssidBytes, passphraseBytes);
                 var response = await SendAsync(plaintext, WifiConfigMsgType.RespSetConfig, cancellationToken).ConfigureAwait(false);
-                EnsureAccepted(response.Status, "rejected the Wi-Fi settings");
+                EnsureAccepted(response.Status, "rejected the Wi-Fi settings", internalErrorMeansRetryRejected: _previousAttemptFailed);
             }
             finally
             {
@@ -101,7 +121,9 @@ namespace ResourceMonitorDaemon.Provisioning
         {
             var response = await SendAsync(WifiConfigMessages.EncodeApplyConfig(), WifiConfigMsgType.RespApplyConfig, cancellationToken)
                 .ConfigureAwait(false);
-            EnsureAccepted(response.Status, "could not apply the Wi-Fi settings");
+            // In v4.4.7 an InternalError here only comes from wifi_prov_mgr_configure_sta failing (stuck
+            // after a failed attempt) or from no config having been set, so always give the restart advice.
+            EnsureAccepted(response.Status, "could not apply the Wi-Fi settings", internalErrorMeansRetryRejected: true);
         }
 
         public async Task<WifiStatus> GetStatusAsync(CancellationToken cancellationToken)
@@ -164,7 +186,7 @@ namespace ResourceMonitorDaemon.Provisioning
             {
                 return new WifiProvisioningResult.ConnectionLost(
                     lastState,
-                    "The device disconnected before reporting the result. It may have joined Wi-Fi; " +
+                    "Lost contact with the device before it reported the result. It may have joined Wi-Fi; " +
                     "check the device or try connecting to it normally.");
             }
         }
@@ -211,18 +233,18 @@ namespace ResourceMonitorDaemon.Provisioning
                 : null;
         }
 
-        private void EnsureAccepted(ProtocommStatus status, string action)
+        private void EnsureAccepted(ProtocommStatus status, string action, bool internalErrorMeansRetryRejected)
         {
             if (status == ProtocommStatus.Success)
             {
                 return;
             }
 
-            if (status == ProtocommStatus.InternalError && _previousAttemptFailed)
+            if (status == ProtocommStatus.InternalError && internalErrorMeansRetryRejected)
             {
                 // wifi_prov_mgr refuses new credentials after a failure unless the firmware calls
                 // wifi_prov_mgr_reset_sm_state_on_failure() (required by the pairing contract).
-                throw new ProvisioningRetryRejectedException();
+                throw new ProvisioningRetryRejectedException(_previousAttemptFailed);
             }
 
             throw new ProvisioningProtocolException($"The device {action} (status {status}).");

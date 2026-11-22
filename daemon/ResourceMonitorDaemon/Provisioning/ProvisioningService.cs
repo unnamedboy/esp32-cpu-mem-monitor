@@ -137,6 +137,11 @@ namespace ResourceMonitorDaemon.Provisioning
 
                 var client = new WifiConfigClient(session, _pollInterval, _connectTimeout);
                 progress?.Report(ProvisioningStep.SendingWifiConfig);
+                if (await client.DetectPreviousFailureAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    _logger.LogInformation("Provisioning {Device}: device reports an earlier failed Wi-Fi attempt; retrying.", device.Name);
+                }
+
                 await client.SetConfigAsync(ssid, password, cancellationToken).ConfigureAwait(false);
                 await client.ApplyConfigAsync(cancellationToken).ConfigureAwait(false);
 

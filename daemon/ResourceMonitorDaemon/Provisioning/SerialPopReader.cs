@@ -231,6 +231,12 @@ namespace ResourceMonitorDaemon.Provisioning
                 };
 
                 port.Open();
+                if (budget.IsCancellationRequested)
+                {
+                    // Open() blocked past the budget and the probe was abandoned: do not touch the port.
+                    return null;
+                }
+
                 port.DiscardInBuffer();
                 port.Write(ProvisioningConstants.SerialPopQuery);
                 var sinceWrite = Stopwatch.StartNew();

@@ -18,16 +18,24 @@ namespace ResourceMonitorDaemon.Provisioning
     }
 
     /// <summary>
-    /// After a failed Wi-Fi attempt the device answered a new SetConfig/ApplyConfig with InternalError:
-    /// its provisioning state machine is stuck in the failed state and needs a restart.
+    /// The device refused new Wi-Fi settings with InternalError. In ESP-IDF v4.4.7 this happens when its
+    /// provisioning state machine is stuck after a failed attempt (wifi_prov_mgr_configure_sta fails
+    /// unless the firmware called wifi_prov_mgr_reset_sm_state_on_failure), so it needs a restart.
     /// </summary>
     public sealed class ProvisioningRetryRejectedException : ProvisioningProtocolException
     {
-        public ProvisioningRetryRejectedException()
-            : base("The device did not accept another attempt after the previous one failed. " +
-                   "Power-cycle the device or hold its BOOT button for 5 seconds to restart provisioning, then try again.")
+        public ProvisioningRetryRejectedException(bool previousAttemptFailed)
+            : base((previousAttemptFailed
+                       ? "The device did not accept another attempt after the previous one failed. "
+                       : "The device could not accept the Wi-Fi settings. ") +
+                   "Power-cycle the device or " + ProvisioningConstants.ReprovisionInstruction +
+                   " to restart provisioning, then try again.")
         {
+            PreviousAttemptFailed = previousAttemptFailed;
         }
+
+        /// <summary>True if the device reported a failed Wi-Fi attempt earlier (this or an earlier session).</summary>
+        public bool PreviousAttemptFailed { get; }
     }
 
     public enum PairingCodeRejectionReason
