@@ -196,7 +196,7 @@ because the BLE client uses the WinRT `Windows.Devices.Bluetooth` APIs.
 ## Provisioning client
 
 Namespace `ResourceMonitorDaemon.Provisioning`. It is the Windows side of the
-pairing contract (`PROVISIONING.md` on the firmware branch): BLE provisioning
+pairing contract ([PROVISIONING.md](../PROVISIONING.md)): BLE provisioning
 with the ESP-IDF 4.4 `wifi_provisioning` manager (which the firmware calls
 directly), using protocomm **Security1** and a proof of possession (the
 8-character pairing code). The pairing wizard (see "Pairing wizard") is its

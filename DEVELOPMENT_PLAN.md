@@ -11,10 +11,10 @@ ESP32 owns display behavior, including DAC mapping and stale-data fade-out.
 Status as of 2026-11-22:
 
 - Phase 1: Complete
-- Phase 2: Complete
+- Phase 2: Complete (including the former remaining work)
 - Phase 3: Complete (settings module and pairing wizard)
-- Phase 4: In progress (Windows client side done but not yet verified on
-  hardware; firmware provisioning on the firmware branch)
+- Phase 4: Implemented on both sides (firmware BLE provisioning and the Windows
+  client/wizard); not yet validated on hardware
 - Phase 5: Planned
 
 Completed implementation summary:
@@ -28,7 +28,15 @@ Completed implementation summary:
   ignored `firmware/src/secrets.h`, copied from
   `firmware/src/secrets.example.h`.
 - A top-level README documents the real project state and local setup flow.
-- C++ PlatformIO tests cover metric payload parsing and DAC value mapping.
+- C++ PlatformIO tests cover metric payload parsing and DAC value mapping,
+  plus the provisioning boot decision, pairing code, serial PoP query
+  parsing, reconnect backoff, provisioning-start retry policy, the BOOT
+  button hold-and-release window, and the `resmon/status` payload.
+- Firmware Wi-Fi startup is non-blocking and BLE provisioning is implemented
+  per [PROVISIONING.md](PROVISIONING.md) (hardware validation pending).
+- The firmware publishes a `resmon/status` device-health JSON snapshot every
+  10 s into its own broker (see [Observability](#observability); hardware
+  validation pending).
 - C# tests cover MQTT percentage payload formatting and clamping.
 - The daemon reads `DeviceSettings` from defaults < `appsettings.json` <
   `%LocalAppData%\ResourceMonitorDaemon\settings.json` < `RESMON_*`
@@ -40,6 +48,7 @@ Completed implementation summary:
   not been tested against a physical ESP32 yet.
 
 See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
+See [PROVISIONING.md](PROVISIONING.md) for the BLE pairing contract.
 See [HARDWARE.md](HARDWARE.md) for the current hardware design and open
 electrical/mechanical decisions.
 
@@ -75,12 +84,22 @@ reproducible configuration path for development.
 - `firmware/src/secrets.example.h` provides placeholder values only.
 - `.gitignore` excludes `firmware/src/secrets.h`, `bin/`, and `obj/` output folders.
 - Startup diagnostics print Wi-Fi state but not Wi-Fi passwords.
+- (2026-11-22) The blocking `while (WiFi.status() != WL_CONNECTED)` wait is
+  gone. `loop()` runs a non-blocking connection state machine with bounded
+  reconnect backoff; DAC stale-decay keeps running while Wi-Fi is down; mDNS
+  and the MQTT broker start once on the first connection.
+- (2026-11-22) A build with no credentials at all no longer waits forever: it
+  logs `no stored credentials and no secrets.h fallback` and enters BLE
+  provisioning (Phase 4). If provisioning cannot start it logs a rate-limited
+  error instead.
+- (2026-11-22) The SSID is printed once per successful connection only;
+  passwords are never printed. Wi-Fi diagnostics are rate-limited.
+- (2026-11-22) The PlatformIO platform (`espressif32 @ 7.0.1`) and the
+  DFRobot_GP8XXX library commit are pinned so builds are reproducible.
 
 ### Remaining Work
 
-1. Add a firmware diagnostic for missing `WIFI_SSID` so an unconfigured build
-   fails visibly instead of waiting forever for Wi-Fi.
-2. Avoid printing SSID values unless useful for diagnosis; never print passwords.
+None.
 
 ## Phase 3: Windows Configuration Module
 
@@ -131,18 +150,51 @@ opt-in feature, not a prerequisite for the wizard.
 
 ## Phase 4: ESP32 Provisioning and Secure Storage
 
-Status: In progress. The Windows client side is done but **unverified on
-hardware**. The BLE provisioning client (`daemon/ResourceMonitorDaemon/Provisioning`)
-and the pairing wizard implement steps 4–6 and 8 of the desired user flow, per
-the pairing contract (`PROVISIONING.md` on the firmware branch). Nothing has
-been run against a physical ESP32 yet. Steps 1–3 and 7 belong to the firmware.
-The optional fields in step 5 (device name, MQTT port and topics) are not
-offered: the BLE provisioning contract carries only the SSID and password.
+Status: Implemented on both sides; **not yet validated on hardware** or end to
+end. Firmware side: see [PROVISIONING.md](PROVISIONING.md). Windows side: the BLE
+provisioning client (`daemon/ResourceMonitorDaemon/Provisioning`) and the pairing
+wizard implement steps 4–6 and 8 of the desired user flow; steps 1–3 and 7 belong
+to the firmware. The optional fields in step 5 (device name, MQTT port and
+topics) are not offered: the BLE provisioning contract carries only the SSID and
+password.
 
 ### Goal
 
 Allow Wi-Fi configuration without firmware recompilation while protecting
 credentials at rest and in transit.
+
+### Implemented (firmware)
+
+The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
+
+- BLE provisioning through the ESP-IDF `wifi_provisioning` manager (called
+  directly so auto-stop can be disabled; BLE stays up ~35 s after success), Security1 with an 8-character Proof of Possession, advertised as
+  `PROV_RESMON_XXXXXX`; BT memory is released after provisioning.
+- The PoP is generated once with the hardware RNG and stored in NVS
+  (`resmon/pop`). It is shown on USB serial only in provisioning mode (a
+  rate-limited hint line and the `RESMON?POP` query).
+- Boot order: BOOT re-provisioning request → stored credentials → compiled
+  `secrets.h` dev fallback (RAM-only) → provisioning.
+- Holding the on-board BOOT button (GPIO0) for 5–15 s and releasing it resets the stored
+  credentials and restarts into provisioning.
+- Pure decision/format logic lives in `firmware/include` with Unity tests.
+
+### Remaining Work
+
+1. Bench-test on the ESP32-WROOM-32 + MOC9686 board: first-boot pairing,
+   wrong PoP, wrong password / unknown SSID, re-pair via the BOOT hold-and-release gesture,
+   dev fallback, reconnect after AP loss, BT memory release (heap before
+   and after), BLE staying up ~35 s after success, the provisioning-start
+   retry path, the BOOT gesture with a serial tool attached, and an AP loss
+   during the BLE grace period (credentials must survive). Checklist and
+   results in PROVISIONING.md.
+2. End-to-end test with the Windows pairing client.
+3. Decide on NVS/flash encryption before treating stored credentials as
+   product-grade (see Storage Policy).
+4. Optional device/MQTT settings from the payload below are **not**
+   provisioned: the provisioning manager carries only SSID and passphrase, and hostname,
+   port, and topics stay compile-time defaults. Adding them would need a
+   custom protocomm endpoint and is deferred.
 
 ### Desired User Flow
 
@@ -231,6 +283,13 @@ provisioning, evaluate whether to:
 Do not implement custom BLE credential encryption unless there is a documented
 reason the supported provisioning paths cannot be used.
 
+Decision (2026-11-22): stay on Arduino through PlatformIO and use the
+official ESP-IDF provisioning manager that ships with the core (the same one
+`WiFiProv` wraps, called directly so auto-stop can be disabled). No custom
+crypto. Consequences: Security1 only (core 2.0.17 has no Security2),
+and the larger BLE image needs the `min_spiffs.csv` partition table (OTA
+layout kept, SPIFFS reduced to 128 KB).
+
 ## Phase 5: Additional Metrics and Hardware Expansion
 
 Status: Planned
@@ -256,15 +315,37 @@ network gauge will require another DAC or a different multi-channel DAC.
 Choose that hardware only when the number and voltage requirements of future
 gauges are known and documented.
 
+## Observability
+
+Status: Firmware side implemented (2026-11-22); not yet validated on hardware
+
+- Firmware: `resmon/status` (QoS 0, not retained, every 10 s while Wi-Fi is
+  connected, the first one 10 s after the broker starts) carries schema version,
+  build id, uptime, free/minimum heap, RSSI, Wi-Fi and provisioning state and
+  DAC presence. Contract: [COMMUNICATION.md](COMMUNICATION.md). Formatting is
+  a pure, unit-tested header (`firmware/include/status_payload.h`); feature
+  flag `ENABLE_STATUS_TOPIC` in `firmware/src/config.h`.
+- Daemon: subscribe to `resmon/status`, treat a missing topic as normal (older
+  firmware), and optionally forward daemon logs, metrics and the device status
+  to Grafana Loki (separate daemon change).
+- Remaining: confirm on hardware that a subscribed client (e.g.
+  `mosquitto_sub -h resmon.local -t resmon/status -v`) receives one message
+  every 10 s and that the CPU/MEM display is unaffected. Also check that a
+  subscriber which stops reading (e.g. a suspended `mosquitto_sub`) is dropped
+  by keep-alive before it can stall `loop()`.
+
 ## Verification Checklist
 
 For every firmware change:
 
-1. Run `platformio run` from the repository root.
+1. Run `platformio run -e esp32dev` from the repository root, and compile the
+   tests with `platformio test -e esp32dev --without-uploading --without-testing`.
 2. Verify startup diagnostics show build, feature, I2C, DAC, heap, Wi-Fi, and
    MQTT state without exposing secrets.
 3. Test valid, invalid, stale, and reconnecting metric messages.
 4. Verify absent optional hardware fails safely.
+5. Verify `resmon/status` still arrives every 10 s and contains no SSID, IP,
+   MAC, PoP or password.
 
 For every daemon change:
 
