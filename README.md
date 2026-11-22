@@ -22,12 +22,12 @@ The .NET app in [daemon/ResourceMonitorDaemon](daemon/ResourceMonitorDaemon) cur
 The firmware in [firmware/src/main.cpp](firmware/src/main.cpp) currently does the following:
 
 - gets Wi-Fi credentials through BLE provisioning (ESP-IDF `wifi_provisioning`
-  via Arduino `WiFiProv`, Security1 + 8-character pairing code), with an
+  called directly, Security1 + 8-character pairing code), with an
   optional compiled `secrets.h` development fallback — see
   [PROVISIONING.md](PROVISIONING.md) (implemented, **not yet tested on hardware**);
-- re-opens provisioning when the on-board BOOT button is held for 5 seconds;
+- re-opens provisioning when the on-board BOOT button is held for 5–15 seconds and then released (longer holds are ignored);
 - answers `RESMON?POP` on USB serial with the pairing code while in provisioning mode;
-- connects to Wi-Fi as a station without blocking the main loop, with bounded reconnect backoff;
+- connects to Wi-Fi as a station without blocking the main loop; the firmware owns the reconnect policy (bounded 5–60 s backoff);
 - advertises the device via mDNS as `resmon.local`;
 - hosts a small MQTT broker with PicoMQTT on port 1883;
 - subscribes to `resmon/cpu` and `resmon/mem`;
@@ -60,7 +60,7 @@ The ESP32 treats each metric independently and expires stale values after a five
 
 - [platformio.ini](platformio.ini) — PlatformIO project configuration for the ESP32 firmware
 - [firmware/src](firmware/src) — firmware source, Wi-Fi config, MQTT settings, and DAC logic
-- [firmware/include](firmware/include) — pure, unit-tested firmware helpers (metric conversion, provisioning boot decision, pairing code, serial command parsing, BOOT button long-press)
+- [firmware/include](firmware/include) — pure, unit-tested firmware helpers (metric conversion, provisioning boot decision, pairing code, serial command parsing, BOOT button hold-and-release window)
 - [firmware/test](firmware/test) — Unity tests for the helpers in `firmware/include`
 - [daemon/ResourceMonitorDaemon](daemon/ResourceMonitorDaemon) — Windows daemon app
 - [daemon/ResourceMonitorDaemon.Tests](daemon/ResourceMonitorDaemon.Tests) — small smoke tests for formatting and clamping logic
@@ -73,8 +73,8 @@ The ESP32 treats each metric independently and expires stale values after a five
 A firmware image built without `secrets.h` contains no Wi-Fi credentials. On
 first boot it enters BLE provisioning mode and is paired from the Windows app;
 the serial log shows the BLE name and the 8-character pairing code. Hold the
-board's BOOT button for 5 seconds (while it is running) to forget the Wi-Fi
-network and pair again. Details: [PROVISIONING.md](PROVISIONING.md).
+board's BOOT button for 5–15 seconds while it is running, then release it, to
+forget the Wi-Fi network and pair again. Details: [PROVISIONING.md](PROVISIONING.md).
 
 ### Optional development fallback (`secrets.h`)
 

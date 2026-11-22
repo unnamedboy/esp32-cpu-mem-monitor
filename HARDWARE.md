@@ -70,20 +70,24 @@ checked and documented, so here is how the firmware uses it:
   external pull-up, and the internal one is a harmless addition). It is never
   driven as an output.
 - The pin is read only after boot has finished, from `loop()`, with a 50 ms
-  non-blocking debounce. Holding it for ≥ 5 s (`BOOT_BUTTON_LONG_PRESS_MS`)
-  sets the NVS `prov_req` flag, clears the stored Wi-Fi credentials, and
-  restarts into BLE provisioning ([PROVISIONING.md](PROVISIONING.md)). A
-  button already held when the firmware starts sampling is ignored until it
-  is released.
+  non-blocking debounce. Holding it for 5–15 s and then releasing it
+  (`BOOT_BUTTON_MIN_HOLD_MS` / `BOOT_BUTTON_MAX_HOLD_MS`) sets the NVS
+  `prov_req` flag, clears the stored Wi-Fi credentials, and restarts into BLE
+  provisioning ([PROVISIONING.md](PROVISIONING.md)). The action fires on
+  release only. Holds longer than 15 s are logged (`BOOT held too long ...,
+  ignored`) and do nothing. A button already held when the firmware starts
+  sampling is ignored until it is released.
 - **Boot-state implication:** if BOOT is held while the board resets or
   powers up, the ESP32 enters the ROM serial download mode and the firmware
   does not run. This is the normal flashing behaviour and is not changed.
 - **USB auto-program circuit:** on typical dev boards the USB-UART bridge's
   DTR/RTS lines can pull GPIO0 low (that is how auto-flashing works). A
   serial tool holding DTR asserted with RTS released could therefore look like
-  a held BOOT button and, after 5 s, trigger a provisioning reset. Open the
-  port with DTR and RTS both deasserted (the pairing client does this) or both
-  asserted (the usual serial-monitor default). Unverified on this board.
+  a held BOOT button. Because the action needs a release within 5–15 s, a
+  tool that holds GPIO0 low continuously cannot trigger it; only toggling DTR
+  at exactly the wrong rhythm could. Open the port with DTR and RTS both
+  deasserted (the pairing client does this) or both asserted (the usual
+  serial-monitor default). Unverified on this board.
 
 ## Intended Wiring
 
@@ -95,7 +99,7 @@ This table documents the intended connection model. Treat rows marked
 | GP8413-compatible external DAC | I2C SDA GPIO21, I2C SCL GPIO22 | Bidirectional I2C plus DAC outputs | 3.3 V I2C logic; DAC output configured 0-5 V | TODO: verify module supply pin and allowed voltage | TODO: verify pull-ups, output loading, and gauge interface | `DAC_I2C_ADDRESS = 0x59`, `CPU_OUTPUT_CHANNEL = 0`, `MEM_OUTPUT_CHANNEL = 1` | Unverified physical wiring |
 | CPU analogue gauge | DAC channel 0 | Output | TODO: verify gauge input requirements | TODO | TODO: current limiting, buffering, scaling, or driver if required | MQTT `resmon/cpu`; clamp to `0..100%` | Unverified gauge |
 | Memory analogue gauge | DAC channel 1 | Output | TODO: verify gauge input requirements | TODO | TODO: current limiting, buffering, scaling, or driver if required | MQTT `resmon/mem`; clamp to `0..100%` | Unverified gauge |
-| On-board BOOT push-button (ESP32-WROOM-32 dev board, exact board revision unverified) | GPIO0, on-board; no header wiring | Input | 3.3 V logic (button pulls GPIO0 to GND) | Board 3.3 V and GND; no extra supply | Board's own pull-up (value unverified) plus ESP32 internal pull-up; 50 ms firmware debounce | `BOOT_BUTTON_PIN = 0`, `BOOT_BUTTON_ACTIVE_LOW = true`, `BOOT_BUTTON_DEBOUNCE_MS = 50`, `BOOT_BUTTON_LONG_PRESS_MS = 5000` | Unverified on hardware: long-press reset and the auto-program-circuit interaction have not been bench-tested |
+| On-board BOOT push-button (ESP32-WROOM-32 dev board, exact board revision unverified) | GPIO0, on-board; no header wiring | Input | 3.3 V logic (button pulls GPIO0 to GND) | Board 3.3 V and GND; no extra supply | Board's own pull-up (value unverified) plus ESP32 internal pull-up; 50 ms firmware debounce | `BOOT_BUTTON_PIN = 0`, `BOOT_BUTTON_ACTIVE_LOW = true`, `BOOT_BUTTON_DEBOUNCE_MS = 50`, `BOOT_BUTTON_MIN_HOLD_MS = 5000`, `BOOT_BUTTON_MAX_HOLD_MS = 15000` | Unverified on hardware: the hold-and-release reset and the auto-program-circuit interaction have not been bench-tested |
 | Voltmeter backlights | No ESP32 GPIO connection | Power only | 12 V backlight rail | 5 V to 12 V boost converter output | TODO: verify polarity, current draw, switch/fuse, and shared ground plan | None | Unverified load test |
 
 ## Mechanical Layout
@@ -103,7 +107,7 @@ This table documents the intended connection model. Treat rows marked
 - Mount the ESP32 carrier separately from the solderless breadboard during prototyping when practical.
 - Keep the ESP32 antenna area clear of wire bundles, metal gauge bodies, other PCBs, and conductive enclosure parts.
 - Keep USB-C accessible for power, flashing, and serial diagnostics.
-- Keep reset/boot controls accessible until the flashing and recovery workflow is final. The BOOT button is now also the user control for re-opening Wi-Fi provisioning (5 s hold), so a final enclosure needs an accessible actuator or an equivalent documented control.
+- Keep reset/boot controls accessible until the flashing and recovery workflow is final. The BOOT button is now also the user control for re-opening Wi-Fi provisioning (hold 5–15 s, then release), so a final enclosure needs an accessible actuator or an equivalent documented control.
 - BLE provisioning uses the same PCB antenna as Wi-Fi; the antenna keep-out applies to pairing as well.
 - Keep the breadboard removable while circuit values and wiring are still changing.
 - Do not treat solderless breadboard wiring as permanent internal enclosure construction.

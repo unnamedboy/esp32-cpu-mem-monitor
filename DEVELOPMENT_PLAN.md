@@ -29,7 +29,8 @@ Completed implementation summary:
 - A top-level README documents the real project state and local setup flow.
 - C++ PlatformIO tests cover metric payload parsing and DAC value mapping,
   plus the provisioning boot decision, pairing code, serial PoP query
-  parsing, reconnect backoff, and BOOT button long-press detection.
+  parsing, reconnect backoff, provisioning-start retry policy, and the BOOT
+  button hold-and-release window.
 - Firmware Wi-Fi startup is non-blocking and BLE provisioning is implemented
   per [PROVISIONING.md](PROVISIONING.md) (hardware validation pending).
 - C# tests cover MQTT percentage payload formatting and clamping.
@@ -138,29 +139,31 @@ credentials at rest and in transit.
 
 The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
 
-- BLE provisioning through Arduino `WiFiProv` (ESP-IDF `wifi_provisioning`
-  manager), Security1 with an 8-character Proof of Possession, advertised as
+- BLE provisioning through the ESP-IDF `wifi_provisioning` manager (called
+  directly so auto-stop can be disabled; BLE stays up ~35 s after success), Security1 with an 8-character Proof of Possession, advertised as
   `PROV_RESMON_XXXXXX`; BT memory is released after provisioning.
 - The PoP is generated once with the hardware RNG and stored in NVS
   (`resmon/pop`). It is shown on USB serial only in provisioning mode (a
   rate-limited hint line and the `RESMON?POP` query).
-- Boot order: BOOT long-press request → stored credentials → compiled
+- Boot order: BOOT re-provisioning request → stored credentials → compiled
   `secrets.h` dev fallback (RAM-only) → provisioning.
-- Holding the on-board BOOT button (GPIO0) for 5 s resets the stored
+- Holding the on-board BOOT button (GPIO0) for 5–15 s and releasing it resets the stored
   credentials and restarts into provisioning.
 - Pure decision/format logic lives in `firmware/include` with Unity tests.
 
 ### Remaining Work
 
 1. Bench-test on the ESP32-WROOM-32 + MOC9686 board: first-boot pairing,
-   wrong PoP, wrong password / unknown SSID, re-pair via BOOT long-press,
-   dev fallback, reconnect after AP loss, and BT memory release (heap before
-   and after). Record results in PROVISIONING.md.
+   wrong PoP, wrong password / unknown SSID, re-pair via the BOOT hold-and-release gesture,
+   dev fallback, reconnect after AP loss, BT memory release (heap before
+   and after), BLE staying up ~35 s after success, the provisioning-start
+   retry path, and the BOOT gesture with a serial tool attached. Record
+   results in PROVISIONING.md.
 2. End-to-end test with the Windows pairing client.
 3. Decide on NVS/flash encryption before treating stored credentials as
    product-grade (see Storage Policy).
 4. Optional device/MQTT settings from the payload below are **not**
-   provisioned: `WiFiProv` carries only SSID and passphrase, and hostname,
+   provisioned: the provisioning manager carries only SSID and passphrase, and hostname,
    port, and topics stay compile-time defaults. Adding them would need a
    custom protocomm endpoint and is deferred.
 
@@ -246,9 +249,10 @@ provisioning, evaluate whether to:
 Do not implement custom BLE credential encryption unless there is a documented
 reason the supported provisioning paths cannot be used.
 
-Decision (2026-11-22): stay on Arduino through PlatformIO and use the core's
-`WiFiProv` library, which wraps the official ESP-IDF provisioning manager. No
-custom crypto. Consequences: Security1 only (core 2.0.17 has no Security2),
+Decision (2026-11-22): stay on Arduino through PlatformIO and use the
+official ESP-IDF provisioning manager that ships with the core (the same one
+`WiFiProv` wraps, called directly so auto-stop can be disabled). No custom
+crypto. Consequences: Security1 only (core 2.0.17 has no Security2),
 and the larger BLE image needs the `min_spiffs.csv` partition table (OTA
 layout kept, SPIFFS reduced to 128 KB).
 
