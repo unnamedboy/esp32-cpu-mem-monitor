@@ -2,6 +2,7 @@ using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ResourceMonitorDaemon.Localization;
 using ResourceMonitorDaemon.Observability;
 
 namespace ResourceMonitorDaemon
@@ -34,6 +35,8 @@ namespace ResourceMonitorDaemon
                     services.AddDeviceSettings();
                     services.AddSingleton<ISettingsStore>(provider =>
                         new UserSettingsStore(DaemonPaths.UserSettingsPath, provider.GetRequiredService<ILogger<UserSettingsStore>>()));
+                    services.AddSingleton<IUiSettingsStore>(provider => (UserSettingsStore)provider.GetRequiredService<ISettingsStore>());
+                    services.AddSingleton<UiLanguageMonitor>();
                     services.AddSingleton(provider => new MqttConnection(provider.GetRequiredService<ILogger<MqttConnection>>()));
                     services.AddObservability();   // optional Loki sink; before MonitorService so it stops last
                     services.AddSingleton<MonitorService>();
@@ -49,6 +52,10 @@ namespace ResourceMonitorDaemon
 
             using var host = builder.Build();
             configurationErrors.Attach(host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ResourceMonitorDaemon.Configuration"));
+
+            // UI language (Ui:Language, default auto = Windows display language) before any UI text is
+            // created; it follows later changes of the settings file. Logs stay English.
+            host.Services.GetRequiredService<UiLanguageMonitor>().Start();
 
             // Settings saved by the tray dialog (or pairing wizard) reach MonitorService through
             // the user settings file watcher and IOptionsMonitor; no explicit reload is needed.
@@ -71,8 +78,8 @@ namespace ResourceMonitorDaemon
                     .CreateLogger("ResourceMonitorDaemon.Program")
                     .LogCritical(ex, "Resource Monitor Daemon failed to start.");
                 MessageBox.Show(
-                    $"启动失败 (Failed to start):{Environment.NewLine}{ex.GetBaseException().Message}{Environment.NewLine}{Environment.NewLine}{_logFilePath}",
-                    "Resource Monitor Daemon",
+                    Strings.Common_StartupFailed(ex.GetBaseException().Message, _logFilePath),
+                    Strings.Common_ProductName,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
                 return;
