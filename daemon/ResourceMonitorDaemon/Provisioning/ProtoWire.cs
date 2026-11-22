@@ -140,16 +140,27 @@ namespace ResourceMonitorDaemon.Provisioning
                 return false;
             }
 
+            // Tags are uint32 on the wire: field numbers 1..2^29-1, wire types 0..5. Validate before any
+            // narrowing cast so hostile input can only ever raise ProvisioningProtocolException.
             var tag = ReadVarint();
-            fieldNumber = checked((int)(tag >> 3));
-            wireType = (ProtoWireType)(tag & 0x7);
-            if (fieldNumber == 0)
+            var rawFieldNumber = tag >> 3;
+            var rawWireType = tag & 0x7;
+            if (rawFieldNumber < 1 || rawFieldNumber > MaxFieldNumber)
             {
-                throw new ProvisioningProtocolException("Malformed protobuf message: field number 0.");
+                throw new ProvisioningProtocolException("Malformed protobuf message: field number out of range.");
             }
 
+            if (rawWireType > (ulong)ProtoWireType.Fixed32)
+            {
+                throw new ProvisioningProtocolException($"Malformed protobuf message: invalid wire type {rawWireType}.");
+            }
+
+            fieldNumber = (int)rawFieldNumber;
+            wireType = (ProtoWireType)rawWireType;
             return true;
         }
+
+        private const ulong MaxFieldNumber = 0x1FFFFFFF;
 
         public ulong ReadVarint()
         {

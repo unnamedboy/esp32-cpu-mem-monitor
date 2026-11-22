@@ -313,6 +313,7 @@ namespace ResourceMonitorDaemon.Provisioning
             var staState = WifiStationState.Connected;
             var failReason = WifiConnectFailedReason.AuthError;
             string? ip4 = null;
+            var connectedPresent = false;
 
             var reader = new ProtoReader(data);
             while (reader.TryReadTag(out var field, out var wireType))
@@ -343,6 +344,7 @@ namespace ResourceMonitorDaemon.Provisioning
                         }
                         else if (field == ProtoFields.WifiRespGetStatus && f1 == ProtoFields.GetStatusConnected && w1 == ProtoWireType.LengthDelimited)
                         {
+                            connectedPresent = true;
                             var connected = new ProtoReader(resp.ReadLengthDelimited());
                             while (connected.TryReadTag(out var f2, out var w2))
                             {
@@ -366,6 +368,14 @@ namespace ResourceMonitorDaemon.Provisioning
                 {
                     reader.SkipField(wireType);
                 }
+            }
+
+            // sta_state Connected is the proto3 zero value, so an empty RespGetStatus would otherwise read as
+            // Connected. The device always attaches the `connected` sub-message when it really is connected
+            // (wifi_config.c), so without it treat the state as still Connecting.
+            if (msgType == WifiConfigMsgType.RespGetStatus && staState == WifiStationState.Connected && !connectedPresent)
+            {
+                staState = WifiStationState.Connecting;
             }
 
             return new WifiConfigResponse(msgType, status, staState, failReason, ip4);
