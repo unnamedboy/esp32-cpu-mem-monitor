@@ -9,6 +9,7 @@ namespace ResourceMonitorDaemon
     {
         // The exe directory may not be writable, so the log lives under %LocalAppData%.
         private static readonly string _logFilePath = DaemonPaths.LogFilePath;
+        private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(3);
 
         [STAThread]
         static void Main()
@@ -76,13 +77,22 @@ namespace ResourceMonitorDaemon
 
             Application.Run();
 
+            // Single owner of shutdown: the tray Exit only ends the message loop. The host is
+            // stopped here exactly once (3 s budget) and disposed by the using declaration.
             try
             {
-                host.StopAsync().GetAwaiter().GetResult();
+                using var stopTimeout = new CancellationTokenSource(ShutdownTimeout);
+                host.StopAsync(stopTimeout.Token).GetAwaiter().GetResult();
             }
-            catch (ObjectDisposedException)
+            catch (Exception ex)
             {
-                // The tray Exit handler already stopped and disposed the host.
+                host.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("ResourceMonitorDaemon.Program")
+                    .LogWarning("Host stop did not complete cleanly: {Error}", ex.GetBaseException().Message);
+            }
+            finally
+            {
+                tray.Dispose();
             }
         }
 

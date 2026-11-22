@@ -478,6 +478,27 @@ var tests = new (string Name, Action Run)[]
         AssertTrue(backoff.RecordDisconnected() == null, "30 s connection should count as stable");
     }),
 
+    ("MonitorService.StopAsync is idempotent (a duplicate host stop does nothing)", () =>
+    {
+        using var temp = new TempDir();
+        var captured = new CapturingLoggerProvider();
+        var services = new ServiceCollection()
+            .AddLogging(logging => logging.AddProvider(captured))
+            .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
+            .AddDeviceSettings()
+            .AddSingleton<ISettingsStore>(new UserSettingsStore(Path.Combine(temp.Path, "settings.json")))
+            .AddSingleton(provider => new MqttConnection(provider.GetRequiredService<ILogger<MqttConnection>>()))
+            .AddSingleton<MonitorService>()
+            .BuildServiceProvider();
+        var service = services.GetRequiredService<MonitorService>();
+
+        service.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+        service.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+        AssertEqual(1, captured.Messages.Count(m => m.Contains("ResourceMonitorDaemon stopping")));
+        services.DisposeAsync().AsTask().GetAwaiter().GetResult();   // MqttConnection is IAsyncDisposable only
+    }),
+
     // ---- MqttConnection (in-process loopback broker) --------------------------------------
     ("MqttConnection is non-blocking, uses the fallback, and notifies once per outage", () =>
     {
