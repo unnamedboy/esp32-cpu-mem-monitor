@@ -151,8 +151,11 @@ schedule, and never blocks the sampling loop:
   an environment variable.
 - "配对设备 (Pair device)…" opens the pairing wizard (one instance at a time; see
   "Pairing wizard"). On the first connection failure of an unconfigured PC, the
-  failure balloon is replaced once by "未找到设备，点击进行配对 (No device found — click to
-  pair)", and clicking it opens the wizard.
+  failure balloon is shown once as a "click to pair" balloon instead. It keeps
+  the "MQTT connection failed" title, says the device cannot be reached and "未找到设备，点击进行配对
+  (No device found — click to pair)", and clicking it opens the wizard.
+- Pause/resume confirmations use the same balloon helper, so clicking them never
+  opens the wizard.
 - "查看日志 (Log)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
 - Exit hides the icon and disables the menu first (re-entry guarded), then stops
   the hosted service within 3 s and disposes the tray icon.
@@ -175,8 +178,9 @@ schedule, and never blocks the sampling loop:
 - `DaemonLogger.cs`: rotating file logger provider.
 - `SettingsForm.cs`, `TrayContext.cs`: Windows tray menu and settings dialog.
 - `Provisioning/`: BLE Wi-Fi provisioning client library (see "Provisioning client" below).
-- `Pairing/`: pairing wizard form, `PairingOutcomePresenter` (pure decisions), `BrokerProbe`,
-  `CurrentWifiNetwork` (SSID prefill) and `FirstRunPairingPrompt` (see "Pairing wizard").
+- `Pairing/`: pairing wizard form, `PairingOutcomePresenter` (pure decisions and messages),
+  `PairingText` (fixed UI texts), `BrokerProbe`, `CurrentWifiNetwork` (SSID prefill and
+  2.4 GHz hint) and `FirstRunPairingPrompt` (see "Pairing wizard").
 - `ResourceMonitorDaemon.Tests`: zero-dependency test runner.
 
 The daemon targets `net9.0-windows10.0.19041.0` (Windows 10 2004 or later)
@@ -350,7 +354,7 @@ runs on the UI thread with async/await, so the UI never blocks.
 | --- | --- |
 | 1. Device | Starts a 5 s BLE scan when the wizard opens and lists `PROV_RESMON_*` devices live, with signal strength. A Rescan button repeats it. If exactly one device is found, it is selected. Bluetooth off or missing gives a clear message (`ProvisioningTransportException.Error`). |
 | 2. Pairing code | Selecting a device starts `TryReadPopFromUsbAsync(name)` in the background. If found, the code is filled in masked: "已通过 USB 自动读取配对码 (read automatically over USB)". The user can switch to "手动输入 (Enter manually)" and back. Typed codes are normalized with `PairingCode.TryNormalize`. A hint names the serial log line `Provisioning: name=... pop=...` at 115200 baud. |
-| 3. Wi-Fi | SSID and password, with a masked password box and a show/hide checkbox. A note says the ESP32 supports 2.4 GHz only. The SSID is prefilled when `netsh wlan show interfaces` reports exactly one connected network. This is best effort: nothing is installed, no admin is needed, and garbled or ambiguous output is ignored. A 5/6 GHz connection on the PC shows a 2.4 GHz warning. Input is validated with `PairingCode` and `WifiConfigClient.ValidateCredentials` before any Bluetooth traffic. |
+| 3. Wi-Fi | SSID and password, with a masked password box and a show/hide checkbox. A note says the ESP32 supports 2.4 GHz only. The SSID is prefilled when WinRT (`NetworkInformation` → `WlanConnectionProfileDetails.GetConnectedSsid()`) reports exactly one connected Wi-Fi network; there is no code-page conversion and no process to start. The optional 2.4 GHz warning comes from `netsh wlan show interfaces`. Its output is decoded with the system OEM code page (`GetOEMCP`, e.g. 936 on Chinese Windows) and read from the "Band" line, or from the channel number (> 14 means 5 GHz) when there is no band line. English and Chinese labels are recognized; otherwise the band is unknown and no warning is shown. Everything here is best effort: nothing is installed, no admin is needed, and any failure just leaves the field empty. Input is validated with `PairingCode` and `WifiConfigClient.ValidateCredentials` before any Bluetooth traffic. |
 | 4. Pair | `ProvisionAsync` with step progress (connect, secure session, send settings, wait for Wi-Fi), followed by "save address" and "daemon connects". Cancel cancels the attempt. Closing the wizard cancels the scan, USB query, attempt and checks, and `ProvisionAsync` then disposes the BLE connection. |
 
 Results (`PairingOutcomePresenter`, pure and unit-tested):
@@ -362,7 +366,7 @@ Results (`PairingOutcomePresenter`, pure and unit-tested):
 | `Failed(AuthError)` | "Wi-Fi 密码错误"; focus moves to the password box. |
 | `Failed(NetworkNotFound)` | "找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）"; focus moves to the SSID box. |
 | `Timeout` | No result within 30 s: check the SSID, password and 2.4 GHz support, then retry. A retry detects a device that joined Wi-Fi late. |
-| `ConnectionLost` | `BrokerProbe` tries for up to 15 s: the daemon's own connection, or a TCP connect to the configured `Host:Port`, about once per second. If that works, it is a success, with no address saved. Otherwise a failure with "rescan, or power-cycle / hold BOOT 5–15 s". |
+| `ConnectionLost` | `BrokerProbe` tries for up to 15 s, about once per second: a daemon MQTT connection made *after the attempt started*, or a TCP connect to the configured `Host:Port`. If that works, it is a success, with no address saved. Otherwise a failure with "rescan, or power-cycle / hold BOOT 5–15 s". |
 | `PairingCodeRejectedException` | "配对码错误"; focus moves to the code box. |
 | `ProvisioningRetryRejectedException` | Chinese restart/BOOT instruction plus the library message, which already contains `ReprovisionInstruction`. |
 | `ProvisioningTransportException` | Specific text per `Error` kind (Bluetooth off or unavailable, device gone, disconnected, timeout, not a provisioning device). |
@@ -371,11 +375,18 @@ Results (`PairingOutcomePresenter`, pure and unit-tested):
 
 After a save, the configuration file watcher applies the new
 `FallbackAddress`, and `MqttConnection` reconnects (an endpoint change skips
-the backoff). The wizard polls the new read-only `MonitorService.IsConnected`
-for up to 45 s, after the new address has been applied, and then shows
+the backoff). The wizard polls the read-only `MonitorService.IsConnected` and
+`ConnectionGeneration` for up to 45 s. It waits until the new address has been
+applied and a connection exists that was established after the attempt started,
+so an older MQTT session that is still up does not count. It then shows
 **"已连接，正在发送数据 (connected, publishing)"**. Otherwise it reports that sending
 is paused or that the daemon keeps retrying. If
 `RESMON_Device__FallbackAddress` overrides the saved value, the wizard says so.
+
+Ambiguity: `Host` (resmon.local) is an mDNS name. With several monitors on
+the same network it can resolve to a different device than the one just
+paired. The wizard cannot tell them apart in the `ConnectionLost` check or in the
+final status when no address was reported.
 
 Password hygiene: the password is read from the box only for the
 `ProvisionAsync` call. The local reference is dropped and the box cleared after
@@ -387,11 +398,17 @@ log lines name only the device, the result and the saved IPv4 address.
 First-run prompt (`FirstRunPairingPrompt`): the prompt is offered only when all
 of these hold: the notification is the MQTT connection-failure one, the
 prompt was never shown, the effective `FallbackAddress` is empty, and the
-daemon has not connected since it started. The tray then shows the "click to
-pair" balloon instead of the failure balloon and writes the marker file
-`%LocalAppData%\ResourceMonitorDaemon\pairing-prompted`, so the prompt
-appears once per user. Delete that file to see it again. No window opens on
-its own at login.
+daemon has not connected since it started. The tray then shows the failure as
+the "click to pair" balloon, which keeps the failure title and states the failure,
+and writes the marker file `%LocalAppData%\ResourceMonitorDaemon\pairing-prompted`.
+The prompt therefore appears at most once per user. The marker is written as soon as the balloon is
+requested, so if Windows suppresses it (Focus Assist, notifications off), the prompt
+is not repeated; the tray menu entry always works. Delete that file to see the
+prompt again. No window opens on its own at login.
+
+User-visible texts: fixed wizard and tray-prompt texts are in `PairingText`;
+outcome-dependent messages are built in `PairingOutcomePresenter`. Both are
+ready to move to resources for localization.
 
 ## Tests
 
@@ -419,8 +436,11 @@ The C# test runner covers:
   `FakeProvisioningDevice.cs`; see "Provisioning client").
 - the pairing wizard's pure parts (`PairingTests.cs`): result and exception
   messages, which addresses may be saved, input validation without echoing
-  values, scan texts, the first-run rule and marker file, the `netsh` SSID parser,
-  and `BrokerProbe` against a loopback listener and a closed port. The form itself
+  values, scan texts, the first-run rule and marker file, SSID selection, the
+  `netsh` band parser (English labels, and Chinese output encoded as CP936 bytes),
+  and `BrokerProbe` against a loopback listener and a closed port. The
+  `MqttConnection` scenario also checks that `ConnectionGeneration` advances on
+  every (re)connect. The form itself
   is not unit-tested. Its layout was checked by rendering it with `DrawToBitmap`
   at 100 % and at a simulated 150 %.
 
@@ -448,8 +468,15 @@ dotnet .tmpbuild\ResourceMonitorDaemon.Tests.dll
 - The first-run balloon opens the wizard only while it is on screen. Windows does
   not report clicks on notifications that have moved to the Action Center, so
   use the tray menu then.
-- SSID prefill depends on `netsh` output. Newer Windows builds may require
-  location permission, and in that case the field is simply left empty.
+- SSID prefill and the 2.4 GHz hint are best effort. Newer Windows builds may
+  require location permission for Wi-Fi details, and then the field stays empty.
+  The band hint only recognizes English and Chinese `netsh` labels.
+- Reopening the wizard right after closing it can miss the USB pairing code. A
+  serial probe abandoned after its 1.5 s budget may still hold the COM port
+  (for example, blocked in `Open()`) until it finishes. Wait a moment and select
+  the device again, or type the code.
+- `resmon.local` may name a different monitor when several are on the network
+  (see "Pairing wizard").
 - The wizard does not set a device name or the MQTT port and topics. The BLE
   contract only carries the SSID and password.
 - Comments in a hand-edited `settings.json` are not preserved when the file is
