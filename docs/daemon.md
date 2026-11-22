@@ -44,7 +44,8 @@ is a plain console runner with no test framework.
 
 - **UI thread.** `Program.Main` runs on an STA thread and owns the Windows Forms message
   loop: tray icon, notifications, dialogs and the pairing wizard. The wizard's Bluetooth
-  and serial work is async on this thread, so the UI stays responsive.
+  and serial work is awaited from this thread (serial probes run on their own threads),
+  so the UI stays responsive.
 - **Sampling loop.** `MonitorService` is a hosted `BackgroundService`. It samples on a
   fixed-rate schedule (missed ticks are skipped, not bunched up) and also wakes when
   settings change.
@@ -204,9 +205,9 @@ DeviceStatusForwarder ─┘   (bounded,         (batching,       (HttpClient, g
                             drop-oldest)      retry)            auth, 10 s timeout)
 ```
 
-- **Sources don't wait for the network.** They enqueue and return. The queue assigns strictly
-  increasing nanosecond timestamps across the process. Lines over 16,384 characters are truncated
-  with a marker.
+- **Sources don't wait for the network.** They enqueue and return. The queue assigns
+  strictly increasing nanosecond timestamps across the process. Lines over 16,384
+  characters are truncated with a marker.
 - **No feedback loop.** The logger provider ignores the
   `ResourceMonitorDaemon.Observability.*` and `System.Net.Http.*` categories, so the
   sink's own messages and HTTP errors stay in the local log and can never re-enter the
@@ -323,7 +324,8 @@ as pure, unit-tested code.
   and the effective `FallbackAddress` did not change, the daemon has no reason to
   reconnect, so an existing connection counts.
 - **Lost Bluetooth link.** `BrokerProbe` checks for up to 15 s, every 1–3 s (each probe
-  takes up to 2 s, followed by a 1 s pause), for a new daemon connection or a TCP connection to `Host:Port`.
+  takes up to 2 s, followed by a 1 s pause), for a new daemon connection or a TCP
+  connection to `Host:Port`.
 - **Wi-Fi helpers.** "Use this PC's Wi-Fi" reads the connected SSID through WinRT only
   when clicked (it can trigger Windows 11's location prompt). The 2.4 GHz warning parses
   `netsh wlan show interfaces` (decoded with the OEM code page) and recognizes English

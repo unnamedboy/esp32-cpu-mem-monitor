@@ -16,7 +16,7 @@ A CPU/MEM gauge face for a generic square panel voltmeter is in
 | MOC9686 ESP32 expansion shield | Confirmed | Carrier with GPIO, 3.3 V, 5 V, GND and labelled I2C headers |
 | Full-size solderless breadboard | Confirmed | Separate prototype area |
 | GP8413-compatible I2C DAC (DFRobot GP8XXX driver) | Firmware target | I2C address `0x59`, output range set to 0–5 V. Exact module, connector labels and wiring not yet verified. |
-| Two analogue panel voltmeters | Planned | Signal input requirements not yet documented. The firmware sets the DAC to a 0–5 V range (module output not yet verified), so a 0–5 V DC panel voltmeter would map directly (gauge input not yet verified). Backlights are planned for a 12 V rail (backlight voltage and current rating unverified). |
+| Two analogue panel voltmeters | Planned | Signal input requirements not yet documented. The firmware sets the DAC to a 0–5 V range (module output not yet verified), so a 0–5 V DC panel voltmeter would match in scale (gauge input, DAC drive capability and loading not yet verified). Backlights are planned for a 12 V rail (backlight voltage and current rating unverified). |
 | 5 V → 12 V boost converter (Amazon ASIN `B0C2H6PFVH`) | Selected | Intended to power the voltmeter backlights only. Which 5 V supply feeds it is undecided. Needs bench validation. |
 | M5Stack Unit DAC2 | Optional candidate | Not selected; part, pinout, address and power requirements not documented |
 

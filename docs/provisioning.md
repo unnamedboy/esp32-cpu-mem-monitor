@@ -14,8 +14,9 @@ model, and the protocol details that the firmware and the Windows client share.
 At every boot the firmware takes the first matching option
 (`decideBootAction()` in [`provisioning_logic.h`](../firmware/include/provisioning_logic.h)):
 
-1. **Re-pairing was requested** with the BOOT button: clear the flag, erase the stored
-   credentials, start pairing mode.
+1. **Re-pairing was requested**, by the BOOT button or by the automatic restart after a
+   failed pairing start: clear the flag, erase the stored credentials, start pairing
+   mode.
 2. **Stored credentials exist** (from an earlier pairing): connect with them.
 3. **A development fallback is compiled in** (`firmware/src/secrets.h` with a non-empty
    `WIFI_SSID`): connect with it, without Bluetooth.
@@ -61,8 +62,8 @@ daemon running.
    warns you; either way, make sure the router also offers the network on 2.4 GHz.
 6. **Click Pair.** Progress shows the steps: connect to device, secure session, send
    Wi-Fi settings, wait for Wi-Fi, save device address and daemon connects (after a lost
-   Bluetooth link, the save step checks the network connection instead). **Cancel** stops the attempt; closing the wizard
-   cancels everything.
+   Bluetooth link, the save step checks the network connection instead). **Cancel**
+   stops the attempt; closing the wizard cancels everything.
 7. **Done.** When the device reports its IP address, the wizard saves it as
    `FallbackAddress` in the user settings file and changes nothing else. The daemon
    reconnects without a restart, and the wizard waits up to 45 s for that connection.
@@ -81,7 +82,7 @@ afterwards, and the password is never written to disk or to the log.
 | Wrong pairing code | Check the code in the serial log and try again. |
 | No Wi-Fi result within 30 s | Check the SSID, password and 2.4 GHz, then try again. A retry also detects a device that joined Wi-Fi late. |
 | Lost the Bluetooth link | The wizard first tries the configured `Host:Port` (default `resmon.local:1883`) for up to 15 s. If the device is still unreachable, rescan; if it no longer appears, use the BOOT gesture and pair again. |
-| The device did not accept another attempt | Use the BOOT gesture, then rescan and pair. Don't power-cycle instead: the device has already stored the earlier settings and would restart with them and without Bluetooth. |
+| The device did not accept another attempt after the previous one failed, or The device could not accept the Wi-Fi settings; it may still be handling an earlier attempt (for example a retry after the 30 s timeout) | Use the BOOT gesture, then rescan and pair. Don't power-cycle instead: the device has already stored the earlier settings and would restart with them and without Bluetooth. |
 | The device is already connected to network "…" | It joined a different network in an earlier attempt. To switch, use the BOOT gesture and pair again. |
 | No device in pairing mode found | Check power and pairing mode, then **Rescan**. |
 | Bluetooth is off / no usable BLE adapter | Turn Bluetooth on, or use a PC with a BLE adapter. |
@@ -131,8 +132,8 @@ For development without the pairing app, copy
 `firmware/src/secrets.h` (ignored by git) and set `WIFI_SSID` and `WIFI_PASSWORD`. The
 fallback is used only when no paired credentials are stored, and it is kept in RAM
 only, so it is never mistaken for paired credentials later. Rebuild and upload the
-firmware after creating the file. Stored credentials take priority over the fallback; to go back to the
-fallback, use the BOOT gesture and then power-cycle without pairing.
+firmware after creating the file. Stored credentials take priority over the fallback;
+to go back to the fallback, use the BOOT gesture and then power-cycle without pairing.
 
 Without pairing, the daemon has no saved IP address (`FallbackAddress`). If
 `resmon.local` does not resolve on your PC, set **Host** in the settings dialog to the IP
@@ -160,8 +161,9 @@ address from the serial line `Wi-Fi connected: ssid=… ip=…`.
   log or with the [serial query](#serial-pairing-code-query) while the device is in
   pairing mode. The code is not printed outside pairing mode.
 - **Pairing window.** Pairing mode only runs on a device without stored or compiled-in
-  credentials, or after the BOOT gesture. Bluetooth is turned off about 35 s after a successful pairing, and
-  on boots that don't pair the Bluetooth memory is released entirely.
+  credentials, or after the BOOT gesture. It has no timeout: until it is paired, the
+  device keeps advertising. Bluetooth is turned off about 35 s after a successful
+  pairing, and on boots that don't pair the Bluetooth memory is released entirely.
 - **Credentials on the device** are stored in the ESP32's standard Wi-Fi NVS storage,
   **without** flash or NVS encryption. Someone with the board can read them out. See the
   [roadmap](roadmap.md) for the open decision on encryption.
@@ -228,8 +230,9 @@ The outcome rules follow ESP-IDF 4.4.7 behaviour:
   `FallbackAddress` only for a usable unicast IPv4 address.
 - **Bluetooth after success.** The firmware keeps BLE up for 30 s after success
   (`PROV_STOP_AFTER_SUCCESS_MS`) plus a 5 s cleanup delay (`PROV_BLE_CLEANUP_DELAY_MS`),
-  so the client can read the result. The MQTT broker starts as soon as the device has
-  an IP address, while BLE is still up. The client does not rely on this window: a link
+  so the client can read the result. mDNS and the MQTT broker start once the device has
+  an IP address and the credentials have been accepted, while BLE is still up (see
+  [below](#firmware-behaviour-worth-knowing)). The client does not rely on this window: a link
   lost after a *Connected* reply still counts as success, and a link lost while waiting
   makes the wizard check whether the broker is reachable.
 

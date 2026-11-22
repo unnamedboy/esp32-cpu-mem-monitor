@@ -62,7 +62,7 @@ Firmware changes:
 Daemon changes:
 
 1. The solution builds and all tests pass.
-2. Reconnects don't block sampling, settings changes apply without a rebuild, and logs
+2. Reconnects don't block sampling, settings changes apply without a restart, and logs
    and notifications contain no credentials.
 
 The tests need the .NET runtime listed under

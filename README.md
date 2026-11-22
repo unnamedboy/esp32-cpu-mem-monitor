@@ -35,7 +35,7 @@ This is a working prototype, not a finished product; see [Status](#status-and-li
   over USB with a data cable (not a charge-only one).
 - For the display: a GP8413-compatible I2C DAC and two analogue panel gauges. The
   firmware also runs without them. See [docs/hardware.md](docs/hardware.md#parts) for
-  which gauges fit, wiring and **safety notes**: the shield's `DC IN` is labelled
+  gauge requirements (not yet verified), wiring status and **safety notes**: the shield's `DC IN` is labelled
   6–9 V (never connect 12 V), and GPIO is 3.3 V.
 - A Wi-Fi network that offers 2.4 GHz for the ESP32, on the same LAN as the PC.
 - A Windows 10 (2004 or later) or Windows 11 PC with Bluetooth LE for pairing.
@@ -115,8 +115,8 @@ to start the daemon with Windows, put a shortcut to the exe in your Startup fold
 ### 3. Pair the device
 
 Right-click the tray icon, choose **Pair device…**, pick the
-`PROV_RESMON_…` device, check the pairing code, enter your Wi-Fi name and password, and
-click **Pair**. When the device has joined Wi-Fi, the wizard saves its IP address and
+`PROV_RESMON_…` device, confirm the pairing code was read over USB (or type it from the
+serial log), enter your Wi-Fi name and password, and click **Pair**. When the device has joined Wi-Fi, the wizard saves its IP address and
 the daemon connects; the gauges start moving.
 
 Bluetooth pairing has not yet been tested on real hardware. If it fails for you, the
@@ -144,8 +144,8 @@ separates sections) override both ([how the layers work](docs/daemon.md#layers))
 | `Ui:Language` | `auto` | `auto`, `en` or `zh-Hans` |
 
 Changes to the JSON files apply while the daemon runs; a host or port change reconnects
-at once (or on resume, if sending is paused). Invalid values are reset to the default or clamped into range, with a
-warning in the log.
+at once (or on resume, if sending is paused). Invalid values are reset to the default
+or clamped into range, with a warning in the log.
 
 Environment variables are read only when the daemon starts. Set them and start the exe
 from the same PowerShell window, or set them as user environment variables and restart
@@ -175,9 +175,9 @@ to your own Loki (Grafana Cloud or self-hosted). It is off by default; enable it
 The tray menu, notifications and dialogs are available in English and Simplified
 Chinese. With `auto` the daemon follows the Windows display language: Simplified
 Chinese display languages get the Chinese UI, everything else (including Traditional
-Chinese) gets English. Change it with **Language** in the settings dialog, or force it with
-`RESMON_Ui__Language`. The menu switches as soon as the setting is applied; dialogs that are already open
-keep their language. The log is always English.
+Chinese) gets English. Change it with **Language** in the settings dialog, or force it
+with `RESMON_Ui__Language`. The menu switches as soon as the setting is applied; dialogs
+that are already open keep their language. The log is always English.
 
 The documentation uses the English labels; the Chinese UI has the same layout and menu
 order.

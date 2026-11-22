@@ -24,7 +24,7 @@ The daemon's topic names are configurable (`Device:CpuTopic`, `Device:MemTopic`,
 The daemon formats each value with one decimal place in the invariant culture
 (always `.` as the decimal separator) and clamps it to `0.0..100.0` before publishing.
 
-The firmware parses the payload as a float, allows trailing whitespace, and ignores
+The firmware parses the payload as a float, allows surrounding whitespace, and ignores
 anything that is not a finite number in `0..100`. CPU and memory are handled
 independently. A metric that receives no valid update for 5 s (`METRIC_TIMEOUT_MS`)
 starts falling towards zero by one 8-bit output step every 50 ms, so a full-scale

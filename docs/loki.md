@@ -20,8 +20,9 @@ URL, tenant or token: you enter them yourself.
    and discards anything still queued.
 
 `/loki/api/v1/push` is appended to the URL only when it has no path, so a full push URL
-or a reverse-proxy path also works. If you use credentials, use `https`: the dialog asks
-before it saves or tests credentials for a plain `http` URL.
+or a reverse-proxy path also works. If you use credentials, use `https`. For a plain
+`http` URL with credentials, the dialog asks before every **Test**, and before **Save**
+when the sink is enabled.
 
 ### The token
 
@@ -69,8 +70,12 @@ All streams use fixed, low-cardinality labels, plus `host="<PC name>"` when
 
 ## What is sent, and privacy
 
-Nothing is sent until you enable the sink and enter a URL, and data goes only to that
-URL. Log lines are redacted first:
+Nothing is collected or sent until you enable the sink and enter a URL. The one exception
+is **Test**: it pushes a single fixed line (`Resource Monitor daemon: observability test
+line`) to the URL in the dialog, with the credentials and host label entered there, even
+while the sink is not enabled. Data only ever goes to the URL you entered.
+
+Log lines are redacted before they are sent:
 
 - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`, including
   their short 8.3 forms such as `C:\Users\ABCDEF~1`;
