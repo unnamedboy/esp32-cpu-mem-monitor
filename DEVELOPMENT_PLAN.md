@@ -300,7 +300,9 @@ Status: Firmware side implemented (2026-11-22); not yet validated on hardware
   to Grafana Loki (separate daemon change).
 - Remaining: confirm on hardware that a subscribed client (e.g.
   `mosquitto_sub -h resmon.local -t resmon/status -v`) receives one message
-  every 10 s and that the CPU/MEM display is unaffected.
+  every 10 s and that the CPU/MEM display is unaffected. Also check that a
+  subscriber which stops reading (e.g. a suspended `mosquitto_sub`) is dropped
+  by keep-alive before it can stall `loop()`.
 
 ## Verification Checklist
 
