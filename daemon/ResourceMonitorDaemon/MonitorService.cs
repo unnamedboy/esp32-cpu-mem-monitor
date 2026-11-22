@@ -17,6 +17,7 @@ namespace ResourceMonitorDaemon
         private readonly IOptionsMonitor<DeviceSettings> _settingsMonitor;
         private readonly MqttConnection _connection;
         private readonly ISettingsStore _settingsStore;
+        private readonly IMetricsObserver? _metricsObserver;
         private PerformanceCounter? _cpuCounter;
         private DeviceSettings _settings;
         private DeviceSettings? _pendingSettings;
@@ -27,12 +28,14 @@ namespace ResourceMonitorDaemon
             ILogger<MonitorService> logger,
             IOptionsMonitor<DeviceSettings> settingsMonitor,
             MqttConnection connection,
-            ISettingsStore settingsStore)
+            ISettingsStore settingsStore,
+            IMetricsObserver? metricsObserver = null)
         {
             _logger = logger;
             _settingsMonitor = settingsMonitor;
             _connection = connection;
             _settingsStore = settingsStore;
+            _metricsObserver = metricsObserver;
             _settings = settingsMonitor.CurrentValue;
         }
 
@@ -91,6 +94,7 @@ namespace ResourceMonitorDaemon
                     _logger.LogDebug(
                         "[Metrics] CPU: {Cpu:F1}% | RAM: {UsedGb:F2}/{TotalGb:F2} GB ({MemoryLoad}%)",
                         cpuUsage, memInfo.UsedGB, memInfo.TotalGB, memInfo.MemoryLoad);
+                    NotifyObserver(cpuUsage, memInfo);
 
                     if (_isPaused)
                     {
@@ -114,6 +118,25 @@ namespace ResourceMonitorDaemon
                 {
                     _logger.LogError(ex, "An error occurred while sampling resources.");
                 }
+            }
+        }
+
+        private void NotifyObserver(float cpuUsage, (double TotalGB, double UsedGB, uint MemoryLoad) memInfo)
+        {
+            if (_metricsObserver == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var mqtt = _isPaused ? "paused" : _connection.IsConnected ? "connected" : "disconnected";
+                _metricsObserver.OnSample(new MetricsSample(cpuUsage, memInfo.MemoryLoad, memInfo.UsedGB, memInfo.TotalGB, mqtt));
+            }
+            catch (Exception ex)
+            {
+                // Observers must not throw; never let one affect sampling or publishing.
+                _logger.LogDebug("Metrics observer failed: {Error}", ex.Message);
             }
         }
 

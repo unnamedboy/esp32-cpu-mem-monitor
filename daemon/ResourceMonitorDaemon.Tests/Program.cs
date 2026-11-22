@@ -491,7 +491,7 @@ var tests = new (string Name, Action Run)[]
     {
         MqttConnectionScenario.LateNotificationHandler().GetAwaiter().GetResult();
     }),
-};
+}.Concat(ObservabilityTests.All).ToArray();
 
 var failed = 0;
 
