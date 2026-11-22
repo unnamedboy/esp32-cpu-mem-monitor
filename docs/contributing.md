@@ -9,8 +9,8 @@ test commands are in the [README](../README.md#building-and-testing).
 - Keep changes small and focused. The project is a prototype, so prefer configurable,
   incremental changes over assumptions about hardware that hasn't been measured.
 - Don't change the MQTT payloads, topics or the pairing protocol unless that is the
-  point of the change; the daemon and firmware have to agree, and older firmware is in
-  the field.
+  point of the change; the daemon and firmware have to agree, and older firmware may
+  still be on existing boards.
 
 ## Firmware conventions
 
@@ -72,8 +72,5 @@ localization test finds the sources by walking up from the test assembly.
 dotnet build daemon\ResourceMonitorDaemon.sln -p:OutDir="$PWD\daemon\.tmpbuild\"
 dotnet daemon\.tmpbuild\ResourceMonitorDaemon.Tests.dll
 ```
-
-The firmware tests only include the pure headers from `firmware/include`, so they can
-also be compiled with any host C++17 compiler and the Unity sources.
 
 Update the docs in the same pull request when behaviour, settings or wiring change.

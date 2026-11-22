@@ -114,9 +114,13 @@ these layers, lowest to highest priority:
 | `Device:SampleIntervalMs` | `1000` | 250–60000 |
 | `Ui:Language` | `auto` | `auto`, `en` or `zh-Hans` |
 
-Changes apply while the daemon runs; a host or port change reconnects automatically.
-Invalid values fall back to defaults with a warning in the log. Values set through
-environment variables are shown read-only in the dialog and are never saved:
+Changes to the JSON files apply while the daemon runs; a host or port change reconnects
+automatically. Invalid values are reset to the default or clamped into range, with a
+warning in the log.
+
+Environment variables are read only when the daemon starts. Set them and start the exe
+from the same PowerShell window, or set them as user environment variables and restart
+the daemon. Values set this way are shown read-only in the dialog and are never saved:
 
 ```powershell
 $env:RESMON_Device__Host = "192.168.1.50"
@@ -156,13 +160,13 @@ order.
 | "MQTT connection failed" notification | Is the ESP32 powered and on the same network? Does `resmon.local` resolve on this PC? Pairing saves the device's IP as a fallback; you can also set **Host** to the IP. The daemon keeps retrying in the background. |
 | Gauges sink to zero | No valid data for 5 s: sending is paused (tray menu), the daemon is not running, or the connection dropped. |
 | Device doesn't show up in the wizard | It is not in pairing mode: use the BOOT gesture (hold 5–15 s, release) and **Rescan**. Check that Bluetooth is on. |
-| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read only works with common ESP32 USB-serial chips (CP210x, CH340/CH343/CH9102, FTDI, Espressif native USB). Otherwise type the code from the serial log. |
+| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read only works with [common ESP32 USB-serial chips](docs/provisioning.md#serial-pairing-code-query); otherwise type the code from the serial log. |
 | Pairing fails | See the [message table](docs/provisioning.md#if-pairing-fails). Remember the ESP32 needs 2.4 GHz. |
 | Serial log says `DAC not found at 0x59` | Check the DAC wiring and address; the firmware runs on without outputs. |
-| Firmware build stops with `CORE_DEBUG_LEVEL >= 3 is refused` | Use level 1 (the default in `platformio.ini`) or 2. The build refuses 3 and higher on purpose; see [why](docs/firmware.md#toolchain). |
+| Firmware build stops with `CORE_DEBUG_LEVEL >= 3 is refused` | Use a level from 0 to 2 (`platformio.ini` sets 1). The build refuses 3 and higher on purpose; see [why](docs/firmware.md#toolchain). |
 
-For anything else, open the log from the tray menu, and set
-`RESMON_Logging__LogLevel__Default=Debug` for more detail.
+For anything else, open the log from the tray menu. For more detail, set
+`RESMON_Logging__LogLevel__Default=Debug` and restart the daemon.
 
 ## Project layout
 

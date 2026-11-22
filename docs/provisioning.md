@@ -46,8 +46,8 @@ daemon running.
    **Rescan** if the device was not in pairing mode yet. If Bluetooth is off, turn it
    on in Windows Settings and rescan.
 4. **Pairing code.** If the device is connected to this PC by USB through a common
-   ESP32 USB-serial bridge (CP210x, CH340/CH343/CH9102, FTDI or Espressif native USB),
-   the wizard reads the code over the serial port and shows *Read automatically over
+   ESP32 USB-serial bridge ([which ones](#serial-pairing-code-query)), the
+   wizard reads the code over the serial port and shows *Read automatically over
    USB*. Close any serial monitor first: a COM port can only be open in one program.
    Otherwise type the 8-character code from the serial log. Codes use the letters A–Z without I and
    O and the digits 2–9; case, spaces and dashes are ignored.
@@ -158,9 +158,8 @@ pairing.
   device's IP address is saved.
 - **Logs.** The firmware build is limited to a log level that cannot print the Wi-Fi
   password ([details](firmware.md#toolchain)). The daemon never logs the password, the
-  pairing code or the SSID. The paired device's Bluetooth address and Wi-Fi IP address
-  are logged only at Debug level; a saved IP address later appears in the daemon's
-  settings and connection diagnostics as the configured `FallbackAddress`.
+  pairing code or the SSID; what it logs about the paired device is described in
+  [daemon.md](daemon.md#logging-and-diagnostics).
 
 ## Protocol reference
 
@@ -238,8 +237,7 @@ it.
   | `connecting` | Has credentials, not connected (yet) |
   | `provisioned` | Connected with paired credentials |
   | `dev-fallback` | Connected with `secrets.h` credentials |
-  | `provisioning` | In pairing mode, but the code could not be loaded from NVS |
-  | `error` | Pairing mode could not start |
+  | `error` | Pairing mode could not start (including when the pairing code could not be loaded from NVS) |
   | `starting` | Setup not finished (not normally seen) |
 
 - Other log lines are interleaved on the same port; ignore lines that don't start with
@@ -270,7 +268,9 @@ before the client can read the result). Implementation notes:
   within 5 s): the firmware restarts into pairing mode after 3 s and tries again. After
   3 failed starts in a row it connects with the `secrets.h` fallback if there is one,
   or stays up and logs `Power-cycle to retry` every 30 s. The count survives software
-  restarts and is cleared at power-on, on a successful start and by the BOOT gesture.
+  restarts. It is cleared by any other kind of reset (power-on, the EN/reset button,
+  brownout, watchdog), by a successful start, when the firmware gives up or falls back,
+  and by the BOOT gesture.
 - **A late start.** If BLE reports that it started after the 5 s timeout was already
   handled (a retry restart pending, or given up), Bluetooth is in fact advertising:
   the firmware cancels the restart, clears the re-pairing request, returns to pairing
@@ -288,7 +288,6 @@ before the client can read the result). Implementation notes:
 
 ## Limitations
 
-- Not yet tested on hardware or end to end.
 - Security1 rather than Security2 (SRP6a): ESP-IDF 4.4 in Arduino-ESP32 2.0.17 only
   offers Security0 and Security1.
 - Only the SSID and password are provisioned. The host name, MQTT port and topics are

@@ -86,7 +86,7 @@ Settings come from these sources, lowest to highest priority:
 3. `%LocalAppData%\ResourceMonitorDaemon\settings.json` (per-user; written by the tray
    dialogs and the pairing wizard);
 4. environment variables prefixed `RESMON_`, with `__` between sections, e.g.
-   `RESMON_Device__Host`.
+   `RESMON_Device__Host`. They are read only at startup ([how to set them](../README.md#configuration)).
 
 The user file holds **only the values set there**, so anything not listed keeps coming
 from `appsettings.json` or the defaults. Both JSON files are watched and changes apply
@@ -175,7 +175,8 @@ Received status messages are validated and, if Loki is enabled, forwarded; see
 - `%LocalAppData%\ResourceMonitorDaemon\daemon.log`, rolled to `daemon.log.1` at 5 MB.
   Write failures never affect the daemon. **View log** in the tray opens it.
 - The level comes from the `Logging` section (Information by default);
-  `RESMON_Logging__LogLevel__Default=Debug` logs every sample.
+  `RESMON_Logging__LogLevel__Default=Debug` (set before starting the daemon) logs every
+  sample.
 - At startup the daemon logs its version, the .NET runtime, the settings sources with
   file paths and the names of any `RESMON_` overrides, the effective settings, the log
   path, memory use, the UI language and the Loki configuration (host, auth mode and
@@ -214,8 +215,7 @@ DeviceStatusForwarder ─┘   (bounded,         (batching,       (HttpClient, g
   plain-token property, `ToString()` never prints it, and HTTP error text is scrubbed of
   the token, the Basic credential and the URL path before it is logged or shown.
 - **Redaction.** `LokiLogRedactor` rewrites forwarded log lines (user folders, user name,
-  PC name). Cheap substring checks run before each regular expression, so a typical
-  line costs well under a microsecond.
+  PC name).
 
 ## Localization
 
@@ -354,7 +354,7 @@ dotnet run --project daemon\ResourceMonitorDaemon.Tests\ResourceMonitorDaemon.Te
 The runner prints one line per test and a `passed` total. It sets the UI language to
 English first. What is covered:
 
-- **`Program.cs`**: payload formatting, settings validation and layering, the user
+- **`ResourceMonitorDaemon.Tests/Program.cs`**: payload formatting, settings validation and layering, the user
   settings store, log rotation, reconnect backoff.
 - **`MqttConnectionScenario.cs`**: `MqttConnection` against an in-process MQTTnet broker
   (non-blocking ticks, notifications, fallback address, wire format,
@@ -376,9 +376,9 @@ dialog by eye in English and Simplified Chinese, at 100 % and 150 % display scal
 
 ## Limitations
 
-- The Bluetooth client and the wizard have not yet run against a physical ESP32: WinRT
-  scanning and GATT, long writes, the real error codes on a wrong pairing code, the USB
-  query on this board's USB-UART bridge, and BLE timing are all unverified.
+- The Bluetooth client and the wizard are [not yet tested on hardware](provisioning.md):
+  WinRT scanning and GATT, long writes, the real error codes on a wrong pairing code,
+  the USB query on this board's USB-UART bridge, and BLE timing are unverified.
 - Loki entries live only in memory: they are lost if the process is killed, and
   whatever is still queued after the shutdown flush budget is dropped.
 - Only English and Simplified Chinese exist; Traditional Chinese Windows uses English.

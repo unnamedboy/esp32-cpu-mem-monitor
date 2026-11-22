@@ -29,8 +29,9 @@ The token is saved only as Windows DPAPI ciphertext (`TokenProtected` in
 `%LocalAppData%\ResourceMonitorDaemon\settings.json`). Only the same Windows user on the
 same PC can decrypt it, which includes any program running as that user. Leaving the
 token box empty keeps the saved token; **Clear** removes it. For automation, set
-`RESMON_Observability__Loki__Token` instead: it takes precedence and is never written to
-disk. A plain `Token` key in a JSON file is ignored with a warning. The token, the
+`RESMON_Observability__Loki__Token` instead (read at startup, like all
+[environment variables](../README.md#configuration)): it takes precedence and is never
+written to disk. A plain `Token` key in a JSON file is ignored with a warning. The token, the
 `Authorization` header and the URL path are never logged.
 
 ## Settings
@@ -62,7 +63,7 @@ All streams use fixed, low-cardinality labels, plus `host="<PC name>"` when
 | Labels | Content |
 | --- | --- |
 | `{app="resmon-daemon", kind="log", level="trace\|debug\|info\|warn\|error\|critical"}` | Daemon log lines at or above `MinLevel`, as `Category: message` |
-| `{app="resmon-daemon", kind="metrics"}` | One JSON line per interval: `{"cpu":12.3,"mem":45.6,"mem_used_gb":7.21,"mem_total_gb":15.86,"mqtt":"connected"}`; `mqtt` is `connected`, `disconnected` or `paused` |
+| `{app="resmon-daemon", kind="metrics"}` | One JSON line per interval: `{"cpu":12.3,"mem":45,"mem_used_gb":7.21,"mem_total_gb":15.86,"mqtt":"connected"}`; `mqtt` is `connected`, `disconnected` or `paused` |
 | `{app="resmon-device", kind="status"}` | The validated [`resmon/status`](protocol.md#device-status) JSON, schema fields only; burst of 3, then at most one per 5 s |
 
 ## What is sent, and privacy
@@ -85,9 +86,9 @@ URL. Log lines are redacted first:
 
 Apart from that the lines match `daemon.log`. They can contain the broker host name or
 IP address you configured, including a `FallbackAddress` saved by the pairing wizard.
-The paired device's Bluetooth address and Wi-Fi IP address are logged only at Debug
-level, so they are forwarded only if you lower both `MinLevel` and the `Logging`
-filter to Debug. The device status never contains an SSID, password, IP or
+Pairing lines that name the device's addresses are
+[Debug-level](daemon.md#logging-and-diagnostics), so they are forwarded only if you
+lower both `MinLevel` and the `Logging` filter to Debug. The device status never contains an SSID, password, IP or
 MAC address. The sink's own messages, such as failed pushes, stay in the local log.
 
 ## Reliability

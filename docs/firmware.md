@@ -18,7 +18,7 @@ pins and wiring in [hardware.md](hardware.md).
   fit the default 1.25 MB app slot. `min_spiffs.csv` has two 1.875 MB app slots and
   128 KB SPIFFS, and keeps NVS where the default table has it, so stored Wi-Fi
   credentials and the pairing code survive a switch between the two tables.
-- `-DCORE_DEBUG_LEVEL=1` (errors only). Levels 1 and 2 are accepted; `config.h` stops
+- `-DCORE_DEBUG_LEVEL=1` (errors only). Levels 0 to 2 are accepted; `config.h` stops
   the build at level 3 or higher. At level 5 the Arduino core logs the Wi-Fi password
   received during pairing; levels 3 and 4 leak no secrets but flood the serial port
   that also carries the pairing-code query.
@@ -76,7 +76,8 @@ rather than scattering constants or branching through `main.cpp`.
 - runs the network state machine (provisioning events, connect and reconnect);
 - services the MQTT broker, once it has started;
 - publishes `resmon/status` when due;
-- decays stale metrics and refreshes the DAC once a second;
+- after the 5 s timeout, lowers a stale metric by one step every 50 ms;
+- refreshes the DAC outputs once a second;
 - prints a status line every 60 s.
 
 Events from the Arduino network task only set flags; all decisions happen in `loop()`.
@@ -138,7 +139,7 @@ The SSID is printed once per connection; passwords are never printed.
 | Wi-Fi credentials | ESP-IDF Wi-Fi storage in NVS (not encrypted) | BOOT gesture, flash erase |
 | Pairing code | NVS namespace `resmon`, key `pop` | Flash erase only |
 | Re-pairing request | NVS namespace `resmon`, key `prov_req` | Next boot |
-| Failed provisioning starts | RTC memory | Power-on, successful start, BOOT gesture |
+| Failed provisioning starts | RTC memory | Any reset other than a software restart (power-on, EN/reset button, brownout, watchdog), a successful start, giving up, BOOT gesture |
 
 The `secrets.h` fallback is applied with RAM-only Wi-Fi storage and is never written to
 NVS.
