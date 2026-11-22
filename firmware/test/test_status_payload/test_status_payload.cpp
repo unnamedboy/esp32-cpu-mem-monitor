@@ -165,6 +165,29 @@ void test_prov_mapping_from_network_state() {
                              statusProvName(statusProvFromNetwork(NetworkState::Error, CredentialSource::None)));
 }
 
+void test_publish_due_after_interval() {
+    TEST_ASSERT_FALSE(isStatusPublishDue(1000, 1000, 10000));
+    TEST_ASSERT_FALSE(isStatusPublishDue(10999, 1000, 10000));
+    TEST_ASSERT_TRUE(isStatusPublishDue(11000, 1000, 10000));
+    TEST_ASSERT_TRUE(isStatusPublishDue(500000, 1000, 10000));  // long gap, e.g. Wi-Fi was down
+}
+
+void test_publish_not_due_when_last_is_later_than_now() {
+    // `last` taken with millis() after the loop's `now` timestamp.
+    TEST_ASSERT_FALSE(isStatusPublishDue(20000, 20001, 10000));
+    TEST_ASSERT_FALSE(isStatusPublishDue(20000, 20250, 10000));
+    TEST_ASSERT_FALSE(isStatusPublishDue(0, 5, 10000));
+}
+
+void test_publish_due_across_millis_wrap() {
+    const uint32_t last = 0xFFFFF000u;  // 4096 ms before the wrap
+    TEST_ASSERT_FALSE(isStatusPublishDue(last + 9999u, last, 10000));  // wraps past 0
+    TEST_ASSERT_TRUE(isStatusPublishDue(last + 10000u, last, 10000));
+    TEST_ASSERT_TRUE(isStatusPublishDue(last + 10001u, last, 10000));
+    // `last` just after the wrap, `now` just before it: not due.
+    TEST_ASSERT_FALSE(isStatusPublishDue(0xFFFFFFFFu, 2u, 10000));
+}
+
 void runStatusPayloadTests() {
     UNITY_BEGIN();
     RUN_TEST(test_sample_payload_exact_output);
@@ -176,6 +199,9 @@ void runStatusPayloadTests() {
     RUN_TEST(test_escape_rejects_small_buffer);
     RUN_TEST(test_wifi_mapping_from_network_state);
     RUN_TEST(test_prov_mapping_from_network_state);
+    RUN_TEST(test_publish_due_after_interval);
+    RUN_TEST(test_publish_not_due_when_last_is_later_than_now);
+    RUN_TEST(test_publish_due_across_millis_wrap);
     UNITY_END();
 }
 

@@ -35,7 +35,7 @@ The example is 155 bytes.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `v` | int | Schema version, currently `1`. Consumers ignore unknown fields and reject unknown `v` greater than the version they support. |
-| `build` | string | `FIRMWARE_BUILD_ID` (JSON-escaped), ≤ 64 characters |
+| `build` | string | `FIRMWARE_BUILD_ID`, JSON-escaped; ≤ 64 bytes after JSON escaping |
 | `uptime_s` | int | `millis() / 1000` (wraps after about 49 days; acceptable) |
 | `heap_free` | int | `ESP.getFreeHeap()` |
 | `heap_min` | int | `ESP.getMinFreeHeap()` |

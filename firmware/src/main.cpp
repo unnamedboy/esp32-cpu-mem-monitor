@@ -585,7 +585,7 @@ void consumeProvisioningEvents(uint32_t now) {
 // mDNS and the MQTT broker are started once, on the first connection. Both
 // keep working across Wi-Fi reconnects (the broker listens on INADDR_ANY and
 // the mDNS responder follows the STA interface state).
-void startNetworkServicesOnce() {
+void startNetworkServicesOnce(uint32_t now) {
     if (networkServicesStarted) {
         return;
     }
@@ -600,8 +600,9 @@ void startNetworkServicesOnce() {
 
     mqtt.begin();
     // First status STATUS_INTERVAL_MS after the broker starts: a publish in
-    // this loop pass could not reach any subscriber yet.
-    lastStatusPublishMs = millis();
+    // this loop pass could not reach any subscriber yet. Uses the loop()
+    // timestamp, not millis(), so serviceStatusTopic(now) sees no "future" time.
+    lastStatusPublishMs = now;
 
     printDebugLine("========== ESP32 CPU Monitor network ready ==========");
     printDebugLine("MQTT broker:");
@@ -638,7 +639,7 @@ bool readApInfo(char* ssid, size_t ssidSize, int* rssi) {
     return true;
 }
 
-void onWifiConnected() {
+void onWifiConnected(uint32_t now) {
     if (networkState == NetworkState::Provisioning) {
         credentialSource = CredentialSource::Stored;
     }
@@ -654,7 +655,7 @@ void onWifiConnected() {
     // SSID is printed once per connection for diagnosis; never the password.
     printDebugFormatted("Wi-Fi connected: ssid=%s ip=%s rssi=%d source=%s", ssid, ip, rssi,
                         credentialSourceName(credentialSource));
-    startNetworkServicesOnce();
+    startNetworkServicesOnce(now);
 }
 
 void onWifiDisconnected(uint32_t now) {
@@ -681,7 +682,7 @@ void serviceNetwork(uint32_t now) {
 
     const bool connected = staHasIp;
     if (connected && !wasWifiConnected) {
-        onWifiConnected();
+        onWifiConnected(now);
     } else if (!connected && wasWifiConnected) {
         onWifiDisconnected(now);
     }
@@ -768,7 +769,7 @@ void serviceStatusTopic(uint32_t now) {
     if (!networkServicesStarted || networkState != NetworkState::Connected) {
         return;
     }
-    if ((uint32_t)(now - lastStatusPublishMs) < STATUS_INTERVAL_MS) {
+    if (!isStatusPublishDue(now, lastStatusPublishMs, STATUS_INTERVAL_MS)) {
         return;
     }
     lastStatusPublishMs = now;

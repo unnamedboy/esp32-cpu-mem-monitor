@@ -94,6 +94,20 @@ inline StatusProv statusProvFromNetwork(NetworkState state, CredentialSource sou
     return StatusProv::Unconfigured;
 }
 
+// True when the next status is due: at least intervalMs have elapsed since
+// lastMs. Wrap-safe for millis(). A lastMs up to intervalMs *later* than nowMs
+// (stamped with millis() after the caller took its loop timestamp) is "not
+// yet due" rather than a huge unsigned elapsed time. Unlike a signed
+// (int32_t) comparison, gaps longer than ~24.8 days (Wi-Fi down) still count
+// as due.
+inline bool isStatusPublishDue(uint32_t nowMs, uint32_t lastMs, uint32_t intervalMs) {
+    const uint32_t ahead = lastMs - nowMs;
+    if (ahead != 0 && ahead < intervalMs) {
+        return false;
+    }
+    return (uint32_t)(nowMs - lastMs) >= intervalMs;
+}
+
 // JSON string-escapes `in` into `out` (no surrounding quotes): `"` and `\`
 // are backslash-escaped, control characters become \u00XX, other bytes are
 // copied. Returns false (out = "") if it does not fit in outSize.
