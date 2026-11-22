@@ -1,4 +1,5 @@
 using ResourceMonitorDaemon;
+using ResourceMonitorDaemon.Tests;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -13,7 +14,7 @@ var tests = new (string Name, Action Run)[]
         AssertEqual("0.0", MetricPayloadFormatter.FormatPercentPayload(-0.1));
         AssertEqual("100.0", MetricPayloadFormatter.FormatPercentPayload(100.1));
     }),
-};
+}.Concat(ProvisioningTests.All);
 
 var failed = 0;
 
