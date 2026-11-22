@@ -119,7 +119,7 @@ namespace ResourceMonitorDaemon.Observability
         // A profile folder in an absolute drive (C:\Users\name) or UNC (\\server\Users\name) path. The
         // name may contain spaces and runs up to the next path separator, a character that cannot be
         // in a file name (: * ? " < > |), one of ' ( ) , ; or the end of the line. A name that itself
-        // contains ' ( ) , or ; is therefore only partly replaced (documented in the README).
+        // contains ' ( ) , or ; is therefore only partly replaced (documented in docs/loki.md).
         private static readonly Regex ProfileFolder = new(
             @"(?<prefix>(?:(?<![\p{L}\p{N}_])[A-Za-z]:|\\\\[^\\/\s:*?""<>|]+)[\\/]Users[\\/])(?<name>[^\\/:*?""<>|'(),;\r\n]+)",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline,
