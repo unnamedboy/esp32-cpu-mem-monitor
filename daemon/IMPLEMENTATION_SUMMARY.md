@@ -67,6 +67,10 @@ current connection and reconnects. A single save can raise several watcher
 reloads; identical settings are ignored and identical sanitize warnings are
 logged only once.
 
+`Ui:Language` (section `Ui`) selects the UI language: `auto` (default, follows
+the Windows display language), `en` or `zh-Hans`; env override
+`RESMON_Ui__Language`. See "Localization (i18n)".
+
 ### Settings API for other features (pairing wizard)
 
 The user file is a patch (`UserDeviceSettingsPatch`, every property nullable;
@@ -100,6 +104,14 @@ settingsStore.Update(patch => patch.FallbackAddress = "192.168.1.50");
   which touches only fields the user changed (edited ≠ displayed), skips
   env-overridden fields, and clears values equal to
   `DaemonConfiguration.LoadLowerLayers(...)` (defaults + `appsettings.json`).
+- `IUiSettingsStore` (also implemented by `UserSettingsStore`, registered in DI)
+  owns the `Ui` section the same way: `LoadUiLanguage()` returns the value set in
+  the user file or null, and `UpdateUiLanguage(value)` writes `Ui:Language`
+  (`null` removes it; anything but `auto`/`en`/`zh-Hans` throws
+  `ArgumentException`). The settings dialog stores a changed choice through
+  `UiLanguage.ValueToStore(selected, lowerLayers)`, which removes the key when the
+  choice equals `DaemonConfiguration.LoadLowerUiLanguage(...)`. `ISettingsStore`
+  and the device patch API are unchanged.
 
 ### Connection Handling
 
@@ -234,9 +246,10 @@ settings or environment; the repository and `appsettings.json` hold none of it.
 - **Diagnostics**: one startup line, logged after all services have started:
   `Observability: Loki enabled|disabled; url host=<host[:port]>, auth=<mode>, token configured=yes|no.`
   Settings changes are logged with the same host-only description.
-- **UI**: the tray item "可观测性 (Observability)…" opens `ObservabilityForm`; see Tray Controls.
-  All user-visible texts of the dialog and its tray entry are in `ObservabilityText`, ready to move
-  to resources.
+- **UI**: the tray item "Observability… (可观测性…)" opens `ObservabilityForm`; see Tray Controls.
+  Its texts are `Observability_*` resources (see "Localization (i18n)"). The Test result shows
+  the HTTP status and the server's reason/body as received; the daemon's own details (timeout,
+  invalid URL) come from `LokiPushResult.LocalizedDetail`, while `Detail` stays English for the log.
 
 Privacy notes:
 
@@ -273,36 +286,42 @@ Privacy notes:
   e.g. `RESMON_Logging__LogLevel__Default=Debug` enables per-sample lines.
 - Startup diagnostics (logged once): informational version/build id, .NET
   runtime, settings sources with file paths and the names of `RESMON_*`
-  overrides, effective settings, log path, working set/managed heap, and MQTT state.
-  Connection state changes are logged as they happen. No secrets are logged.
+  overrides, effective settings, log path, working set/managed heap, and MQTT state,
+  plus the UI language line `UI language: <culture> (Ui:Language=<value>, Windows
+  display language <culture>).` Connection state changes are logged as they happen.
+  No secrets are logged. Log messages are always English, whatever the UI language.
 
 ### Tray Controls
 
+- Menu texts follow the UI language and switch live when `Ui:Language` changes.
 - Pause/resume sending (label refreshes once per second).
-- "⚙ 设置 (Settings)…" opens a dialog for Host, Port, CpuTopic, MemTopic and
-  SampleIntervalMs with validation. Fields overridden by `RESMON_Device__*`
+- "⚙ Settings… (设置…)" opens a dialog for Host, Port, CpuTopic, MemTopic,
+  SampleIntervalMs and the UI language, with validation. Fields overridden by `RESMON_Device__*`
   environment variables are shown read-only with "(env)" and are never saved.
   Save writes only fields the user changed in the dialog, removes a changed value
   that equals defaults + `appsettings.json`, and leaves all other user-file fields
   (e.g. FallbackAddress) untouched; the change is
   applied live, and the confirmation balloon names any field still overridden by
-  an environment variable.
-- "配对设备 (Pair device)…" opens the pairing wizard (one instance at a time; see
+  an environment variable. The Language drop-down lists "Automatic (system)" and
+  each language in its own name ("English", "简体中文"); it is read-only when
+  `RESMON_Ui__Language` is set. A changed language is applied when the dialog
+  closes, so the menu and the confirmation balloon already use it.
+- "Pair device… (配对设备…)" opens the pairing wizard (one instance at a time; see
   "Pairing wizard"). On the first connection failure of an unconfigured PC, the
   failure balloon is shown once as a "click to pair" balloon instead. It keeps
-  the "MQTT connection failed" title, says the device cannot be reached and "未找到设备，点击进行配对
-  (No device found — click to pair)", and clicking it opens the wizard.
+  the "MQTT connection failed" title, says the device cannot be reached and "No device found —
+  click to pair" (未找到设备，点击进行配对), and clicking it opens the wizard.
 - Pause/resume confirmations use the same balloon helper, so clicking them never
   opens the wizard.
-- "查看日志 (Log)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
-- "可观测性 (Observability)…" opens `ObservabilityForm` for the optional Loki sink.
+- "View log (查看日志)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
+- "Observability… (可观测性…)" opens `ObservabilityForm` for the optional Loki sink.
   - Fields: Enabled, Url, AuthMode, Username, Token, TenantId, IncludeHostLabel and
     MetricsIntervalSeconds.
   - It uses the same only-changed-fields and env read-only rules as the settings dialog.
   - The token box is masked and never shows a stored token. An empty box keeps the saved token,
-    with the placeholder "已保存 (saved)". Typing replaces the token, which is stored
-    DPAPI-encrypted. "清除 (Clear)" removes it.
-  - "测试连接 (Test)" pushes one line using the values in the dialog and shows the HTTP result.
+    with the placeholder "(saved)". Typing replaces the token, which is stored
+    DPAPI-encrypted. "Clear" removes it.
+  - "Test" pushes one line using the values in the dialog and shows the HTTP result.
   - Before saving or testing credentials for a plain-`http` URL, the dialog asks for confirmation.
   - The dialog is modeless; Cancel closes it without saving, and Exit closes it.
 - Exit hides the icon and disables the menu immediately (re-entry guarded) and ends
@@ -311,7 +330,88 @@ Privacy notes:
   idempotent.
 - The settings dialog is modeless; Cancel and Esc close it without saving.
 - If the host fails to start, the tray icon is removed, the error is logged and
-  shown in a message box, and the process exits.
+  shown in a message box (in the UI language, with the exception text as detail),
+  and the process exits.
+
+## Localization (i18n)
+
+The UI is available in English (neutral language) and Simplified Chinese
+(`zh-Hans`). Logs are not localized.
+
+- **Resources**: `Resources/Strings.resx` (English) and `Resources/Strings.zh-Hans.resx`.
+  The SDK builds the translation into the satellite assembly
+  `zh-Hans/ResourceMonitorDaemon.resources.dll` next to the exe; `<NeutralLanguage>en</NeutralLanguage>`
+  in the project marks English as the built-in neutral language. No extra packages.
+- **Access**: `Localization/Strings.cs` is a small hand-written class over a
+  `ResourceManager` (base name `ResourceMonitorDaemon.Resources.Strings`), one
+  member per key: a property for plain text, a method for a format string whose
+  parameters fill `{0}`, `{1}`, … in order (`Strings.Pairing_StepSaved(address)`).
+  The English resx `<comment>` names each placeholder. Keys are grouped by prefix:
+  `Common_`, `Tray_`, `Settings_`, `Observability_`, `Pairing_`, `Provisioning_`.
+  Format strings are formatted with `string.Format(Strings.Culture, …)`.
+- **Culture**: `UiLanguage` resolves `Ui:Language` (`auto` | `en` | `zh-Hans`,
+  case-insensitive; anything else → `auto` plus a logged warning). `auto` maps
+  any Simplified Chinese Windows display language (`zh-Hans`, `zh-CN`, `zh-SG`,
+  `zh-Hans-*`, bare `zh`) to `zh-Hans` and everything else, including Traditional
+  Chinese, to English. `UiCulture.Apply` sets only `Strings.Culture`; the thread
+  cultures are never changed, so number formatting elsewhere (and the invariant
+  MQTT payloads of `MetricPayloadFormatter`) is unaffected.
+- **Live changes**: `UiLanguageMonitor` (DI singleton) applies the setting in
+  `Program.Main` right after the host is built, before any UI text exists, logs the
+  start-up language, and re-applies it on every configuration reload (user file
+  saved, no restart). `UiCulture.Changed` makes the tray re-read its menu texts.
+  Balloons and dialogs read their texts when they are shown; an open dialog keeps
+  the labels it was created with, and messages it shows later use the then-current
+  language.
+- **Logs stay English**: log messages, `daemon.log`, the Loki sink and exception
+  messages are never localized, so LogQL queries and searches stay stable. Where a
+  message is both logged and shown, the code carries a key, not a sentence:
+  - validation rules return a `UiMessage` (key + arguments). `UiMessage.English`
+    resolves the neutral resource with the invariant culture for logs, sanitize
+    warnings and `ArgumentException`s; `UiMessage.Localized` is shown in dialogs.
+    The existing string APIs (`DeviceSettingsValidator.ValidateHost`, `Validate`,
+    `LokiSettingsValidator.Validate`, `LokiUrl.Validate`, …) still return the
+    English text; dialogs call the `*Problem`/`Problems` variants;
+  - provisioning exceptions keep English messages (logged by the wizard).
+    `PairingOutcomePresenter` maps them by type and code: `ProvisioningTransportError`,
+    `PairingCodeRejectionReason`, `ProvisioningRetryRejectedException.PreviousAttemptFailed`,
+    and the `ArgumentException.ParamName` (`ssid`, `passphrase`, `pop`). The
+    exception message is not shown;
+  - Loki push results: `Detail` (English) is logged; `LocalizedDetail` is shown for
+    the daemon's own texts.
+- **Not translated**: the product name, the example Loki URLs, enum values such as
+  the auth modes `None`/`Basic`/`Bearer`, configuration key names inside messages
+  (`CpuTopic`, `FallbackAddress`), server responses and .NET exception texts shown as
+  detail (for example the start-up failure). The OK/Yes/No buttons of message
+  boxes are drawn by Windows in the Windows display language.
+- **Tests** (`LocalizationTests.cs`): same keys in both files and no empty values;
+  `Strings` has exactly one member per key with one parameter per placeholder;
+  identical placeholder sets per key; English texts without CJK and Chinese texts
+  without bilingual "中文 (English)" labels; culture resolution; the satellite
+  assembly is built and loaded; `UiMessage` English vs. localized; invariant
+  `MetricPayloadFormatter` output under zh-Hans and de-DE; the `Ui` section of the
+  store; `UiLanguageMonitor` reloads; and a source scan that fails on any CJK
+  character or bilingual label in `daemon/ResourceMonitorDaemon/**/*.cs` outside
+  `Resources/` (lines marked `i18n-allow`, such as the `netsh` labels in
+  `CurrentWifiNetwork`, are exempt).
+
+To add a language (for example `zh-Hant`):
+
+1. Copy `Resources/Strings.zh-Hans.resx` to `Resources/Strings.<culture>.resx` and
+   translate every value. Keep the placeholders `{0}`, `{1}`, … of each key, and
+   keep technical tokens such as `RESMON_…`, `(env)` and serial log lines.
+2. Add the value to `UiLanguage` (a constant, `Values`, a `CultureInfo` property,
+   `Resolve`, and the `ForSystem` mapping for `auto`), and an entry with the
+   language's own name to the drop-down in `SettingsForm` (a `Settings_Language…`
+   key whose value is the same in every file).
+3. Extend `LocalizationTests` (key parity and placeholders for the new file, a
+   resolution case) and check the dialogs for clipping in the new language.
+4. Build: the SDK produces `<culture>/ResourceMonitorDaemon.resources.dll`
+   automatically.
+
+To add a text, add the key to `Strings.resx` (with a placeholder comment) and to
+every translation, then add the matching member to `Strings.cs`; the tests fail
+until all three agree.
 
 ## Project Structure
 
@@ -337,9 +437,13 @@ Privacy notes:
   - `ObservabilityService`: hosted service and DI registration.
   - `ObservabilityForm`: the dialog.
 - `SettingsForm.cs`, `TrayContext.cs`: Windows tray menu and settings dialog.
+- `Localization/`: `Strings` (typed resource access), `UiLanguage` (setting and
+  culture resolution), `UiCulture` / `UiLanguageMonitor` (current UI culture,
+  live changes), `UiMessage` (English-for-logs / localized-for-UI messages).
+- `Resources/`: `Strings.resx` (English) and `Strings.zh-Hans.resx`.
 - `Provisioning/`: BLE Wi-Fi provisioning client library (see "Provisioning client" below).
 - `Pairing/`: pairing wizard form, `PairingOutcomePresenter` (pure decisions and messages),
-  `PairingText` (fixed UI texts), `BrokerProbe`, `CurrentWifiNetwork` (SSID prefill and
+  `BrokerProbe`, `CurrentWifiNetwork` (SSID prefill and
   2.4 GHz hint) and `FirstRunPairingPrompt` (see "Pairing wizard").
 - `ResourceMonitorDaemon.Tests`: zero-dependency test runner.
 
@@ -507,15 +611,15 @@ a physical ESP32 yet. In particular:
 ## Pairing wizard
 
 Namespace `ResourceMonitorDaemon.Pairing`. A WinForms dialog
-(`PairingWizardForm`), "配对设备 (Pair device)", on top of `ProvisioningService`.
+(`PairingWizardForm`), "Pair device (配对设备)", on top of `ProvisioningService`.
 It has two columns so it still fits a 1080p screen at 150 % scaling. All work
 runs on the UI thread with async/await, so the UI never blocks.
 
 | Section | Behaviour |
 | --- | --- |
 | 1. Device | Starts a 5 s BLE scan when the wizard opens and lists `PROV_RESMON_*` devices live, with signal strength. A Rescan button repeats it. If exactly one device is found, it is selected. Bluetooth off or missing gives a clear message (`ProvisioningTransportException.Error`). |
-| 2. Pairing code | Selecting a device starts `TryReadPopFromUsbAsync(name)` in the background. If found, the code is filled in masked: "已通过 USB 自动读取配对码 (read automatically over USB)". The user can switch to "手动输入 (Enter manually)" and back. Typed codes are normalized with `PairingCode.TryNormalize`. A hint names the serial log line `Provisioning: name=... pop=...` at 115200 baud. |
-| 3. Wi-Fi | SSID and password, with a masked password box and a show/hide checkbox. A note says the ESP32 supports 2.4 GHz only. Nothing is read when the wizard opens. The link "使用本机当前 Wi-Fi (Use this PC's Wi-Fi)" next to the SSID box runs the lookup on click, off the UI thread. Reading the connected SSID can make Windows 11 show its one-time "allow location access" prompt (Microsoft Learn: "Changes to API behavior for Wi-Fi access and location"), so it is never done automatically. The SSID is filled in when WinRT (`NetworkInformation` → `WlanConnectionProfileDetails.GetConnectedSsid()`) reports exactly one connected Wi-Fi network; there is no code-page conversion and no process to start. If nothing can be read, the note asks the user to type the name (not connected, or location access not granted). The optional 2.4 GHz warning is computed on the same click from `netsh wlan show interfaces`. Its output is decoded with the system OEM code page (`GetOEMCP`, e.g. 936 on Chinese Windows) and read from the "Band" line, or from the channel number (> 14 means 5 GHz) when there is no band line. English and Chinese labels are recognized; otherwise the band is unknown and no warning is shown. Everything here is best effort: nothing is installed, no admin is needed, and any failure just leaves the field empty. Input is validated with `PairingCode` and `WifiConfigClient.ValidateCredentials` before any Bluetooth traffic. |
+| 2. Pairing code | Selecting a device starts `TryReadPopFromUsbAsync(name)` in the background. If found, the code is filled in masked: "Read automatically over USB." (已通过 USB 自动读取配对码。). The user can switch to "Enter manually" (手动输入) and back. Typed codes are normalized with `PairingCode.TryNormalize`. A hint names the serial log line `Provisioning: name=... pop=...` at 115200 baud. |
+| 3. Wi-Fi | SSID and password, with a masked password box and a show/hide checkbox. A note says the ESP32 supports 2.4 GHz only. Nothing is read when the wizard opens. The link "Use this PC's Wi-Fi" (使用本机当前 Wi-Fi) next to the SSID box runs the lookup on click, off the UI thread. Reading the connected SSID can make Windows 11 show its one-time "allow location access" prompt (Microsoft Learn: "Changes to API behavior for Wi-Fi access and location"), so it is never done automatically. The SSID is filled in when WinRT (`NetworkInformation` → `WlanConnectionProfileDetails.GetConnectedSsid()`) reports exactly one connected Wi-Fi network; there is no code-page conversion and no process to start. If nothing can be read, the note asks the user to type the name (not connected, or location access not granted). The optional 2.4 GHz warning is computed on the same click from `netsh wlan show interfaces`. Its output is decoded with the system OEM code page (`GetOEMCP`, e.g. 936 on Chinese Windows) and read from the "Band" line, or from the channel number (> 14 means 5 GHz) when there is no band line. English and Chinese labels are recognized; otherwise the band is unknown and no warning is shown. Everything here is best effort: nothing is installed, no admin is needed, and any failure just leaves the field empty. Input is validated with `PairingCode` and `WifiConfigClient.ValidateCredentials` before any Bluetooth traffic. |
 | 4. Pair | `ProvisionAsync` with step progress (connect, secure session, send settings, wait for Wi-Fi), followed by "save address" and "daemon connects". Cancel cancels the attempt. Closing the wizard cancels the scan, USB query, attempt and checks, and `ProvisionAsync` then disposes the BLE connection. |
 
 Results (`PairingOutcomePresenter`, pure and unit-tested):
@@ -524,14 +628,15 @@ Results (`PairingOutcomePresenter`, pure and unit-tested):
 | --- | --- |
 | `Connected(ip)` with a usable unicast IPv4 | Success. `ISettingsStore.Update(p => p.FallbackAddress = ip)` is called, and nothing else is changed. |
 | `Connected(null)`, or an unusable address (0.0.0.0, broadcast, loopback, multicast, 169.254/16) | Success, but nothing is saved; the daemon keeps using `Host` (resmon.local). |
-| `Failed(AuthError)` | "Wi-Fi 密码错误"; focus moves to the password box. |
-| `Failed(NetworkNotFound)` | "找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）"; focus moves to the SSID box. |
+| `Failed(AuthError)` | "Wrong Wi-Fi password" (Wi-Fi 密码错误); focus moves to the password box. |
+| `Failed(NetworkNotFound)` | "Wi-Fi network not found (the ESP32 supports 2.4 GHz only)" (找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）); focus moves to the SSID box. |
 | `Timeout` | No result within 30 s: check the SSID, password and 2.4 GHz support, then retry. A retry detects a device that joined Wi-Fi late. |
 | `ConnectionLost` | `BrokerProbe` tries for up to 15 s, about once per second: a daemon MQTT connection made *after the attempt started*, or a TCP connect to the configured `Host:Port`. If that works, it is a success, with no address saved. Otherwise a failure with "rescan, or power-cycle / hold BOOT 5–15 s". |
-| `PairingCodeRejectedException` | "配对码错误"; focus moves to the code box. |
-| `ProvisioningRetryRejectedException` | Chinese restart/BOOT instruction plus the library message, which already contains `ReprovisionInstruction`. |
-| `ProvisioningTransportException` | Specific text per `Error` kind (Bluetooth off or unavailable, device gone, disconnected, timeout, not a provisioning device). |
-| `ArgumentException` | Field-specific invalid-input message; the parameter suffix is removed and values are never echoed. |
+| `PairingCodeRejectedException` | "Wrong pairing code" (配对码错误), or "could not be verified" for `VerificationMismatch`; focus moves to the code box. |
+| `ProvisioningRetryRejectedException` | Restart/BOOT instruction (`Pairing_ReprovisionInstruction`), worded by `PreviousAttemptFailed`. The English library message is only logged. |
+| `ProvisioningTransportException` | Specific text per `Error` kind (Bluetooth off or unavailable, device gone, disconnected, timeout, not a provisioning device, GATT error). The English message is only logged. |
+| `ProvisioningProtocolException` | "Unexpected answer from the device; rescan" (details in the log). |
+| `ArgumentException` | Field-specific invalid-input message chosen by `ParamName`; values are never echoed. |
 | Anything else | Generic "see the log" message. The exception is logged as an error. |
 
 After a save, the configuration file watcher applies the new
@@ -546,7 +651,7 @@ its broker did not restart. If in addition the effective `FallbackAddress` did
 not change (same address, or no IP reported), the daemon has no reason to
 reconnect. In that case an existing connection counts
 (`PairingOutcomePresenter.RequiresNewDaemonConnection`). It then shows
-**"已连接，正在发送数据 (connected, publishing)"**. Otherwise it reports that sending
+**"Connected, publishing"** (已连接，正在发送数据). Otherwise it reports that sending
 is paused or that the daemon keeps retrying. If
 `RESMON_Device__FallbackAddress` overrides the saved value, the wizard says so.
 
@@ -573,9 +678,9 @@ requested, so if Windows suppresses it (Focus Assist, notifications off), the pr
 is not repeated; the tray menu entry always works. Delete that file to see the
 prompt again. No window opens on its own at login.
 
-User-visible texts: fixed wizard and tray-prompt texts are in `PairingText`;
-outcome-dependent messages are built in `PairingOutcomePresenter`. Both are
-ready to move to resources for localization.
+User-visible texts: fixed wizard and tray-prompt texts are `Pairing_*` resources;
+outcome-dependent messages are built in `PairingOutcomePresenter` from `Pairing_*`
+and `Provisioning_*` resources (see "Localization (i18n)").
 
 ## Tests
 
@@ -595,6 +700,9 @@ The C# test runner covers:
 - `ReconnectBackoff` doubling, cap, reset, flapping broker, stable-connection reset,
   30 s stability cap and state preserved across `Reconfigure`;
 - `StatusTopic` default, validation and collision handling.
+- localization (`LocalizationTests.cs`; see "Localization (i18n)"). The runner
+  sets the UI language to English first, so other tests assert English texts;
+  pairing tests add zh-Hans spot checks.
 - Loki sink:
   - push payload shape, labels and ns timestamps strictly increasing per stream, also across
     threads;
@@ -626,8 +734,9 @@ The C# test runner covers:
   and `BrokerProbe` against a loopback listener and a closed port. The
   `MqttConnection` scenario also checks that `ConnectionGeneration` advances on
   every (re)connect. The form itself
-  is not unit-tested. Its layout was checked by rendering it with `DrawToBitmap`
-  at 100 % and at a simulated 150 %.
+  is not unit-tested. Its layout, and that of the settings and Observability
+  dialogs, was checked in English and Simplified Chinese by rendering them with
+  `DrawToBitmap` at 100 % and at a simulated 150 %.
 
 Run it with:
 
@@ -665,6 +774,9 @@ dotnet .tmpbuild\ResourceMonitorDaemon.Tests.dll
   (see "Pairing wizard").
 - The wizard does not set a device name or the MQTT port and topics. The BLE
   contract only carries the SSID and password.
+- Only English and Simplified Chinese exist; Traditional Chinese Windows uses
+  English. A dialog that is open while the language changes keeps its labels, and
+  message boxes show Windows' own OK/Yes/No buttons in the Windows display language.
 - Comments in a hand-edited `settings.json` are not preserved when the file is
   saved from the dialog or wizard.
 - Wi-Fi credentials must not be stored in daemon settings, source code or logs.

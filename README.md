@@ -89,7 +89,7 @@ The daemon reads non-secret settings from these sources, lowest to highest prior
 
 1. built-in defaults;
 2. `appsettings.json` next to `ResourceMonitorDaemon.exe` (shipped defaults);
-3. `%LocalAppData%\ResourceMonitorDaemon\settings.json` (per-user; written by the tray **⚙ 设置 (Settings)…** dialog and, for `FallbackAddress`, the pairing wizard);
+3. `%LocalAppData%\ResourceMonitorDaemon\settings.json` (per-user; written by the tray **⚙ Settings… (设置…)** dialog and, for `FallbackAddress`, the pairing wizard);
 4. environment variables with the `RESMON_` prefix (`__` separates sections).
 
 The user settings file contains only the values you set there; anything not listed keeps coming from `appsettings.json` or the defaults. Example:
@@ -124,27 +124,41 @@ The daemon never stores Wi-Fi credentials.
 The log is written to `%LocalAppData%\ResourceMonitorDaemon\daemon.log` (rolled to `daemon.log.1` at 5 MB) and can be opened from the tray menu.
 See [daemon/IMPLEMENTATION_SUMMARY.md](daemon/IMPLEMENTATION_SUMMARY.md) for all settings, validation rules and the settings API.
 
+### Language
+
+The tray menu, notifications and dialogs are available in English and Simplified Chinese (简体中文). The setting `Ui:Language` chooses the language:
+
+| Value | Language |
+| --- | --- |
+| `auto` (default) | Follows the Windows display language: Simplified Chinese for `zh-Hans`, `zh-CN` and `zh-SG`, English for everything else (Traditional Chinese has no translation yet and also uses English). |
+| `en` | English |
+| `zh-Hans` | Simplified Chinese |
+
+Change it with the **Language** drop-down in the tray **⚙ Settings…** dialog. It saves `"Ui": { "Language": "zh-Hans" }` in the user settings file; choosing the value that `appsettings.json` already sets (normally `auto`) removes the entry again. To force a language without touching the file, set `RESMON_Ui__Language` (for example `$env:RESMON_Ui__Language = "en"`); the drop-down is then read-only. An invalid value falls back to `auto` with a warning in the log.
+
+The tray menu switches as soon as the setting changes; notifications and windows opened afterwards use the new language. A dialog that is already open keeps its labels. The log (`daemon.log` and the optional Loki sink) is always in English, so searches and LogQL queries do not depend on the UI language. Windows itself draws the Yes/No/OK buttons of message boxes in the Windows display language.
+
 ### Pairing a device (Wi-Fi setup over Bluetooth)
 
-The tray's **配对设备 (Pair device)…** wizard sends your Wi-Fi name and password to the ESP32 over an encrypted Bluetooth LE session. The session is protected by the device's 8-character pairing code. You need a PC with Bluetooth LE and firmware that implements the pairing contract (`PROVISIONING.md` on the firmware branch).
+The tray's **Pair device… (配对设备…)** wizard sends your Wi-Fi name and password to the ESP32 over an encrypted Bluetooth LE session. The session is protected by the device's 8-character pairing code. You need a PC with Bluetooth LE and firmware that implements the pairing contract (`PROVISIONING.md` on the firmware branch).
 
 > Status: the wizard and the Bluetooth client are implemented and unit-tested, but they have **not yet been tested with a physical ESP32**.
 
 1. **Put the device in pairing mode.** A device without Wi-Fi settings enters pairing mode on its own at start-up. To pair a device that is already configured, hold its **BOOT** button for 5–15 seconds, then release it. Holds longer than 15 s are ignored.
-2. **Open the wizard.** Right-click the tray icon and choose **配对设备 (Pair device)…**. On the first start of a PC that has never connected to a device, the daemon shows its first "MQTT connection failed" notification once as **无法连接设备。未找到设备，点击进行配对 (Cannot reach the device. No device found — click to pair)**. Click it while it is on screen. The wizard never opens by itself.
-3. **Select the device.** The wizard scans for 5 seconds and lists devices named `PROV_RESMON_XXXXXX` with their signal strength. If exactly one device is found, it is selected for you. Use **重新扫描 (Rescan)** if the device was not in pairing mode yet. If Bluetooth is off, the wizard says so; turn it on in Windows Settings and rescan.
-4. **Pairing code.** If the device is connected to this PC by USB, the wizard reads the code automatically and shows **已通过 USB 自动读取配对码 (read automatically over USB)**, with the code masked. Close any serial monitor first, because a COM port can only be open in one program. Otherwise, type the code. It is printed in the device's serial log at 115200 baud, in a line like `Provisioning: name=PROV_RESMON_XXXXXX pop=ABCDEFGH`. Codes use letters and the digits 2–9 (no 0, O, 1 or I), and case, spaces and dashes are ignored.
-5. **Wi-Fi.** Enter the network name (SSID) and password. To copy the network this PC is connected to, click **使用本机当前 Wi-Fi (Use this PC's Wi-Fi)**. The first time, Windows 11 may ask whether apps may use your location, because Windows treats Wi-Fi details as location data. If you decline, type the name instead. The ESP32 supports **2.4 GHz only**. If your PC is connected on 5 GHz, the wizard warns you; make sure the router also offers the network on 2.4 GHz.
-6. **Click 开始配对 (Pair).** The wizard shows each step: connect, secure session, send Wi-Fi settings, wait for Wi-Fi. **取消 (Cancel)** stops the attempt, and closing the wizard cancels everything.
-7. **Done.** When the device reports its IP address, the wizard saves it as `FallbackAddress` in `%LocalAppData%\ResourceMonitorDaemon\settings.json`; no other setting is changed. The daemon then reconnects without a restart. The wizard finishes with **已连接，正在发送数据 (connected, publishing)** once metrics are being sent.
+2. **Open the wizard.** Right-click the tray icon and choose **Pair device… (配对设备…)**. On the first start of a PC that has never connected to a device, the daemon shows its first "MQTT connection failed" notification once as **Cannot reach the device. No device found — click to pair.** (无法连接设备。未找到设备，点击进行配对。). Click it while it is on screen. The wizard never opens by itself.
+3. **Select the device.** The wizard scans for 5 seconds and lists devices named `PROV_RESMON_XXXXXX` with their signal strength. If exactly one device is found, it is selected for you. Use **Rescan (重新扫描)** if the device was not in pairing mode yet. If Bluetooth is off, the wizard says so; turn it on in Windows Settings and rescan.
+4. **Pairing code.** If the device is connected to this PC by USB, the wizard reads the code automatically and shows **Read automatically over USB.** (已通过 USB 自动读取配对码。), with the code masked. Close any serial monitor first, because a COM port can only be open in one program. Otherwise, type the code. It is printed in the device's serial log at 115200 baud, in a line like `Provisioning: name=PROV_RESMON_XXXXXX pop=ABCDEFGH`. Codes use letters and the digits 2–9 (no 0, O, 1 or I), and case, spaces and dashes are ignored.
+5. **Wi-Fi.** Enter the network name (SSID) and password. To copy the network this PC is connected to, click **Use this PC's Wi-Fi (使用本机当前 Wi-Fi)**. The first time, Windows 11 may ask whether apps may use your location, because Windows treats Wi-Fi details as location data. If you decline, type the name instead. The ESP32 supports **2.4 GHz only**. If your PC is connected on 5 GHz, the wizard warns you; make sure the router also offers the network on 2.4 GHz.
+6. **Click Pair (开始配对).** The wizard shows each step: connect, secure session, send Wi-Fi settings, wait for Wi-Fi. **Cancel (取消)** stops the attempt, and closing the wizard cancels everything.
+7. **Done.** When the device reports its IP address, the wizard saves it as `FallbackAddress` in `%LocalAppData%\ResourceMonitorDaemon\settings.json`; no other setting is changed. The daemon then reconnects without a restart. The wizard finishes with **Connected, publishing** (已连接，正在发送数据) once metrics are being sent.
 
 The Wi-Fi password is used only for that attempt. The password box is cleared afterwards, and the password is never written to disk or to the log. If an attempt fails, the wizard tells you what to fix:
 
 | Message | What to do |
 | --- | --- |
-| Wi-Fi 密码错误 (wrong Wi-Fi password) | Re-enter the password and try again. |
-| 找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz） (network not found) | Check the SSID and that the router offers 2.4 GHz. |
-| 配对码错误 (pairing code rejected) | Check the code in the serial log and try again. |
+| Wrong Wi-Fi password (Wi-Fi 密码错误) | Re-enter the password and try again. |
+| Wi-Fi network not found (找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）) | Check the SSID and that the router offers 2.4 GHz. |
+| Wrong pairing code (配对码错误) | Check the code in the serial log and try again. |
 | No result within 30 s | Check the SSID, password and 2.4 GHz, then try again. A retry also detects a device that joined Wi-Fi late. |
 | Lost the Bluetooth link | The wizard checks `resmon.local` for 15 s first. If the device is unreachable, rescan, or power-cycle the device or hold BOOT for 5–15 s, then pair again. |
 | The device did not accept another attempt | Power-cycle the device or hold BOOT for 5–15 s and release, then rescan and pair. |
@@ -156,12 +170,12 @@ The daemon can push its own log, a metrics line and the ESP32 status (`resmon/st
 1. Get a Loki push endpoint:
    - **Grafana Cloud**: in your stack's Loki details, use the URL (for example `https://logs-prod-xxx.grafana.net`), the numeric **user/instance ID** as Username, and an access-policy token with the `logs:write` scope. Use AuthMode `Basic`.
    - **Self-hosted Loki**: for example `http://loki:3100`, usually AuthMode `None`. Set TenantId only if multi-tenancy is enabled (sent as `X-Scope-OrgID`). If you use credentials, use `https`; the dialog warns before it saves credentials for a plain-`http` URL.
-2. Open the tray menu **可观测性 (Observability)…**, tick **Enabled**, and fill in Url, Auth mode, Username and Token. Then click **测试连接 (Test)**. It pushes one test line and shows the HTTP result, for example `HTTP 204 No Content`.
-3. Click **保存 (Save)**. The change takes effect immediately, without a restart. Disabling the sink stops collection and discards anything still queued.
+2. Open the tray menu **Observability… (可观测性…)**, tick **Enabled**, and fill in Url, Auth mode, Username and Token. Then click **Test (测试连接)**. It pushes one test line and shows the HTTP result, for example `HTTP 204 No Content`.
+3. Click **Save (保存)**. The change takes effect immediately, without a restart. Disabling the sink stops collection and discards anything still queued.
 
 `/loki/api/v1/push` is appended to the Url only when it has no path, so a full push URL or a reverse-proxy path also works.
 
-The token is saved only as Windows DPAPI ciphertext (`TokenProtected`, current Windows user only) in `%LocalAppData%\ResourceMonitorDaemon\settings.json`. Leaving the token box empty keeps the saved token, and **清除 (Clear)** removes it. For automation, set `RESMON_Observability__Loki__Token`. That variable takes precedence and is never written to disk. A plain `Token` key in a JSON file is ignored with a warning. The daemon never logs the token, the `Authorization` header or the URL path. Its startup line shows only whether Loki is enabled, the URL host, the auth mode and whether a token is configured.
+The token is saved only as Windows DPAPI ciphertext (`TokenProtected`, current Windows user only) in `%LocalAppData%\ResourceMonitorDaemon\settings.json`. Leaving the token box empty keeps the saved token, and **Clear (清除)** removes it. For automation, set `RESMON_Observability__Loki__Token`. That variable takes precedence and is never written to disk. A plain `Token` key in a JSON file is ignored with a warning. The daemon never logs the token, the `Authorization` header or the URL path. Its startup line shows only whether Loki is enabled, the URL host, the auth mode and whether a token is configured.
 
 Settings (section `Observability:Loki`; environment form `RESMON_Observability__Loki__<Name>`):
 
