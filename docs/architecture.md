@@ -26,7 +26,8 @@ channels, output scaling or gauge behaviour.
 
 **The firmware** owns everything physical: it maps percentages to DAC codes, clamps
 them, and decides what the gauges show when data stops arriving. It does not depend on
-the daemon to reach a safe state: a stale metric falls to zero on its own after 5 s.
+the daemon to reach a safe state: a stale metric starts falling after 5 s and reaches zero within about
+13 s.
 
 ## Design decisions
 
@@ -35,8 +36,10 @@ the daemon to reach a safe state: a stale metric falls to zero on its own after 
   wizard also saves its IP address as a fallback for networks where mDNS is unreliable.
 - **Plain MQTT on a trusted LAN.** QoS 0, nothing retained, no authentication or TLS.
   The latest value is all that matters, and losing a sample is harmless. Anything on
-  the LAN can publish to the gauges or subscribe to the status, which is why the status
-  payload carries no network identifiers and the daemon rate-limits what it forwards.
+  the LAN can publish to the gauges, or subscribe to `resmon/cpu` and `resmon/mem` and
+  so see when the PC is busy or idle. It can also read the status, which is why the
+  status payload carries no network identifiers and the daemon rate-limits what it
+  forwards.
 - **Minimal payloads.** A metric is a bare decimal string, and the topic says which
   metric it is. This keeps the firmware parser trivial and easy to test.
 - **Credentials belong to the device.** Wi-Fi credentials go from the wizard to the

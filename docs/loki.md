@@ -26,8 +26,9 @@ before it saves or tests credentials for a plain `http` URL.
 ### The token
 
 The token is saved only as Windows DPAPI ciphertext (`TokenProtected` in
-`%LocalAppData%\ResourceMonitorDaemon\settings.json`). Only the same Windows user on the
-same PC can decrypt it, which includes any program running as that user. Leaving the
+`%LocalAppData%\ResourceMonitorDaemon\settings.json`). Only the same Windows user account can
+decrypt it (with a roaming or domain profile that can include other PCs), which
+includes any program running as that user. Leaving the
 token box empty keeps the saved token; **Clear** removes it. For automation, set
 `RESMON_Observability__Loki__Token` instead (read at startup, like all
 [environment variables](../README.md#configuration)): it takes precedence and is never
@@ -82,7 +83,8 @@ URL. Log lines are redacted first:
   name is a common word such as `admin`, that word is replaced in ordinary text too.
   Names shorter than 3 characters are not replaced in free text (that would mangle
   ordinary words), but paths containing them are still covered by the folder rules;
-- the PC name becomes `<host>`, unless `IncludeHostLabel` is on.
+- the PC name becomes `<host>`, unless `IncludeHostLabel` is on; as with the user name,
+  names shorter than 3 characters are not replaced in free text.
 
 Apart from that the lines match `daemon.log`. They can contain the broker host name or
 IP address you configured, including a `FallbackAddress` saved by the pairing wizard.

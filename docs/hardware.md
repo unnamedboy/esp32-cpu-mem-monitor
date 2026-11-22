@@ -16,8 +16,8 @@ A CPU/MEM gauge face for a generic square panel voltmeter is in
 | MOC9686 ESP32 expansion shield | Confirmed | Carrier with GPIO, 3.3 V, 5 V, GND and labelled I2C headers |
 | Full-size solderless breadboard | Confirmed | Separate prototype area |
 | GP8413-compatible I2C DAC (DFRobot GP8XXX driver) | Firmware target | I2C address `0x59`, output range set to 0–5 V. Exact module, connector labels and wiring not yet verified. |
-| Two analogue panel voltmeters | Planned | Signal input requirements not yet documented; backlights need 12 V |
-| 5 V → 12 V boost converter (Amazon ASIN `B0C2H6PFVH`) | Selected | Powers the voltmeter backlights only; needs bench validation |
+| Two analogue panel voltmeters | Planned | Signal input requirements not yet documented. The DAC's full scale is 5 V, so a 0–5 V DC panel voltmeter would map directly (unverified). Backlights are planned for a 12 V rail (backlight voltage and current rating unverified). |
+| 5 V → 12 V boost converter (Amazon ASIN `B0C2H6PFVH`) | Selected | Intended to power the voltmeter backlights only. Which 5 V supply feeds it is undecided. Needs bench validation. |
 | M5Stack Unit DAC2 | Optional candidate | Not selected; part, pinout, address and power requirements not documented |
 
 ## Electrical safety
@@ -25,15 +25,18 @@ A CPU/MEM gauge face for a generic square panel voltmeter is in
 - **The MOC9686 `DC IN` accepts 6–9 V.** Never connect 12 V to it.
 - **ESP32 GPIO is 3.3 V logic.** Don't connect 5 V (or 12 V) signals to a GPIO without a
   level shifter, divider or other documented conditioning.
-- **The 12 V backlight rail is separate.** It comes from the boost converter and feeds
-  only the voltmeter backlights. Keep it away from `DC IN`, GPIO, I2C and the DAC
+- **The 12 V backlight rail is separate.** It is planned to come from the boost converter
+  and feed only the voltmeter backlights. Don't power the converter from the carrier's
+  5 V header or from USB until the backlight input current has been measured against
+  that supply's limit. Keep it away from `DC IN`, GPIO, I2C and the DAC
   outputs. Before permanent wiring it still needs a measured current budget, a polarity
   check, a switch/fuse decision and a grounding plan.
 - **Check the DAC's I2C pull-ups before connecting it.** GPIO21 and GPIO22 are 3.3 V
   and not 5 V tolerant. Find out which voltage the module's SDA/SCL pull-up resistors
   go to. If the module is powered from 5 V and pulls I2C up to 5 V, power its logic from
-  3.3 V instead or put a level shifter between it and the ESP32. (The module's details
-  are not yet verified.)
+  3.3 V only if the module's documentation allows a 3.3 V supply with the needed 0–5 V
+  output range; otherwise put a level shifter between it and the ESP32. (The module's
+  details are not yet verified.)
 - **The DAC's 0–5 V range is an output domain** (DAC → gauges), not an ESP32 input.
 - **Missing hardware is fine.** If no DAC answers at startup, the firmware logs
   `DAC not found at 0x59; running without external DAC` and keeps running without
@@ -46,7 +49,7 @@ A CPU/MEM gauge face for a generic square panel voltmeter is in
 | 5 V / USB | USB-C | ESP32 board and carrier | Confirmed for development; keep USB-C reachable for flashing and serial |
 | 3.3 V logic | Board/carrier regulator | ESP32 GPIO and I2C | Confirmed |
 | DAC output | DAC module | CPU and memory gauge inputs | Configured 0–5 V; gauge requirements unverified |
-| 12 V backlight | Boost converter from 5 V | Voltmeter backlights only | Selected; verify voltage under load, input current, polarity and heat |
+| 12 V backlight | Boost converter; its 5 V input source is undecided and unverified | Voltmeter backlights only | Selected; verify voltage under load, input current, polarity and heat |
 
 Check the boost converter's continuous current rating, wire colours, protection and
 thermal limits against the purchased module, not a generic listing, before sizing
@@ -58,9 +61,9 @@ All assignments live in [`firmware/src/config.h`](../firmware/src/config.h).
 
 | Function | Setting | Direction | Voltage domain | Notes |
 | --- | --- | --- | --- | --- |
-| I2C SDA | GPIO21 (`I2C_SDA_PIN`) | Bidirectional | 3.3 V | Project default I2C pins |
-| I2C SCL | GPIO22 (`I2C_SCL_PIN`) | Output (open-drain, bus master) | 3.3 V | |
-| DAC | address `0x59` (`DAC_I2C_ADDRESS`) | I2C device | 3.3 V bus | Verify against the real module |
+| I2C SDA | GPIO21 (`I2C_SDA_PIN`) | Bidirectional (open-drain) | 3.3 V on the ESP32 side | Project default I2C pins |
+| I2C SCL | GPIO22 (`I2C_SCL_PIN`) | Output (open-drain, bus master) | 3.3 V on the ESP32 side | |
+| DAC | address `0x59` (`DAC_I2C_ADDRESS`) | I2C device | ESP32 side 3.3 V; module pull-up voltage unverified | Verify against the real module |
 | CPU gauge | DAC channel 0 (`CPU_OUTPUT_CHANNEL`) | DAC output | 0–5 V | `resmon/cpu` |
 | Memory gauge | DAC channel 1 (`MEM_OUTPUT_CHANNEL`) | DAC output | 0–5 V | `resmon/mem` |
 | BOOT button | GPIO0 (`BOOT_BUTTON_PIN`) | Input | 3.3 V | On-board button, no extra wiring |
@@ -98,11 +101,11 @@ Rows marked unverified are design intent, not tested wiring.
 
 | Component | ESP32 connection | Direction | Voltage domain | Power | Protection/conditioning | Firmware configuration | Validation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GP8413-compatible I2C DAC (exact module unverified) | I2C: SDA GPIO21, SCL GPIO22 (carrier I2C header; exact label unverified) | Bidirectional I2C; analogue outputs | 3.3 V I2C logic; outputs configured 0–5 V | Unverified: module supply pin and allowed voltage | Unverified: pull-ups, output loading | `DAC_I2C_ADDRESS = 0x59`, `CPU_OUTPUT_CHANNEL = 0`, `MEM_OUTPUT_CHANNEL = 1` | Unverified |
+| GP8413-compatible I2C DAC (exact module unverified) | I2C: SDA GPIO21, SCL GPIO22 (carrier I2C header; exact label unverified) | SDA bidirectional, SCL output (open-drain, ESP32 is bus master); analogue outputs | ESP32 side 3.3 V; module pull-up voltage unverified; outputs configured 0–5 V | Unverified: module supply pin and allowed voltage | Unverified: pull-ups, output loading | `DAC_I2C_ADDRESS = 0x59`, `CPU_OUTPUT_CHANNEL = 0`, `MEM_OUTPUT_CHANNEL = 1` | Unverified |
 | CPU gauge (panel voltmeter) | DAC channel 0 | Output | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/cpu`, 0–100 % (out-of-range values are ignored) | Unverified |
 | Memory gauge (panel voltmeter) | DAC channel 1 | Output | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/mem`, 0–100 % (out-of-range values are ignored) | Unverified |
 | On-board BOOT push-button (ESP32-WROOM-32 dev board; board revision unverified) | GPIO0, on the board; no header wiring | Input | 3.3 V (button pulls GPIO0 to GND) | Board 3.3 V and GND | Board pull-up (value unverified) plus internal pull-up; 50 ms firmware debounce | `BOOT_BUTTON_PIN = 0`, `BOOT_BUTTON_ACTIVE_LOW = true`, `BOOT_BUTTON_DEBOUNCE_MS = 50`, `BOOT_BUTTON_MIN_HOLD_MS = 5000`, `BOOT_BUTTON_MAX_HOLD_MS = 15000` | Unverified: hold-and-release and the auto-program interaction not bench-tested |
-| Voltmeter backlights | None | Power only | 12 V backlight rail | Boost converter output | Unverified: polarity, current draw, switch/fuse, shared ground | None | Unverified load test |
+| Voltmeter backlights | None | Power only | Planned 12 V rail (backlight rating unverified) | Boost converter output; converter input source undecided and unverified | Unverified: polarity, current draw, switch/fuse, shared ground | None | Unverified load test |
 
 When you wire or change a connection, update this table with the same fields and say
 how you tested it.
@@ -110,7 +113,8 @@ how you tested it.
 ## Mechanical layout
 
 - Mount the ESP32 carrier on standoffs separately from the breadboard; it already
-  exposes all headers.
+  exposes all headers. Leave enough clearance below the board that solder joints and
+  header pins cannot touch the enclosure floor.
 - Keep the PCB antenna area clear of wire bundles, metal gauge bodies, other PCBs and
   conductive enclosure parts. Bluetooth pairing uses the same antenna as Wi-Fi.
 - Keep USB-C reachable from outside for power, flashing and serial diagnostics.
@@ -119,8 +123,8 @@ how you tested it.
   it.
 - Keep the breadboard removable while circuit values change; move proven circuits to
   perfboard or a PCB for the final build.
-- Route low-level analogue wiring away from USB and power wiring, keep it short, and
-  use labelled detachable connectors.
+- Route low-level analogue wiring away from USB and power wiring, keep it short with a
+  small service loop, and use labelled detachable connectors.
 
 ## Measurements needed before enclosure CAD
 

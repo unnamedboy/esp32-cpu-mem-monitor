@@ -22,7 +22,8 @@ This is a working prototype, not a finished product; see [Status](#status-and-li
 - CPU and memory usage on two analogue gauges, updated every second.
 - The ESP32 runs its own MQTT broker and is found as `resmon.local`; no server needed.
 - Wi-Fi setup over Bluetooth LE from a pairing wizard in the tray app, encrypted and
-  protected by an 8-character pairing code. No Wi-Fi password in the firmware.
+  protected by an 8-character pairing code. No Wi-Fi password in the firmware by default
+  (an optional development fallback can compile one in).
 - Gauges fall to zero when data stops; out-of-range or malformed values are ignored.
 - Settings dialog, live configuration reload, automatic reconnects.
 - Optional forwarding of logs, metrics and device health to your own Grafana Loki.
@@ -32,22 +33,27 @@ This is a working prototype, not a finished product; see [Status](#status-and-li
 
 - An ESP32-WROOM-32 dev board (the prototype uses a MOC9686 expansion shield), powered
   over USB. A GP8413-compatible I2C DAC and two analogue panel gauges for the display;
-  the firmware also runs without them. See [docs/hardware.md](docs/hardware.md) for
-  parts, wiring and **safety notes** (the shield's `DC IN` takes 6–9 V only, GPIO is
+  the firmware also runs without them. The DAC's full scale is 5 V, so a 0–5 V DC panel
+  voltmeter would map directly (gauge input not yet verified). See
+  [docs/hardware.md](docs/hardware.md) for parts, wiring and **safety notes** (the shield's `DC IN` takes 6–9 V only, GPIO is
   3.3 V).
 - A 2.4 GHz Wi-Fi network shared by the PC and the ESP32.
 - A Windows 10 (2004 or later) or Windows 11 PC with Bluetooth LE for pairing.
-- [PlatformIO](https://platformio.org/) to build the firmware and the
-  [.NET SDK](https://dotnet.microsoft.com/) 9 or later to build the daemon.
+- [PlatformIO](https://platformio.org/) to build the firmware.
+- The [.NET](https://dotnet.microsoft.com/) 9 SDK to build and run the daemon, or a newer
+  SDK plus the .NET 9 Desktop Runtime: the daemon and its tests target .NET 9 and need
+  that runtime.
 
 ## Quick start
 
 ### 0. Wiring (optional)
 
-There is no verified wiring guide for the DAC and gauges yet. What is fixed: the DAC is
-a GP8413-compatible module (DFRobot GP8XXX library) at I2C address `0x59`, on the I2C
-bus at GPIO21 (SDA) and GPIO22 (SCL). The firmware runs fine with nothing attached, so
-you can start with just the board on USB. Before wiring anything, read the
+There is no verified wiring guide for the DAC and gauges yet. What the firmware expects:
+a GP8413-compatible DAC (DFRobot GP8XXX library) at I2C address `0x59`, on the I2C bus
+at GPIO21 (SDA) and GPIO22 (SCL); the actual module is not yet verified. The address
+is `DAC_I2C_ADDRESS` in [`firmware/src/config.h`](firmware/src/config.h); many GP8413
+boards set their address with jumpers or switches, so check that they match. The
+firmware runs fine with nothing attached, so you can start with just the board on USB. Before wiring anything, read the
 [connection table](docs/hardware.md#connections) and the
 [safety notes](docs/hardware.md#electrical-safety), in particular the check of the DAC's
 I2C pull-up voltage: the ESP32's I2C pins are 3.3 V only.
@@ -60,6 +66,11 @@ Get the source if you haven't yet:
 git clone https://github.com/unnamedboy/esp32-cpu-mem-monitor.git
 cd esp32-cpu-mem-monitor
 ```
+
+If the board has run other firmware before, erase the flash once first with
+`pio run -e esp32dev -t erase`. That removes any saved Wi-Fi network, which would
+otherwise make the board skip pairing; the device then generates a new pairing code
+([details](docs/provisioning.md#boards-that-already-have-wi-fi-settings)).
 
 From the repository root, with the board on USB (`pio` is the PlatformIO CLI; in VS Code,
 use a PlatformIO terminal). If no COM port appears for the board, install the driver
@@ -81,8 +92,8 @@ Provisioning: name=PROV_RESMON_A1B2C3 pop=ABCDEFGH
 ```
 
 Close the serial monitor before pairing, so the wizard can read the code over USB.
-If the board previously ran older firmware of this project, it will reuse that Wi-Fi
-network instead; see [upgrading](docs/provisioning.md#upgrading-a-board-that-ran-older-firmware).
+If instead the board connects to a Wi-Fi network it already knew, see
+[boards that already have Wi-Fi settings](docs/provisioning.md#boards-that-already-have-wi-fi-settings).
 
 ### 2. Build and start the daemon
 
@@ -91,8 +102,10 @@ dotnet build daemon\ResourceMonitorDaemon.sln -c Release
 daemon\ResourceMonitorDaemon\bin\Release\net9.0-windows10.0.19041.0\ResourceMonitorDaemon.exe
 ```
 
-The app lives in the notification area. There is no installer yet; to start it with
-Windows, put a shortcut to the exe in your Startup folder.
+The app lives in the notification area; on Windows 11 its icon may be in the hidden-icons
+overflow. Until a device is paired, an "MQTT connection failed" notification (on the
+first run: *No device found — click to pair*) is expected. There is no installer yet;
+to start the daemon with Windows, put a shortcut to the exe in your Startup folder.
 
 ### 3. Pair the device
 
@@ -171,7 +184,7 @@ order.
 | "MQTT connection failed" notification | Is the ESP32 powered and on the same network? Does `resmon.local` resolve on this PC? Pairing saves the device's IP as a fallback; you can also set **Host** to the IP. The daemon keeps retrying in the background. |
 | Gauges sink to zero | No valid data for 5 s: sending is paused (tray menu), the daemon is not running, or the connection dropped. |
 | Device doesn't show up in the wizard | It is not in pairing mode: use the BOOT gesture (hold 5–15 s, release) and **Rescan**. Check that Bluetooth is on. |
-| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read is only tried on ports that look like an ESP32 USB-serial bridge ([rules](docs/provisioning.md#serial-pairing-code-query)); otherwise type the code from the serial log. |
+| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read is only tried on ports that could be an ESP32 USB-serial bridge ([rules](docs/provisioning.md#serial-pairing-code-query)); otherwise type the code from the serial log. |
 | Pairing fails | See the [message table](docs/provisioning.md#if-pairing-fails). Remember the ESP32 needs 2.4 GHz. |
 | Serial log says `DAC not found at 0x59` | Check the DAC wiring and address; the firmware runs on without outputs. |
 | Firmware build stops with `CORE_DEBUG_LEVEL >= 3 is refused` | Use a level from 0 to 2 (`platformio.ini` sets 1). The build refuses 3 and higher on purpose; see [why](docs/firmware.md#toolchain). |
@@ -193,6 +206,8 @@ For anything else, open the log from the tray menu. For more detail, set
 | [`docs`](docs) | Documentation |
 
 ## Building and testing
+
+Running the daemon or its tests needs the .NET 9 runtime ([see above](#what-you-need)).
 
 ```powershell
 # Daemon: build and run the tests (prints "N/N passed")

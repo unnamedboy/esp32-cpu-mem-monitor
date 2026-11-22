@@ -5,8 +5,7 @@ What already works is listed under [Features](../README.md#features) and
 
 ## Next
 
-1. **Validate on hardware.** Pairing, the BOOT gesture and the status topic have only
-   been tested in software. Run the [hardware checklist](provisioning.md#testing-on-hardware),
+1. **Validate on hardware** ([what is untested](provisioning.md)). Run the [hardware checklist](provisioning.md#testing-on-hardware),
    check that a status subscriber receives one message every 10 s without disturbing the
    gauges, and that a subscriber which stops reading is dropped by keep-alive.
 2. **Pair end to end** from the Windows wizard against a real device, including the USB
@@ -27,6 +26,8 @@ What already works is listed under [Features](../README.md#features) and
 - Total 12 V backlight current, whether the boost converter has enough continuous
   current and thermal margin, and whether the rail needs a switch, fuse or connector
   harness.
+- Which 5 V supply feeds the boost converter. Don't use the carrier's 5 V header or USB
+  until the backlight input current has been measured against that supply's limit.
 - Enclosure material, antenna clearance, and how users reach the BOOT button.
 
 ## Open software decisions

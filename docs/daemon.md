@@ -200,7 +200,7 @@ DeviceStatusForwarder ─┘   (bounded,         (batching,       (HttpClient, g
 ```
 
 - **Sources never block.** They enqueue and return. The queue assigns strictly
-  increasing nanosecond timestamps across the process. Lines over 16 K characters (16,384) are truncated
+  increasing nanosecond timestamps across the process. Lines over 16,384 characters are truncated
   with a marker.
 - **No feedback loop.** The logger provider ignores the
   `ResourceMonitorDaemon.Observability.*` and `System.Net.Http.*` categories, so the

@@ -65,6 +65,9 @@ Daemon changes:
 2. Reconnects don't block sampling, settings changes apply without a rebuild, and logs
    and notifications contain no credentials.
 
+Running the tests needs the .NET 9 runtime (see the README's
+[What you need](../README.md#what-you-need)).
+
 If a running daemon locks the build output, build to a separate folder (ignored by
 git). Run this from the repository root and keep the folder inside `daemon\`: the
 localization test finds the sources by walking up from the test assembly.

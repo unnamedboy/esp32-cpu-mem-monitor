@@ -103,14 +103,16 @@ credentials and restarts straight into pairing mode.
   used up: it boots with the `secrets.h` fallback if there is one, otherwise into
   pairing mode again (the credentials are already erased).
 
-### Upgrading a board that ran older firmware
+### Boards that already have Wi-Fi settings
 
-Firmware from before BLE provisioning connected with `WiFi.begin(SSID, PASSWORD)`,
-which also saves the network in the ESP32's Wi-Fi storage. The new firmware treats that
-as a paired network: it connects with it, skips pairing mode, ignores later `secrets.h`
-changes, and answers the serial query with `state=provisioned`. To start fresh, use the
-BOOT gesture once, or erase the flash and upload again (this also generates a new
-pairing code):
+Any earlier firmware that saved a Wi-Fi network in the ESP32's Wi-Fi storage (NVS) leaves
+it behind: for example an Arduino sketch that called `WiFi.begin(ssid, password)` (which
+saves by default), many ESP-IDF examples, or this project's own firmware from before
+BLE pairing. This firmware treats that network as paired: it connects with it, skips
+pairing mode, ignores `secrets.h`, and answers the serial query with
+`state=provisioned` (or `connecting`). To start fresh, erase the flash once before the
+first upload (this also generates a new pairing code), or use the BOOT gesture after
+uploading:
 
 ```sh
 pio run -e esp32dev -t erase
@@ -123,9 +125,13 @@ For development without the pairing app, copy
 [`firmware/src/secrets.example.h`](../firmware/src/secrets.example.h) to
 `firmware/src/secrets.h` (ignored by git) and set `WIFI_SSID` and `WIFI_PASSWORD`. The
 fallback is used only when no paired credentials are stored, and it is kept in RAM
-only, so it is never mistaken for paired credentials later. Stored credentials always
-win; to go back to the fallback, use the BOOT gesture and then power-cycle without
-pairing.
+only, so it is never mistaken for paired credentials later. Rebuild and upload the
+firmware after creating the file. Stored credentials always win; to go back to the
+fallback, use the BOOT gesture and then power-cycle without pairing.
+
+Without pairing, the daemon has no saved IP address (`FallbackAddress`). If
+`resmon.local` does not resolve on your PC, set **Host** in the settings dialog to the IP
+address from the serial line `Wi-Fi connected: ssid=… ip=…`.
 
 ## Security model
 
@@ -297,8 +303,8 @@ before the client can read the result). Implementation notes:
 
 ## Testing on hardware
 
-When you have a board, these are the cases worth checking (on a board that ran older
-firmware, clear the old credentials first, see above):
+When you have a board, these are the cases worth checking (on a board that already
+has Wi-Fi settings, [clear them first](#boards-that-already-have-wi-fi-settings)):
 
 - First boot: advertised name, serial hint line, `RESMON?POP` reply.
 - Pairing from the wizard: IP address received; broker reachable via `resmon.local`
