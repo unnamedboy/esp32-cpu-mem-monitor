@@ -53,18 +53,36 @@ namespace ResourceMonitorDaemon.Pairing
                 processStartUtc = DateTime.UtcNow;
             }
 
-            return new FirstRunPairingPrompt(DefaultMarkerPath, logger, DetectEarlierRun(DaemonPaths.LogFilePath, processStartUtc));
+            var ranBefore = DetectEarlierRun(DaemonPaths.LogFilePath, new[] { LegacyLogFilePath }, processStartUtc);
+            return new FirstRunPairingPrompt(DefaultMarkerPath, logger, ranBefore);
         }
 
         /// <summary>
-        /// True when a daemon log from an earlier run exists: <paramref name="logFilePath"/> created before
-        /// <paramref name="processStartUtc"/>, or its rotated <c>.1</c> file. A log created by this process
-        /// does not count.
+        /// Where daemon releases before the per-user log (the first versions on main) wrote their log:
+        /// next to the executable. The current daemon never writes there.
         /// </summary>
-        public static bool DetectEarlierRun(string logFilePath, DateTime processStartUtc)
+        public static string LegacyLogFilePath => Path.Combine(AppContext.BaseDirectory, "daemon.log");
+
+        /// <summary>
+        /// True when a daemon log from an earlier run exists: <paramref name="logFilePath"/> created before
+        /// <paramref name="processStartUtc"/> (a log created by this process does not count), its rotated
+        /// <c>.1</c> file, or any of <paramref name="legacyLogPaths"/> (plain existence: logs written by
+        /// older daemon versions in locations the current one never uses).
+        /// </summary>
+        public static bool DetectEarlierRun(string logFilePath, IEnumerable<string> legacyLogPaths, DateTime processStartUtc)
         {
+            ArgumentNullException.ThrowIfNull(legacyLogPaths);
             try
             {
+                var current = Path.GetFullPath(logFilePath);
+                foreach (var legacy in legacyLogPaths)
+                {
+                    if (!string.Equals(Path.GetFullPath(legacy), current, StringComparison.OrdinalIgnoreCase) && File.Exists(legacy))
+                    {
+                        return true;
+                    }
+                }
+
                 if (File.Exists(logFilePath + ".1"))
                 {
                     return true;

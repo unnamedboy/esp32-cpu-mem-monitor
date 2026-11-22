@@ -270,26 +270,40 @@ namespace ResourceMonitorDaemon.Tests
                     }
                 }
             }),
-            ("Pairing: an earlier daemon run is detected from a log created before this process", () =>
+            ("Pairing: an earlier daemon run is detected from an older per-user log or a legacy log next to the exe", () =>
             {
                 var directory = Path.Combine(Path.GetTempPath(), "resmon-pairing-tests-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(directory);
                 try
                 {
-                    var log = Path.Combine(directory, "daemon.log");
+                    var log = Path.Combine(directory, "appdata", "daemon.log");
+                    Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+                    var noLegacy = Array.Empty<string>();
                     var start = DateTime.UtcNow;
-                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, start), "no log: first run");
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "no log: first run");
 
                     File.WriteAllText(log, "line\n");
                     File.SetCreationTimeUtc(log, start.AddSeconds(1));
-                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, start), "log created by this process");
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "log created by this process");
 
                     File.SetCreationTimeUtc(log, start.AddDays(-30));
-                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, start), "log from an earlier run");
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "log from an earlier run");
 
                     File.SetCreationTimeUtc(log, start.AddSeconds(1));
                     File.WriteAllText(log + ".1", "rotated\n");
-                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, start), "rotated log exists");
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "rotated log exists");
+                    File.Delete(log + ".1");
+
+                    // Older releases wrote daemon.log next to the executable: its existence alone counts,
+                    // even when the current per-user log was just created by this process.
+                    var legacy = Path.Combine(directory, "exe", "daemon.log");
+                    Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, new[] { legacy }, start), "legacy log absent");
+                    File.WriteAllText(legacy, "old release\n");
+                    File.SetCreationTimeUtc(legacy, start.AddSeconds(1));
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, new[] { legacy }, start), "legacy log next to the exe");
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, new[] { log }, start),
+                        "a legacy path equal to the current log is ignored");
                 }
                 finally
                 {

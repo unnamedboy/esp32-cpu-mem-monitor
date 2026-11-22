@@ -439,13 +439,17 @@ only when all of these hold:
 - the effective `Host` is the default `resmon.local`. A custom host means the
   connection was configured by hand;
 - the daemon has not connected since this process started;
-- the daemon did not run on this PC before this process: no `daemon.log`
-  created before the process started, and no rotated `daemon.log.1`. This
-  covers installations that worked before the marker existed and start
-  while the device is off.
+- the daemon did not run before this process. That means no per-user
+  `daemon.log` created before the process started, no rotated
+  `daemon.log.1`, and no legacy `daemon.log` next to the executable. Releases
+  before the per-user log wrote it there, and the current daemon never does,
+  so its mere existence counts. This covers installations that worked before
+  the marker existed and start while the device is off
+  (`FirstRunPairingPrompt.DetectEarlierRun` takes the candidate paths).
 
-In practice, the prompt can only appear during the first run of the daemon
-on a PC. The tray then shows the failure as the "click to pair" balloon,
+The marker and the per-user log live in each Windows user's `%LocalAppData%`,
+so the rule applies per Windows user. In practice, the prompt can only appear
+during that user's first run of the daemon. The tray then shows the failure as the "click to pair" balloon,
 which keeps the failure title and states the failure. The marker is written
 as soon as the balloon is requested, so if Windows suppresses it (Focus
 Assist, notifications off), the prompt is not repeated; the tray menu entry

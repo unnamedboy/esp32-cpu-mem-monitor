@@ -676,6 +676,13 @@ namespace ResourceMonitorDaemon.Pairing
                     FocusField(outcome.SuggestRescan && outcome.Focus == PairingField.None ? PairingField.Device : outcome.Focus);
                 }
             }
+            catch (Exception) when (!_closed)
+            {
+                // Unexpected failure (e.g. while saving the address): no step may stay "running".
+                // RunSafelyAsync logs it and shows the generic message.
+                SettleRunningSteps(StepState.Failed);
+                throw;
+            }
             finally
             {
                 if (ReferenceEquals(_operationCts, cts))
