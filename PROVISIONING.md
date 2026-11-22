@@ -311,6 +311,11 @@ Record the date, board, and result of each item here once tested:
 - [ ] Wrong password / unknown SSID: `ConnectionFailed` with AuthError /
       NetworkNotFound; retry with correct credentials in the same session and in
       a new session.
+- [ ] Transient auth failure on the first attempt (e.g. a handshake timeout with
+      the correct password): the core's single automatic retry may then succeed
+      after the firmware already reset the provisioning state, leaving the device
+      online for this boot but unprovisioned in NVS. Confirm the client reports
+      the failure and that a retry from the wizard re-provisions it.
 - [ ] **AP lost during the BLE grace period:** pair successfully, then power-cycle
       the AP within 30 s. Expect `Wi-Fi lost during BLE grace period ...;
       credentials kept`, BLE stopping, reconnection once the AP is back, and the

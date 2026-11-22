@@ -430,7 +430,10 @@ void handleProvisioningStartFailure(const char* step, esp_err_t err, uint32_t no
             rtcProvFailCount = 0;
             printDebugLine("Provisioning: giving up on BLE; connecting with the secrets.h dev fallback");
             // A manager may still be initialised (e.g. after the PROV_START
-            // timeout). Deinit is a no-op when it is not initialised.
+            // timeout). Deinit only logs one error line when the manager was
+            // never initialised. In the rare case that it is still running,
+            // deinit stops it inline and blocks loop() once for the BLE cleanup
+            // delay (PROV_BLE_CLEANUP_DELAY_MS); acceptable on this give-up path.
             wifi_prov_mgr_deinit();
             startDevFallback(now);
             break;
