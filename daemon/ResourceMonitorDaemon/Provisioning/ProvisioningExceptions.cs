@@ -18,18 +18,21 @@ namespace ResourceMonitorDaemon.Provisioning
     }
 
     /// <summary>
-    /// The device refused new Wi-Fi settings with InternalError. In ESP-IDF v4.4.7 this happens when its
-    /// provisioning state machine is stuck after a failed attempt (wifi_prov_mgr_configure_sta fails
-    /// unless the firmware called wifi_prov_mgr_reset_sm_state_on_failure), so it needs a restart.
+    /// The device refused new Wi-Fi settings with InternalError. In ESP-IDF v4.4.7
+    /// wifi_prov_mgr_configure_sta fails once prov_state has reached CRED_RECV: an earlier attempt is
+    /// still connecting (e.g. after a Timeout), or it failed and the firmware did not call
+    /// wifi_prov_mgr_reset_sm_state_on_failure. The device needs a provisioning restart.
+    /// The advice is deliberately only the BOOT-button restart, not a power-cycle: configure_sta has
+    /// already stored the earlier credentials in NVS, so a power-cycle would boot the device as a plain
+    /// station with those credentials and without BLE provisioning.
     /// </summary>
     public sealed class ProvisioningRetryRejectedException : ProvisioningProtocolException
     {
         public ProvisioningRetryRejectedException(bool previousAttemptFailed)
             : base((previousAttemptFailed
                        ? "The device did not accept another attempt after the previous one failed. "
-                       : "The device could not accept the Wi-Fi settings. ") +
-                   "Power-cycle the device or " + ProvisioningConstants.ReprovisionInstruction +
-                   " to restart provisioning, then try again.")
+                       : "The device could not accept the Wi-Fi settings; it may still be handling an earlier attempt. ") +
+                   "To restart provisioning, " + ProvisioningConstants.ReprovisionInstruction + ", then try again.")
         {
             PreviousAttemptFailed = previousAttemptFailed;
         }

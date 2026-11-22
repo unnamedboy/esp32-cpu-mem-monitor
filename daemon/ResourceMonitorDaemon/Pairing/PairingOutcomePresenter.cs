@@ -149,10 +149,10 @@ namespace ResourceMonitorDaemon.Pairing
                 : new PairingOutcome(
                     PairingOutcomeKind.Failed,
                     $"蓝牙连接已断开，且 {BrokerCheckBudget.TotalSeconds:F0} 秒内无法连接 {host}:{port}。设备可能没有加入 Wi-Fi：请重新扫描后重试；" +
-                    $"如果设备不再出现，请重启设备或{ReprovisionInstructionZh}。\n" +
+                    $"如果设备不再出现，请{ReprovisionInstructionZh}，然后重新配对。\n" +
                     $"Lost the Bluetooth link and {host}:{port} did not answer within {BrokerCheckBudget.TotalSeconds:F0} s. " +
-                    "The device may not have joined Wi-Fi: rescan and try again. If the device no longer appears, power-cycle it or " +
-                    ProvisioningConstants.ReprovisionInstruction + ".")
+                    "The device may not have joined Wi-Fi: rescan and try again. If the device no longer appears, " +
+                    ProvisioningConstants.ReprovisionInstruction + ", then pair again.")
                 {
                     SuggestRescan = true,
                 };
@@ -178,7 +178,7 @@ namespace ResourceMonitorDaemon.Pairing
                 case ProvisioningRetryRejectedException retry:
                     return new PairingOutcome(
                         PairingOutcomeKind.Failed,
-                        $"设备不接受新的尝试。请重启设备或{ReprovisionInstructionZh}，然后重新扫描并重试。\n{retry.Message}")
+                        $"设备不接受新的尝试（可能仍在处理之前的尝试）。请{ReprovisionInstructionZh}，然后重新扫描并重试。\n{retry.Message}")
                     {
                         SuggestRescan = true,
                     };

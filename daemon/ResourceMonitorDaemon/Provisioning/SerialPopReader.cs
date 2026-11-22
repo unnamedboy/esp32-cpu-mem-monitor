@@ -79,14 +79,14 @@ namespace ResourceMonitorDaemon.Provisioning
                 return null;
             }
 
-            // Tolerate log noise in front of the reply on the same line.
-            var start = line.IndexOf(ReplyPrefix, StringComparison.Ordinal);
-            if (start < 0)
+            // Contract: the reply line starts with "RESMON-POP ". Only leading whitespace/CR is tolerated.
+            var trimmed = line.TrimStart(' ', '\t', '\r', '\n');
+            if (!trimmed.StartsWith(ReplyPrefix, StringComparison.Ordinal))
             {
                 return null;
             }
 
-            var tokens = line[(start + ReplyPrefix.Length)..]
+            var tokens = trimmed[ReplyPrefix.Length..]
                 .TrimEnd('\r', '\n')
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (tokens.Length == 0)
