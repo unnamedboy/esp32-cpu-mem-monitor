@@ -29,6 +29,11 @@ A CPU/MEM gauge face for a generic square panel voltmeter is in
   only the voltmeter backlights. Keep it away from `DC IN`, GPIO, I2C and the DAC
   outputs. Before permanent wiring it still needs a measured current budget, a polarity
   check, a switch/fuse decision and a grounding plan.
+- **Check the DAC's I2C pull-ups before connecting it.** GPIO21 and GPIO22 are 3.3 V
+  and not 5 V tolerant. Find out which voltage the module's SDA/SCL pull-up resistors
+  go to. If the module is powered from 5 V and pulls I2C up to 5 V, power its logic from
+  3.3 V instead or put a level shifter between it and the ESP32. (The module's details
+  are not yet verified.)
 - **The DAC's 0–5 V range is an output domain** (DAC → gauges), not an ESP32 input.
 - **Missing hardware is fine.** If no DAC answers at startup, the firmware logs
   `DAC not found at 0x59; running without external DAC` and keeps running without
@@ -54,7 +59,7 @@ All assignments live in [`firmware/src/config.h`](../firmware/src/config.h).
 | Function | Setting | Direction | Voltage domain | Notes |
 | --- | --- | --- | --- | --- |
 | I2C SDA | GPIO21 (`I2C_SDA_PIN`) | Bidirectional | 3.3 V | Project default I2C pins |
-| I2C SCL | GPIO22 (`I2C_SCL_PIN`) | Output (bus clock) | 3.3 V | |
+| I2C SCL | GPIO22 (`I2C_SCL_PIN`) | Output (open-drain, bus master) | 3.3 V | |
 | DAC | address `0x59` (`DAC_I2C_ADDRESS`) | I2C device | 3.3 V bus | Verify against the real module |
 | CPU gauge | DAC channel 0 (`CPU_OUTPUT_CHANNEL`) | DAC output | 0–5 V | `resmon/cpu` |
 | Memory gauge | DAC channel 1 (`MEM_OUTPUT_CHANNEL`) | DAC output | 0–5 V | `resmon/mem` |

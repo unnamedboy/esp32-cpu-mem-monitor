@@ -200,7 +200,7 @@ DeviceStatusForwarder ─┘   (bounded,         (batching,       (HttpClient, g
 ```
 
 - **Sources never block.** They enqueue and return. The queue assigns strictly
-  increasing nanosecond timestamps across the process. Lines over 16 KB are truncated
+  increasing nanosecond timestamps across the process. Lines over 16 K characters (16,384) are truncated
   with a marker.
 - **No feedback loop.** The logger provider ignores the
   `ResourceMonitorDaemon.Observability.*` and `System.Net.Http.*` categories, so the
@@ -211,9 +211,11 @@ DeviceStatusForwarder ─┘   (bounded,         (batching,       (HttpClient, g
 - **Token storage.** The token is resolved from `RESMON_Observability__Loki__Token`
   first, then from `TokenProtected` in the user file: base64 DPAPI ciphertext, scope
   CurrentUser. Its fixed entropy only namespaces the value; since the code is public,
-  the protection boundary is the Windows user account. The settings types have no
-  plain-token property, `ToString()` never prints it, and HTTP error text is scrubbed of
-  the token, the Basic credential and the URL path before it is logged or shown.
+  the protection boundary is the Windows user account. The user-file patch
+  (`UserLokiSettingsPatch`) has no plain-token property, so only the ciphertext can be
+  written. The decrypted token exists only in memory (`LokiSettings.Token`);
+  `ToString()` and `Describe()` never print it, and HTTP error text is scrubbed of the
+  token, the Basic credential and the URL path before it is logged or shown.
 - **Redaction.** `LokiLogRedactor` rewrites forwarded log lines (user folders, user name,
   PC name).
 
@@ -354,8 +356,8 @@ dotnet run --project daemon\ResourceMonitorDaemon.Tests\ResourceMonitorDaemon.Te
 The runner prints one line per test and a `passed` total. It sets the UI language to
 English first. What is covered:
 
-- **`ResourceMonitorDaemon.Tests/Program.cs`**: payload formatting, settings validation and layering, the user
-  settings store, log rotation, reconnect backoff.
+- **`Program.cs`** (the test runner's entry point): payload formatting, settings
+  validation and layering, the user settings store, log rotation, reconnect backoff.
 - **`MqttConnectionScenario.cs`**: `MqttConnection` against an in-process MQTTnet broker
   (non-blocking ticks, notifications, fallback address, wire format,
   connection generation).

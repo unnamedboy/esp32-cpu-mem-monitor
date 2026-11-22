@@ -139,7 +139,7 @@ The SSID is printed once per connection; passwords are never printed.
 | Wi-Fi credentials | ESP-IDF Wi-Fi storage in NVS (not encrypted) | BOOT gesture, flash erase |
 | Pairing code | NVS namespace `resmon`, key `pop` | Flash erase only |
 | Re-pairing request | NVS namespace `resmon`, key `prov_req` | Next boot |
-| Failed provisioning starts | RTC memory | Any reset other than a software restart (power-on, EN/reset button, brownout, watchdog), a successful start, giving up, BOOT gesture |
+| Failed provisioning starts | RTC memory | Any reset other than a software restart (power-on, EN/reset button, brownout, watchdog), a successful start, giving up or switching to the `secrets.h` fallback, BOOT gesture |
 
 The `secrets.h` fallback is applied with RAM-only Wi-Fi storage and is never written to
 NVS.

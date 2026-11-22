@@ -86,10 +86,11 @@ URL. Log lines are redacted first:
 
 Apart from that the lines match `daemon.log`. They can contain the broker host name or
 IP address you configured, including a `FallbackAddress` saved by the pairing wizard.
-Pairing lines that name the device's addresses are
-[Debug-level](daemon.md#logging-and-diagnostics), so they are forwarded only if you
-lower both `MinLevel` and the `Logging` filter to Debug. The device status never contains an SSID, password, IP or
-MAC address. The sink's own messages, such as failed pushes, stay in the local log.
+Pairing lines at Information level name the device as `PROV_RESMON_XXXXXX`, whose
+suffix is the last three bytes of the ESP32's Wi-Fi MAC address. Pairing lines with the
+device's Bluetooth and IP addresses are [Debug-level](daemon.md#logging-and-diagnostics),
+so they are forwarded only if you lower both `MinLevel` and the `Logging` filter to
+Debug. The device status never contains an SSID, password, IP or MAC address. The sink's own messages, such as failed pushes, stay in the local log.
 
 ## Reliability
 

@@ -49,13 +49,22 @@ a GP8413-compatible module (DFRobot GP8XXX library) at I2C address `0x59`, on th
 bus at GPIO21 (SDA) and GPIO22 (SCL). The firmware runs fine with nothing attached, so
 you can start with just the board on USB. Before wiring anything, read the
 [connection table](docs/hardware.md#connections) and the
-[safety notes](docs/hardware.md#electrical-safety).
+[safety notes](docs/hardware.md#electrical-safety), in particular the check of the DAC's
+I2C pull-up voltage: the ESP32's I2C pins are 3.3 V only.
 
 ### 1. Flash the firmware
 
+Get the source if you haven't yet:
+
+```sh
+git clone https://github.com/unnamedboy/esp32-cpu-mem-monitor.git
+cd esp32-cpu-mem-monitor
+```
+
 From the repository root, with the board on USB (`pio` is the PlatformIO CLI; in VS Code,
 use a PlatformIO terminal). If no COM port appears for the board, install the driver
-for its USB-serial chip (usually CP210x or CH340):
+for its USB-serial chip (usually CP210x or CH340). The first `pio run` downloads the
+ESP32 toolchain and libraries, several hundred MB:
 
 ```sh
 pio run -e esp32dev -t upload
@@ -107,7 +116,7 @@ change, to `%LocalAppData%\ResourceMonitorDaemon\settings.json`. Those override 
 shipped `appsettings.json` next to the exe, and `RESMON_` environment variables (`__`
 separates sections) override both ([how the layers work](docs/daemon.md#layers)).
 
-| Setting | Default | |
+| Setting | Default | Meaning |
 | --- | --- | --- |
 | `Device:Host` | `resmon.local` | Broker host name or IP |
 | `Device:FallbackAddress` | empty | IPv4 tried when `Host` fails; set by the pairing wizard |
@@ -162,7 +171,7 @@ order.
 | "MQTT connection failed" notification | Is the ESP32 powered and on the same network? Does `resmon.local` resolve on this PC? Pairing saves the device's IP as a fallback; you can also set **Host** to the IP. The daemon keeps retrying in the background. |
 | Gauges sink to zero | No valid data for 5 s: sending is paused (tray menu), the daemon is not running, or the connection dropped. |
 | Device doesn't show up in the wizard | It is not in pairing mode: use the BOOT gesture (hold 5–15 s, release) and **Rescan**. Check that Bluetooth is on. |
-| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read only works with [common ESP32 USB-serial chips](docs/provisioning.md#serial-pairing-code-query); otherwise type the code from the serial log. |
+| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read is only tried on ports that look like an ESP32 USB-serial bridge ([rules](docs/provisioning.md#serial-pairing-code-query)); otherwise type the code from the serial log. |
 | Pairing fails | See the [message table](docs/provisioning.md#if-pairing-fails). Remember the ESP32 needs 2.4 GHz. |
 | Serial log says `DAC not found at 0x59` | Check the DAC wiring and address; the firmware runs on without outputs. |
 | Firmware build stops with `CORE_DEBUG_LEVEL >= 3 is refused` | Use a level from 0 to 2 (`platformio.ini` sets 1). The build refuses 3 and higher on purpose; see [why](docs/firmware.md#toolchain). |
@@ -195,8 +204,9 @@ dotnet run --project daemon\ResourceMonitorDaemon.Tests\ResourceMonitorDaemon.Te
 pio run -e esp32dev
 pio test -e esp32dev --without-uploading --without-testing
 
-# Firmware tests on a connected board
+# Firmware tests on a connected board (they replace the firmware; re-flash afterwards)
 pio test -e esp32dev
+pio run -e esp32dev -t upload
 ```
 
 The firmware is pinned to `espressif32 @ 7.0.1` (Arduino-ESP32 2.0.17). See

@@ -32,7 +32,7 @@ test commands are in the [README](../README.md#building-and-testing).
 
 - No UI text in C# sources: add it to both `.resx` files and the typed accessors (see
   [daemon.md](daemon.md#localization)). The localization tests fail otherwise.
-- Log messages are English and must never contain passwords, tokens or the pairing code.
+- Log messages are English and must never contain passwords, tokens, the pairing code or the SSID.
 - Settings go through `DeviceSettings`/`UserSettingsStore`; invalid values are sanitized
   with a warning, never fatal.
 - Nothing may block the sampling loop.
@@ -52,8 +52,8 @@ Firmware changes:
 
 1. `pio run -e esp32dev` builds, and the tests compile with
    `pio test -e esp32dev --without-uploading --without-testing` (or run on a board with
-   `pio test -e esp32dev`). The compile-only run reports each suite as SKIPPED with
-   "0 test cases"; that is expected.
+   `pio test -e esp32dev`, then re-flash with `pio run -e esp32dev -t upload`). The
+   compile-only run reports each suite as SKIPPED with "0 test cases"; that is expected.
 2. With a board: the startup diagnostics are complete and contain no secrets; valid,
    invalid and stale metrics behave as expected; the firmware runs without the DAC;
    `resmon/status` still arrives every 10 s without SSID, IP, MAC, pairing code or
