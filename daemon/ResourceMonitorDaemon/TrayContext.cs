@@ -1,4 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -6,13 +8,14 @@ using System.Windows.Forms;
 
 namespace ResourceMonitorDaemon
 {
-    public class TrayContext
+    public class TrayContext : IDisposable
     {
         private readonly IHost _host;
         private readonly string _logFilePath;
         private readonly NotifyIcon _notifyIcon;
         private readonly MonitorService _monitorService;
         private readonly ISettingsStore _settingsStore;
+        private readonly IOptionsMonitor<DeviceSettings> _settingsMonitor;
         private readonly SynchronizationContext? _uiContext;
         private readonly System.Windows.Forms.Timer _updateTimer;
         private ToolStripMenuItem? _pauseResumeItem;
@@ -25,6 +28,7 @@ namespace ResourceMonitorDaemon
             _logFilePath = logFilePath;
             _monitorService = monitorService;
             _settingsStore = settingsStore;
+            _settingsMonitor = host.Services.GetRequiredService<IOptionsMonitor<DeviceSettings>>();
 
             var contextMenu = new ContextMenuStrip();
 
@@ -119,7 +123,8 @@ namespace ResourceMonitorDaemon
             }
 
             _settingsForm = new SettingsForm(
-                _monitorService.CurrentSettings,
+                // Fresh effective settings: MonitorService.CurrentSettings lags until its next tick.
+                _settingsMonitor.CurrentValue,
                 DaemonConfiguration.LoadLowerLayers(AppContext.BaseDirectory),
                 _settingsStore,
                 DaemonConfiguration.GetEnvironmentOverriddenDeviceFields());
@@ -151,6 +156,16 @@ namespace ResourceMonitorDaemon
             {
                 MessageBox.Show("暂无日志记录！", "Daemon", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        /// <summary>Removes the tray icon without stopping the host (used if start-up fails).</summary>
+        public void Dispose()
+        {
+            _updateTimer.Stop();
+            _updateTimer.Dispose();
+            _settingsForm?.Close();
+            _notifyIcon.Visible = false;
+            _notifyIcon.Dispose();
         }
 
         private async void OnExitAsync(object? sender, EventArgs e)

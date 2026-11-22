@@ -83,8 +83,9 @@ settingsStore.Update(patch => patch.FallbackAddress = "192.168.1.50");
   atomically (`settings.json.tmp` then replace; `IOException` on failure). Only
   non-null fields are written. Other top-level sections and unknown `Device` keys
   are preserved; comments and trailing commas are accepted when reading (comments
-  are not kept). An unparsable file is copied to `settings.json.bak` before it is
-  replaced.
+  are not kept). An empty file is treated as empty; an unparsable file is copied to
+  `settings.json.<yyyyMMdd-HHmmss>.bak` (never overwriting an earlier backup) before
+  it is replaced.
 - `ISettingsStore.Load()` — the fields set in the user file only (not
   `appsettings.json`, defaults or environment); never throws.
 - `ISettingsStore.Saved` — raised after a successful update. No reload call is
@@ -92,9 +93,11 @@ settingsStore.Update(patch => patch.FallbackAddress = "192.168.1.50");
 - `ISettingsStore.FilePath` — absolute path of the user settings file.
 - Never copy effective settings (`IOptionsMonitor<DeviceSettings>.CurrentValue`)
   wholesale into the patch: that would persist environment overrides and freeze
-  `appsettings.json` values. The tray dialog uses
-  `UserDeviceSettingsPatch.ApplyDialogEdit(lowerLayers, edited, envFields)`, which
-  skips env-overridden fields and clears values equal to
+  `appsettings.json` values. The tray dialog opens with
+  `IOptionsMonitor<DeviceSettings>.CurrentValue` and saves with
+  `UserDeviceSettingsPatch.ApplyDialogEdit(lowerLayers, displayed, edited, envFields)`,
+  which touches only fields the user changed (edited ≠ displayed), skips
+  env-overridden fields, and clears values equal to
   `DaemonConfiguration.LoadLowerLayers(...)` (defaults + `appsettings.json`).
 
 ### Connection Handling
@@ -109,9 +112,10 @@ schedule, and never blocks the sampling loop:
 - Backoff (`ReconnectBackoff`, pure and clock-injectable) starts at
   `ReconnectInitialBackoffMs` and doubles per failure up to `ReconnectMaxBackoffMs`.
   A successful connect does not reset it by itself: only a connection that stays
-  up for at least `ReconnectMaxBackoffMs` resets it when it drops; a shorter-lived
-  connection counts as a failure, so a flapping broker is still backed off. An
-  endpoint change resets it and reconnects immediately.
+  up for at least min(`ReconnectMaxBackoffMs`, 30 s) resets it when it drops; a
+  shorter-lived connection counts as a failure, so a flapping broker is still backed
+  off. Changing the backoff settings keeps this connection state. An endpoint change
+  resets the schedule and reconnects immediately.
 - A failed publish marks the connection lost; the reconnect follows the backoff.
 - Shutdown cancels any in-flight connect attempt first (a shutdown token is linked
   into every connect/close/publish timeout), so exit does not wait for connect
@@ -140,13 +144,16 @@ schedule, and never blocks the sampling loop:
 - "⚙ 设置 (Settings)…" opens a dialog for Host, Port, CpuTopic, MemTopic and
   SampleIntervalMs with validation. Fields overridden by `RESMON_Device__*`
   environment variables are shown read-only with "(env)" and are never saved.
-  Save writes only values that differ from defaults + `appsettings.json` and
-  leaves other user-file fields (e.g. FallbackAddress) untouched; the change is
+  Save writes only fields the user changed in the dialog, removes a changed value
+  that equals defaults + `appsettings.json`, and leaves all other user-file fields
+  (e.g. FallbackAddress) untouched; the change is
   applied live, and the confirmation balloon names any field still overridden by
   an environment variable.
 - "查看日志 (Log)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
 - Exit hides the icon and disables the menu first (re-entry guarded), then stops
   the hosted service within 3 s and disposes the tray icon.
+- If the host fails to start, the tray icon is removed, the error is logged and
+  shown in a message box, and the process exits.
 
 ## Project Structure
 
@@ -174,11 +181,14 @@ The C# test runner covers:
 - configuration precedence (defaults < appsettings.json < user file < `RESMON_` env) and broken JSON files;
 - `UserSettingsStore`: only set fields written, `appsettings.json` still applying
   after saving `FallbackAddress`, env values not persisted by the dialog edit,
-  comments/trailing commas and unknown keys preserved, `.bak` backup of an
-  unparsable file, invalid input, live reload through the file watcher;
+  comments/trailing commas and unknown keys preserved, timestamped `.bak` backups
+  that never overwrite each other, empty files without backup, dialog saves that
+  touch only changed fields (even from stale values), invalid input, live reload
+  through the file watcher;
 - sanitize-warning de-duplication across reloads and absolute paths in load errors;
 - log rotation under concurrent writers;
-- `ReconnectBackoff` doubling, cap, reset, flapping broker and stable-connection reset;
+- `ReconnectBackoff` doubling, cap, reset, flapping broker, stable-connection reset,
+  30 s stability cap and state preserved across `Reconfigure`;
 - `MqttConnection` against an in-process loopback MQTTnet broker: non-blocking ticks,
   one notification per outage, reconnect notice, fallback address, and unchanged
   topic/payload/QoS/retain on the wire; dispose with unreachable host + fallback

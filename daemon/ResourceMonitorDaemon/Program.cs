@@ -55,7 +55,24 @@ namespace ResourceMonitorDaemon
             var svc = host.Services.GetRequiredService<MonitorService>();
             var tray = new TrayContext(host, _logFilePath, svc, settingsStore);
 
-            host.StartAsync().GetAwaiter().GetResult();
+            try
+            {
+                host.StartAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                // Do not leave an orphaned tray icon behind a process that is about to exit.
+                tray.Dispose();
+                host.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("ResourceMonitorDaemon.Program")
+                    .LogCritical(ex, "Resource Monitor Daemon failed to start.");
+                MessageBox.Show(
+                    $"启动失败 (Failed to start):{Environment.NewLine}{ex.GetBaseException().Message}{Environment.NewLine}{Environment.NewLine}{_logFilePath}",
+                    "Resource Monitor Daemon",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
 
             Application.Run();
 

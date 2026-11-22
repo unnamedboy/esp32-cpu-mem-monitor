@@ -4,32 +4,29 @@ namespace ResourceMonitorDaemon
     /// Pure reconnect schedule: after each failure the next attempt is delayed by the current
     /// delay, which then doubles up to the maximum. A successful connect does not reset the
     /// schedule by itself: only a connection that stays up for at least
-    /// <see cref="StableConnectionThreshold"/> does, so a broker that accepts and immediately
+    /// <see cref="StableConnectionThreshold"/> (max delay, capped at 30 s) does, so a broker that accepts and immediately
     /// drops connections is still backed off. <see cref="Reset"/> (endpoint change) makes the
     /// next attempt due immediately and restores the initial delay.
     /// Not thread-safe; callers synchronize.
     /// </summary>
     public sealed class ReconnectBackoff
     {
+        /// <summary>Upper bound for <see cref="StableConnectionThreshold"/>.</summary>
+        public static readonly TimeSpan MaxStableConnectionThreshold = TimeSpan.FromSeconds(30);
+
         private readonly Func<DateTimeOffset> _clock;
         private DateTimeOffset? _connectedAt;
 
         public ReconnectBackoff(TimeSpan initialDelay, TimeSpan maxDelay, Func<DateTimeOffset>? clock = null)
         {
-            if (initialDelay <= TimeSpan.Zero)
-            {
-                throw new ArgumentOutOfRangeException(nameof(initialDelay), "Initial delay must be positive.");
-            }
-
-            InitialDelay = initialDelay;
-            MaxDelay = maxDelay < initialDelay ? initialDelay : maxDelay;
             _clock = clock ?? (() => DateTimeOffset.UtcNow);
+            SetDelays(initialDelay, maxDelay);
             Reset();
         }
 
-        public TimeSpan InitialDelay { get; }
+        public TimeSpan InitialDelay { get; private set; }
 
-        public TimeSpan MaxDelay { get; }
+        public TimeSpan MaxDelay { get; private set; }
 
         /// <summary>Delay that the next <see cref="RecordFailure"/> will apply.</summary>
         public TimeSpan NextDelay { get; private set; }
@@ -42,8 +39,29 @@ namespace ResourceMonitorDaemon
 
         public bool IsAttemptDue => _clock() >= NextAttemptAt;
 
-        /// <summary>How long a connection must last before the schedule resets (= max delay).</summary>
-        public TimeSpan StableConnectionThreshold => MaxDelay;
+        /// <summary>How long a connection must last before the schedule resets: min(max delay, 30 s).</summary>
+        public TimeSpan StableConnectionThreshold => MaxDelay < MaxStableConnectionThreshold ? MaxDelay : MaxStableConnectionThreshold;
+
+        /// <summary>
+        /// Changes the delays while keeping the connection state (stability timer), the failure
+        /// count and the pending deadline. The next delay is clamped into the new range.
+        /// </summary>
+        public void Reconfigure(TimeSpan initialDelay, TimeSpan maxDelay)
+        {
+            SetDelays(initialDelay, maxDelay);
+            NextDelay = NextDelay < InitialDelay ? InitialDelay : NextDelay > MaxDelay ? MaxDelay : NextDelay;
+        }
+
+        private void SetDelays(TimeSpan initialDelay, TimeSpan maxDelay)
+        {
+            if (initialDelay <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(initialDelay), "Initial delay must be positive.");
+            }
+
+            InitialDelay = initialDelay;
+            MaxDelay = maxDelay < initialDelay ? initialDelay : maxDelay;
+        }
 
         /// <summary>Records a successful connect (starts the stability timer).</summary>
         public void RecordConnected() => _connectedAt = _clock();

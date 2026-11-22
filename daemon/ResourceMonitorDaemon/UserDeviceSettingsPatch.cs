@@ -59,37 +59,39 @@ namespace ResourceMonitorDaemon
         };
 
         /// <summary>
-        /// Applies the dialog's values: for each <see cref="DialogFieldNames"/> field that is not
-        /// overridden by an environment variable, store the edited value if it differs from what
-        /// the lower layers (<paramref name="lowerLayers"/> = defaults + appsettings.json)
-        /// resolve to, otherwise clear it. Env-overridden fields and fields the dialog does not
-        /// show are left exactly as they were.
+        /// Applies the dialog's values. Only <see cref="DialogFieldNames"/> fields that the user
+        /// actually changed (edited value differs from <paramref name="displayed"/>, the value
+        /// shown when the dialog opened) and that are not overridden by an environment variable
+        /// are touched: such a field is stored if it differs from what the lower layers
+        /// (<paramref name="lowerLayers"/> = defaults + appsettings.json) resolve to, otherwise
+        /// cleared. Everything else in the patch is left exactly as it was, so a stale dialog can
+        /// never write old values back.
         /// </summary>
-        public void ApplyDialogEdit(DeviceSettings lowerLayers, DeviceSettings edited, IReadOnlySet<string> environmentOverriddenFields)
+        public void ApplyDialogEdit(DeviceSettings lowerLayers, DeviceSettings displayed, DeviceSettings edited, IReadOnlySet<string> environmentOverriddenFields)
         {
-            bool Editable(string name) => !environmentOverriddenFields.Contains(name);
+            bool Changed(string name, bool equalToDisplayed) => !equalToDisplayed && !environmentOverriddenFields.Contains(name);
 
-            if (Editable(nameof(Host)))
+            if (Changed(nameof(Host), string.Equals(edited.Host, displayed.Host, StringComparison.OrdinalIgnoreCase)))
             {
                 Host = string.Equals(edited.Host, lowerLayers.Host, StringComparison.OrdinalIgnoreCase) ? null : edited.Host;
             }
 
-            if (Editable(nameof(Port)))
+            if (Changed(nameof(Port), edited.Port == displayed.Port))
             {
                 Port = edited.Port == lowerLayers.Port ? null : edited.Port;
             }
 
-            if (Editable(nameof(CpuTopic)))
+            if (Changed(nameof(CpuTopic), edited.CpuTopic == displayed.CpuTopic))
             {
                 CpuTopic = edited.CpuTopic == lowerLayers.CpuTopic ? null : edited.CpuTopic;
             }
 
-            if (Editable(nameof(MemTopic)))
+            if (Changed(nameof(MemTopic), edited.MemTopic == displayed.MemTopic))
             {
                 MemTopic = edited.MemTopic == lowerLayers.MemTopic ? null : edited.MemTopic;
             }
 
-            if (Editable(nameof(SampleIntervalMs)))
+            if (Changed(nameof(SampleIntervalMs), edited.SampleIntervalMs == displayed.SampleIntervalMs))
             {
                 SampleIntervalMs = edited.SampleIntervalMs == lowerLayers.SampleIntervalMs ? null : edited.SampleIntervalMs;
             }

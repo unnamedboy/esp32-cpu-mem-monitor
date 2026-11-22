@@ -206,9 +206,10 @@ var tests = new (string Name, Action Run)[]
             // changes only Port and leaves CpuTopic at the appsettings value.
             var lowerLayers = DaemonConfiguration.LoadLowerLayers(temp.Path);
             AssertEqual("app.host", lowerLayers.Host);
-            var edited = LoadEffective(temp.Path, userPath) with { Port = 1885 };
-            AssertEqual("env.host", edited.Host);
-            store.Update(patch => patch.ApplyDialogEdit(lowerLayers, edited, envFields));
+            var displayed = LoadEffective(temp.Path, userPath);
+            AssertEqual("env.host", displayed.Host);
+            var edited = displayed with { Port = 1885 };
+            store.Update(patch => patch.ApplyDialogEdit(lowerLayers, displayed, edited, envFields));
         }
         finally
         {
@@ -226,8 +227,22 @@ var tests = new (string Name, Action Run)[]
         AssertEqual("user.host", effective.Host);
 
         // Editing a value back to the lower-layer value removes it from the file.
-        store.Update(p => p.ApplyDialogEdit(DaemonConfiguration.LoadLowerLayers(temp.Path), effective with { Port = 1999 }, new HashSet<string>()));
+        store.Update(p => p.ApplyDialogEdit(DaemonConfiguration.LoadLowerLayers(temp.Path), effective, effective with { Port = 1999 }, new HashSet<string>()));
         AssertEqual(null, store.Load().Port);
+        AssertEqual("user.host", store.Load().Host);
+    }),
+    ("Dialog save touches only fields the user changed, even if it showed stale values", () =>
+    {
+        using var temp = new TempDir();
+        var store = new UserSettingsStore(Path.Combine(temp.Path, "settings.json"));
+        store.Update(patch => patch.Host = "new.host");     // saved elsewhere after the dialog opened
+
+        var lowerLayers = new DeviceSettings();
+        var displayed = lowerLayers with { Host = "old.host" };   // stale value shown in the dialog
+        var edited = displayed with { SampleIntervalMs = 2000 };  // user changes only the interval
+        store.Update(patch => patch.ApplyDialogEdit(lowerLayers, displayed, edited, new HashSet<string>()));
+
+        AssertTrue(store.Load() == new UserDeviceSettingsPatch { Host = "new.host", SampleIntervalMs = 2000 }, "patch: " + store.Load().Describe());
     }),
     ("Update preserves other sections, unknown keys, and tolerates comments/trailing commas", () =>
     {
@@ -249,7 +264,7 @@ var tests = new (string Name, Action Run)[]
         AssertEqual("keep", root["Device"]!["FutureKey"]!.GetValue<string>());
         AssertEqual("Port,CpuTopic", string.Join(",", root["Device"]!.AsObject().Select(p => p.Key).Where(k => k != "FutureKey")));
         AssertEqual(1884, root["Device"]!["Port"]!.GetValue<int>());
-        AssertTrue(!File.Exists(store.BackupPath), "valid file should not be backed up");
+        AssertEqual(null, store.LastBackupPath);
 
         AssertThrows<ArgumentException>(() => store.Update(patch => patch.MemTopic = "resmon/#"));
         AssertEqual(null, store.Load().MemTopic);
@@ -264,8 +279,28 @@ var tests = new (string Name, Action Run)[]
         AssertTrue(store.Load().IsEmpty, "expected empty patch");
 
         store.Update(patch => patch.Port = 1886);
-        AssertEqual(broken, File.ReadAllText(store.BackupPath));
+        var firstBackup = store.LastBackupPath!;
+        AssertEqual(broken, File.ReadAllText(firstBackup));
+        AssertTrue(Path.GetFileName(firstBackup).StartsWith("settings.json.") && firstBackup.EndsWith(".bak"), "backup name " + firstBackup);
         AssertEqual(1886, store.Load().Port);
+
+        // A second broken file gets its own backup; the first one is never overwritten.
+        File.WriteAllText(path, "also broken");
+        store.Update(patch => patch.Port = 1887);
+        AssertTrue(store.LastBackupPath != firstBackup, "backup reused");
+        AssertEqual("also broken", File.ReadAllText(store.LastBackupPath!));
+        AssertEqual(broken, File.ReadAllText(firstBackup));
+    }),
+    ("Empty or whitespace settings file is treated as empty without a backup", () =>
+    {
+        using var temp = new TempDir();
+        var path = Path.Combine(temp.Path, "settings.json");
+        File.WriteAllText(path, "  " + Environment.NewLine + " ");
+        var store = new UserSettingsStore(path);
+        store.Update(patch => patch.Port = 1888);
+        AssertEqual(null, store.LastBackupPath);
+        AssertEqual(1, Directory.GetFiles(temp.Path).Length);
+        AssertEqual(1888, store.Load().Port);
     }),
     ("Saved settings reach a live configuration through the file watcher", () =>
     {
@@ -415,6 +450,32 @@ var tests = new (string Name, Action Run)[]
         AssertEqual(0, backoff.ConsecutiveFailures);
         AssertTrue(backoff.IsAttemptDue, "reconnect after a stable connection should be immediate");
         AssertEqual(TimeSpan.FromSeconds(1), backoff.NextDelay);
+    }),
+
+    ("ReconnectBackoff.Reconfigure keeps the connection state and clamps the next delay", () =>
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var backoff = new ReconnectBackoff(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(8), () => now);
+        backoff.RecordFailure();
+        backoff.RecordFailure();
+        backoff.RecordFailure();                              // next delay 8 s
+        backoff.RecordConnected();
+        backoff.Reconfigure(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4));
+        AssertEqual(TimeSpan.FromSeconds(4), backoff.NextDelay);
+        AssertEqual(3, backoff.ConsecutiveFailures);
+        now += TimeSpan.FromSeconds(4);
+        AssertTrue(backoff.RecordDisconnected() == null, "stability timer lost across Reconfigure");
+        AssertEqual(TimeSpan.FromSeconds(2), backoff.NextDelay);
+    }),
+    ("ReconnectBackoff caps the stability threshold at 30 s", () =>
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var backoff = new ReconnectBackoff(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(10), () => now);
+        AssertEqual(TimeSpan.FromSeconds(30), backoff.StableConnectionThreshold);
+        backoff.RecordFailure();
+        backoff.RecordConnected();
+        now += TimeSpan.FromSeconds(30);
+        AssertTrue(backoff.RecordDisconnected() == null, "30 s connection should count as stable");
     }),
 
     // ---- MqttConnection (in-process loopback broker) --------------------------------------

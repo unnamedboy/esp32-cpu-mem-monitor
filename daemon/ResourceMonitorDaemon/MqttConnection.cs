@@ -110,15 +110,16 @@ namespace ResourceMonitorDaemon
                 var previous = _settings;
                 _settings = settings;
 
-                if (_backoff == null
-                    || previous == null
-                    || previous.ReconnectInitialBackoffMs != settings.ReconnectInitialBackoffMs
-                    || previous.ReconnectMaxBackoffMs != settings.ReconnectMaxBackoffMs)
+                var initial = TimeSpan.FromMilliseconds(settings.ReconnectInitialBackoffMs);
+                var max = TimeSpan.FromMilliseconds(settings.ReconnectMaxBackoffMs);
+                if (_backoff == null)
                 {
-                    _backoff = new ReconnectBackoff(
-                        TimeSpan.FromMilliseconds(settings.ReconnectInitialBackoffMs),
-                        TimeSpan.FromMilliseconds(settings.ReconnectMaxBackoffMs),
-                        _clock);
+                    _backoff = new ReconnectBackoff(initial, max, _clock);
+                }
+                else if (_backoff.InitialDelay != initial || _backoff.MaxDelay != max)
+                {
+                    // Keep the connection/stability state; only the delays change.
+                    _backoff.Reconfigure(initial, max);
                 }
 
                 if (previous != null && previous.EndpointDiffers(settings))
@@ -248,7 +249,7 @@ namespace ResourceMonitorDaemon
 
             _shutdown.Cancel();
 
-            if (attempt != null)
+            if (attempt is { IsCompleted: false })
             {
                 try
                 {
@@ -258,6 +259,16 @@ namespace ResourceMonitorDaemon
                 {
                     // Shutting down; an unfinished attempt disposes its own client.
                 }
+            }
+
+            // Dispose the token source only once nothing can still be using it.
+            if (attempt is null or { IsCompleted: true })
+            {
+                _shutdown.Dispose();
+            }
+            else
+            {
+                _ = attempt.ContinueWith(_ => _shutdown.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
 
             if (client != null)

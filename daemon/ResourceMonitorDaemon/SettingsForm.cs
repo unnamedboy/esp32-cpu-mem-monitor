@@ -7,15 +7,17 @@ namespace ResourceMonitorDaemon
     /// </summary>
     /// <remarks>
     /// Shows the effective values. Fields overridden by <c>RESMON_Device__*</c> environment
-    /// variables are read-only and never saved. On Save, only values that differ from what
-    /// <c>appsettings.json</c> + defaults resolve to are written to the user settings file
-    /// (see <see cref="UserDeviceSettingsPatch.ApplyDialogEdit"/>); fields the dialog does not
-    /// show, such as FallbackAddress, are left untouched.
+    /// variables are read-only and never saved. On Save, only fields the user changed are
+    /// touched, and a changed value equal to what <c>appsettings.json</c> + defaults resolve to
+    /// is removed from the user settings file instead of being copied into it
+    /// (see <see cref="UserDeviceSettingsPatch.ApplyDialogEdit"/>); unchanged fields and fields
+    /// the dialog does not show, such as FallbackAddress, are left untouched.
     /// </remarks>
     public sealed class SettingsForm : Form
     {
         private readonly ISettingsStore _store;
         private readonly DeviceSettings _effective;
+        private readonly DeviceSettings _displayed;
         private readonly DeviceSettings _lowerLayers;
         private readonly IReadOnlySet<string> _environmentFields;
         private readonly TextBox _host;
@@ -107,6 +109,9 @@ namespace ResourceMonitorDaemon
             Controls.Add(layout);
             AcceptButton = save;
             CancelButton = cancel;
+
+            // Baseline for "did the user change this field?" — read through the same path as Save.
+            _displayed = ReadControls();
         }
 
         /// <summary>Dialog fields whose effective value comes from an environment variable.</summary>
@@ -145,16 +150,18 @@ namespace ResourceMonitorDaemon
             layout.SetColumnSpan(note, 2);
         }
 
+        private DeviceSettings ReadControls() => _effective with
+        {
+            Host = _host.Text.Trim(),
+            Port = (int)_port.Value,
+            CpuTopic = _cpuTopic.Text.Trim(),
+            MemTopic = _memTopic.Text.Trim(),
+            SampleIntervalMs = (int)_interval.Value,
+        };
+
         private void OnSave(object? sender, EventArgs e)
         {
-            var edited = _effective with
-            {
-                Host = _host.Text.Trim(),
-                Port = (int)_port.Value,
-                CpuTopic = _cpuTopic.Text.Trim(),
-                MemTopic = _memTopic.Text.Trim(),
-                SampleIntervalMs = (int)_interval.Value,
-            };
+            var edited = ReadControls();
 
             var errors = DeviceSettingsValidator.Validate(edited);
             if (errors.Count > 0)
@@ -165,7 +172,7 @@ namespace ResourceMonitorDaemon
 
             try
             {
-                _store.Update(patch => patch.ApplyDialogEdit(_lowerLayers, edited, _environmentFields));
+                _store.Update(patch => patch.ApplyDialogEdit(_lowerLayers, _displayed, edited, _environmentFields));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {

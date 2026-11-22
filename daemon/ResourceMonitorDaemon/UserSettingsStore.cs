@@ -73,8 +73,12 @@ namespace ResourceMonitorDaemon
 
         public string FilePath { get; }
 
-        /// <summary>Copy of an unparsable settings file kept before it is replaced.</summary>
-        public string BackupPath => FilePath + ".bak";
+        /// <summary>
+        /// Path of the most recent backup made by this instance, or <c>null</c>. An unparsable
+        /// settings file is copied to <c>settings.json.&lt;yyyyMMdd-HHmmss&gt;.bak</c> before it is
+        /// replaced; existing backups are never overwritten.
+        /// </summary>
+        public string? LastBackupPath { get; private set; }
 
         public event EventHandler? Saved;
 
@@ -215,18 +219,17 @@ namespace ResourceMonitorDaemon
             }
 
             var text = File.ReadAllText(FilePath);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return new JsonObject();   // nothing to preserve, no backup needed
+            }
+
             try
             {
-                var node = JsonNode.Parse(text, nodeOptions: null, documentOptions: ReadOptions);
-                if (node is JsonObject existing)
+                if (JsonNode.Parse(text, nodeOptions: null, documentOptions: ReadOptions) is JsonObject existing)
                 {
                     // Detach from the parsed document so it can be re-serialized freely.
                     return existing.DeepClone().AsObject();
-                }
-
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    return new JsonObject();
                 }
             }
             catch (JsonException)
@@ -235,9 +238,23 @@ namespace ResourceMonitorDaemon
             }
 
             // Never silently discard content we cannot parse: keep a copy next to the file.
-            File.Copy(FilePath, BackupPath, overwrite: true);
-            _logger?.LogWarning("User settings '{Path}' are not a valid JSON object; previous content backed up to {Backup}.", FilePath, BackupPath);
+            var backup = CreateUniqueBackupPath();
+            File.Copy(FilePath, backup, overwrite: false);
+            LastBackupPath = backup;
+            _logger?.LogWarning("User settings '{Path}' are not a valid JSON object; previous content backed up to {Backup}.", FilePath, backup);
             return new JsonObject();
+        }
+
+        private string CreateUniqueBackupPath()
+        {
+            var stem = $"{FilePath}.{DateTime.Now:yyyyMMdd-HHmmss}";
+            var candidate = stem + ".bak";
+            for (var i = 1; File.Exists(candidate); i++)
+            {
+                candidate = $"{stem}-{i}.bak";
+            }
+
+            return candidate;
         }
 
         private static void TryDelete(string path)
