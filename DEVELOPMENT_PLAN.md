@@ -8,12 +8,12 @@ ESP32 owns display behavior, including DAC mapping and stale-data fade-out.
 
 ## Current State
 
-Status as of 2026-08-16:
+Status as of 2026-11-22:
 
 - Phase 1: Complete
-- Phase 2: Complete
+- Phase 2: Complete (including the former remaining work)
 - Phase 3: In progress / not complete
-- Phase 4: Planned
+- Phase 4: Firmware side implemented; not yet validated on hardware
 - Phase 5: Planned
 
 Completed implementation summary:
@@ -27,10 +27,15 @@ Completed implementation summary:
   ignored `firmware/src/secrets.h`, copied from
   `firmware/src/secrets.example.h`.
 - A top-level README documents the real project state and local setup flow.
-- C++ PlatformIO tests cover metric payload parsing and DAC value mapping.
+- C++ PlatformIO tests cover metric payload parsing and DAC value mapping,
+  plus the provisioning boot decision, pairing code, serial PoP query
+  parsing, reconnect backoff, and BOOT button long-press detection.
+- Firmware Wi-Fi startup is non-blocking and BLE provisioning is implemented
+  per [PROVISIONING.md](PROVISIONING.md) (hardware validation pending).
 - C# tests cover MQTT percentage payload formatting and clamping.
 
 See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
+See [PROVISIONING.md](PROVISIONING.md) for the BLE pairing contract.
 See [HARDWARE.md](HARDWARE.md) for the current hardware design and open
 electrical/mechanical decisions.
 
@@ -66,12 +71,22 @@ reproducible configuration path for development.
 - `firmware/src/secrets.example.h` provides placeholder values only.
 - `.gitignore` excludes `firmware/src/secrets.h`, `bin/`, and `obj/` output folders.
 - Startup diagnostics print Wi-Fi state but not Wi-Fi passwords.
+- (2026-11-22) The blocking `while (WiFi.status() != WL_CONNECTED)` wait is
+  gone. `loop()` runs a non-blocking connection state machine with bounded
+  reconnect backoff; DAC stale-decay keeps running while Wi-Fi is down; mDNS
+  and the MQTT broker start once on the first connection.
+- (2026-11-22) A build with no credentials at all no longer waits forever: it
+  logs `no stored credentials and no secrets.h fallback` and enters BLE
+  provisioning (Phase 4). If provisioning cannot start it logs a rate-limited
+  error instead.
+- (2026-11-22) The SSID is printed once per successful connection only;
+  passwords are never printed. Wi-Fi diagnostics are rate-limited.
+- (2026-11-22) The PlatformIO platform (`espressif32 @ 7.0.1`) and the
+  DFRobot_GP8XXX library commit are pinned so builds are reproducible.
 
 ### Remaining Work
 
-1. Add a firmware diagnostic for missing `WIFI_SSID` so an unconfigured build
-   fails visibly instead of waiting forever for Wi-Fi.
-2. Avoid printing SSID values unless useful for diagnosis; never print passwords.
+None.
 
 ## Phase 3: Windows Configuration Module
 
@@ -111,12 +126,43 @@ opt-in feature, not a prerequisite for the wizard.
 
 ## Phase 4: ESP32 Provisioning and Secure Storage
 
-Status: Planned
+Status: Firmware side implemented (2026-11-22); not yet validated on hardware
+or end-to-end with the Windows client.
 
 ### Goal
 
 Allow Wi-Fi configuration without firmware recompilation while protecting
 credentials at rest and in transit.
+
+### Implemented (firmware)
+
+The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
+
+- BLE provisioning through Arduino `WiFiProv` (ESP-IDF `wifi_provisioning`
+  manager), Security1 with an 8-character Proof of Possession, advertised as
+  `PROV_RESMON_XXXXXX`; BT memory is released after provisioning.
+- The PoP is generated once with the hardware RNG and stored in NVS
+  (`resmon/pop`). It is shown on USB serial only in provisioning mode (a
+  rate-limited hint line and the `RESMON?POP` query).
+- Boot order: BOOT long-press request → stored credentials → compiled
+  `secrets.h` dev fallback (RAM-only) → provisioning.
+- Holding the on-board BOOT button (GPIO0) for 5 s resets the stored
+  credentials and restarts into provisioning.
+- Pure decision/format logic lives in `firmware/include` with Unity tests.
+
+### Remaining Work
+
+1. Bench-test on the ESP32-WROOM-32 + MOC9686 board: first-boot pairing,
+   wrong PoP, wrong password / unknown SSID, re-pair via BOOT long-press,
+   dev fallback, reconnect after AP loss, and BT memory release (heap before
+   and after). Record results in PROVISIONING.md.
+2. End-to-end test with the Windows pairing client.
+3. Decide on NVS/flash encryption before treating stored credentials as
+   product-grade (see Storage Policy).
+4. Optional device/MQTT settings from the payload below are **not**
+   provisioned: `WiFiProv` carries only SSID and passphrase, and hostname,
+   port, and topics stay compile-time defaults. Adding them would need a
+   custom protocomm endpoint and is deferred.
 
 ### Desired User Flow
 
@@ -200,6 +246,12 @@ provisioning, evaluate whether to:
 Do not implement custom BLE credential encryption unless there is a documented
 reason the supported provisioning paths cannot be used.
 
+Decision (2026-11-22): stay on Arduino through PlatformIO and use the core's
+`WiFiProv` library, which wraps the official ESP-IDF provisioning manager. No
+custom crypto. Consequences: Security1 only (core 2.0.17 has no Security2),
+and the larger BLE image needs the `min_spiffs.csv` partition table (OTA
+layout kept, SPIFFS reduced to 128 KB).
+
 ## Phase 5: Additional Metrics and Hardware Expansion
 
 Status: Planned
@@ -229,7 +281,8 @@ gauges are known and documented.
 
 For every firmware change:
 
-1. Run `platformio run` from the repository root.
+1. Run `platformio run -e esp32dev` from the repository root, and compile the
+   tests with `platformio test -e esp32dev --without-uploading --without-testing`.
 2. Verify startup diagnostics show build, feature, I2C, DAC, heap, Wi-Fi, and
    MQTT state without exposing secrets.
 3. Test valid, invalid, stale, and reconnecting metric messages.
