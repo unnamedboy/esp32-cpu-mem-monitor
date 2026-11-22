@@ -729,6 +729,33 @@ namespace ResourceMonitorDaemon.Tests
                 AssertTrue(logger.Lines.Any(l => l.Contains("a different network than requested")), "missing mismatch log");
                 AssertTrue(logger.Lines.All(l => !l.Contains("office-net") && !l.Contains("home-net")), "SSID leaked into the log");
             })),
+            ("Connected and WifiStatus ToString never contain the SSID", () =>
+            {
+                var connected = new WifiProvisioningResult.Connected("192.168.1.50")
+                {
+                    JoinedSsid = "SecretHomeNet", AlreadyConnected = true, JoinedDifferentNetwork = true,
+                };
+                var text = connected.ToString();
+                AssertTrue(!text.Contains("SecretHomeNet"), "SSID leaked from Connected.ToString()");
+                AssertTrue(text.Contains("192.168.1.50") && text.Contains("<redacted>") && text.Contains("AlreadyConnected = True"),
+                    "ToString lost the non-secret fields");
+                AssertTrue(!$"{connected}".Contains("SecretHomeNet"), "SSID leaked through interpolation");
+
+                var status = new WifiStatus(WifiStationState.Connected, null, "192.168.1.50") { JoinedSsid = "SecretHomeNet" };
+                AssertTrue(!status.ToString().Contains("SecretHomeNet"), "SSID leaked from WifiStatus.ToString()");
+                AssertTrue(status.ToString().Contains("State = Connected"), "WifiStatus ToString lost the state");
+                AssertTrue(new WifiProvisioningResult.Connected(null).ToString().Contains("JoinedSsid = (none)"), "missing (none)");
+            }),
+            ("Empty or absent connected.ssid decodes as not reported", () =>
+            {
+                var ip = ToHex(Encoding.ASCII.GetBytes("192.168.1.50"));
+                // connected{ip4_addr, ssid = ""}: 0A 0C ip, 1A 00 -> 16 bytes = 0x10
+                var empty = WifiConfigMessages.DecodeResponse(Hex("0801" + "5A12" + "5A10" + "0A0C" + ip + "1A00"));
+                AssertEqual<string?>(null, empty.ConnectedSsid);
+                // ssid made only of NUL padding is also "not reported"
+                var nul = WifiConfigMessages.DecodeResponse(Hex("0801" + "5A14" + "5A12" + "0A0C" + ip + "1A020000"));
+                AssertEqual<string?>(null, nul.ConnectedSsid);
+            }),
             ("Already-connected device that does not report its SSID is not flagged as different", () => RunAsync(async () =>
             {
                 var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 0, JoinedSsid = "" };
@@ -825,7 +852,8 @@ namespace ResourceMonitorDaemon.Tests
         {
             if (result is not WifiProvisioningResult.Connected connected)
             {
-                throw new InvalidOperationException($"expected Connected, got {result}");
+                // Only the type name: never interpolate a result that may carry an SSID.
+                throw new InvalidOperationException($"expected Connected, got {result.GetType().Name}");
             }
 
             AssertEqual<string?>(expectedIp, connected.Ip4Address);

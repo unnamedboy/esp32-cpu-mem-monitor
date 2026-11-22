@@ -225,7 +225,8 @@ UTF-8 encoding and the unencrypted SetConfig message) are zeroed after
 encryption. It is never logged, stored, or put in exception messages. The
 pairing code follows the same rules: its hash and the session key are zeroed,
 it is never logged, and it is redacted from `ToString()`. The SSID is not
-logged either. .NET's AES object keeps its own internal copy of the session
+logged either, and `Connected` and `WifiStatus` redact it from `ToString()`.
+.NET's AES object keeps its own internal copy of the session
 key until it is disposed.
 
 ### Dependencies
@@ -282,7 +283,8 @@ key until it is disposed.
     - `JoinedDifferentNetwork` is true when that SSID differs from the one the
       user just entered. The wizard should then say "the device is already on
       network X" instead of reporting success for the requested network.
-    - If the device does not report its SSID, the flag stays false.
+    - If the device does not report its SSID (field absent, empty or only NUL
+      padding), the flag stays false.
     - The SSID is never logged; the log only says whether it matched.
     - On a real device, answering Connected also starts the firmware's
       end-of-provisioning countdown.

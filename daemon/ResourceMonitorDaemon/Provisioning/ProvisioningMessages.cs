@@ -356,7 +356,10 @@ namespace ResourceMonitorDaemon.Provisioning
                                 }
                                 else if (f2 == ProtoFields.ConnectedSsid && w2 == ProtoWireType.LengthDelimited)
                                 {
-                                    connectedSsid = Encoding.UTF8.GetString(connected.ReadLengthDelimited()).TrimEnd('\0');
+                                    // A present-but-empty ssid means "not reported" (null), so that it can never
+                                    // count as a different network.
+                                    var ssid = Encoding.UTF8.GetString(connected.ReadLengthDelimited()).TrimEnd('\0');
+                                    connectedSsid = ssid.Length == 0 ? null : ssid;
                                 }
                                 else
                                 {

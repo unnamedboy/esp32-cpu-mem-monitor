@@ -34,6 +34,16 @@ namespace ResourceMonitorDaemon.Provisioning
             /// reporting success for the requested network. False if the device did not report its SSID.
             /// </summary>
             public bool JoinedDifferentNetwork { get; init; }
+
+            // Record ToString() would print JoinedSsid; redact it so logging a result never leaks the SSID.
+            protected override bool PrintMembers(StringBuilder builder)
+            {
+                builder.Append("Ip4Address = ").Append(Ip4Address)
+                    .Append(", JoinedSsid = ").Append(JoinedSsid is null ? "(none)" : "<redacted>")
+                    .Append(", AlreadyConnected = ").Append(AlreadyConnected)
+                    .Append(", JoinedDifferentNetwork = ").Append(JoinedDifferentNetwork);
+                return true;
+            }
         }
 
         /// <summary>The device gave up joining Wi-Fi (wrong password or network not found).</summary>
@@ -56,6 +66,16 @@ namespace ResourceMonitorDaemon.Provisioning
     {
         /// <summary>SSID reported with a Connected status, or null. Never log it.</summary>
         public string? JoinedSsid { get; init; }
+
+        // Record ToString() would print JoinedSsid; redact it so logging a status never leaks the SSID.
+        private bool PrintMembers(StringBuilder builder)
+        {
+            builder.Append("State = ").Append(State)
+                .Append(", FailReason = ").Append(FailReason)
+                .Append(", Ip4Address = ").Append(Ip4Address)
+                .Append(", JoinedSsid = ").Append(JoinedSsid is null ? "(none)" : "<redacted>");
+            return true;
+        }
     }
 
     /// <summary>
