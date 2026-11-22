@@ -85,7 +85,7 @@ transport/ble_cli.py}` at
 | `BleProvisioningTransport` | WinRT GATT client. Finds service `021a9004-0382-4aea-bff4-6b3f1c5adfb4`, maps endpoints by their 0x2901 user description, sends each request as write-with-response then reads the response from the same characteristic. |
 | `IProvisioningTransport` | `SendAsync(endpoint, data, ct)` seam; the tests use an in-memory fake device behind it. |
 | `Security1Session` | X25519 key exchange, key = shared secret XOR SHA-256(pairing code), AES-256-CTR with IV = device random and one keystream for all traffic, Command0/1 handshake and verifier check. |
-| `WifiConfigClient` | SetConfig -> ApplyConfig -> GetStatus polling (at most 1 per second, at most 30 s). Result: `Connected(ip4)`, `Failed(AuthError or NetworkNotFound)` or `Timeout`. |
+| `WifiConfigClient` | SetConfig -> ApplyConfig -> GetStatus polling (at most 1 per second, at most 30 s including an in-flight exchange). Result: `Connected(ip4)`, `Failed(AuthError or NetworkNotFound)`, `Timeout`, or `ConnectionLost` (link dropped after the settings were applied; the device may have joined Wi-Fi). |
 | `SerialPopReader`, `PopLineParser`, `PairingCode` | USB serial pairing-code query (`RESMON?POP`), reply parsing and pairing-code validation. |
 | `ProtoWriter` / `ProtoReader`, `Sec1Messages`, `WifiConfigMessages` | Minimal hand-written protobuf codec for just these messages. |
 
@@ -93,12 +93,18 @@ Errors: `PairingCodeRejectedException` (wrong pairing code),
 `ProvisioningTransportException` with an `Error` kind (Bluetooth off or
 unavailable, device not found or disconnected, timeout, service or endpoint
 missing, GATT error), and `ProvisioningProtocolException` (unexpected device
-answers). Messages can be shown to the user.
+answers), including `ProvisioningRetryRejectedException` when the device
+refuses a new attempt after a failed one. Messages can be shown to the user.
 
-Secrets: the Wi-Fi password is only held in buffers that are zeroed after
+Secrets: the Wi-Fi password arrives as a .NET `string`, which cannot be wiped,
+so the caller (the wizard) should drop its references as soon as
+`ProvisionAsync` returns. Inside the library, the byte copies made from it (the
+UTF-8 encoding and the unencrypted SetConfig message) are zeroed after
 encryption. It is never logged, stored, or put in exception messages. The
-pairing code is never logged and is redacted from `ToString()`. The SSID is not
-logged either.
+pairing code follows the same rules: its hash and the session key are zeroed,
+it is never logged, and it is redacted from `ToString()`. The SSID is not
+logged either. .NET's AES object keeps its own internal copy of the session
+key until it is disposed.
 
 ### Dependencies
 
@@ -118,9 +124,36 @@ logged either.
   `PairingCodeRejectedException` (reason `DeviceClosedConnection`) when the link
   fails during Command1. It also reports it (reason `VerificationMismatch`) if
   the device's verifier does not match.
+- If the write for Command1 is acknowledged anyway (the prepared-write path in
+  `protocomm_ble.c` acknowledges even on failure), the read returns the stale
+  Response0. The client treats that as a rejected pairing code too.
 - The device ends the protocomm session when BLE disconnects. The transport
-  keeps the link open with `GattSession.MaintainConnection` and fails all later
-  requests after any disconnect.
+  keeps the link open with `GattSession.MaintainConnection`. If a disconnect
+  has been seen, the next request fails before it is written. A read that
+  already completed is still returned, even if the link drops right after.
+- **BLE teardown after success.** In IDF v4.4.7, the GetStatus handler calls
+  `wifi_prov_mgr_done()` as soon as it reports Connected (`handlers.c`). With
+  the default auto-stop, BLE then goes down after `max(cleanup_delay, 100 ms)`
+  (`manager.c`). The 30 s auto-stop timer is only a fallback. The contract
+  therefore requires the firmware to call `wifi_prov_mgr_disable_auto_stop(5000)`
+  or longer, and the client relies on that. The client also copes when the
+  firmware does not: a disconnect right after a Connected read still returns
+  `Connected`. A disconnect while still waiting returns `ConnectionLost`, and
+  the wizard should then try the normal MQTT connection to `resmon.local`
+  before reporting failure.
+- **Retry after a failure.** After a failed attempt, `wifi_prov_mgr` rejects
+  new credentials (ApplyConfig returns InternalError) unless the firmware calls
+  `wifi_prov_mgr_reset_sm_state_on_failure()`, which the contract requires. If
+  the device refuses a retry anyway, the client throws
+  `ProvisioningRetryRejectedException` with a "power-cycle or hold BOOT"
+  message.
+- An empty GetStatus response is not treated as Connected, even though
+  Connected is the protobuf default value. The client only reports Connected
+  when the `connected` sub-message is present.
+- The protobuf reader checks tag ranges, wire types and lengths, so malformed
+  input from any nearby device advertising `PROV_RESMON_*` can only raise
+  `ProvisioningProtocolException`. This is tested with crafted inputs and a
+  seeded fuzz loop.
 - If an exchange fails half-way, the session is marked unusable because the
   client and device keystreams can no longer be aligned. Reconnect and start a
   new session.
@@ -136,10 +169,18 @@ Covered by unit tests (all in-memory):
 - X25519 against the RFC 7748 section 6.1 vectors;
 - AES-256-CTR against NIST SP 800-38A F.5.5/F.5.6, plus keystream continuity
   across calls of uneven lengths;
-- a full round trip against a fake device that implements the device side
-  through separate code paths (BouncyCastle `X25519Agreement` and
-  `SicBlockCipher`): Connected, wrong pairing code, forged verifier,
-  AuthError, NetworkNotFound, timeout, and the session becoming unusable;
+- a full round trip against an in-memory fake device. Its crypto uses
+  different code paths from the client (BouncyCastle `X25519Agreement` and
+  `SicBlockCipher`). Its message layouts are written with literal field
+  numbers, but its low-level protobuf framing reuses the client's
+  `ProtoReader`/`ProtoWriter`, so it does not check varint or tag encoding
+  independently; the byte-level ProtoWire tests cover that. Cases covered:
+  Connected, wrong pairing code (dropped link or stale Response0), forged
+  verifier, AuthError, NetworkNotFound, timeout (including a hung exchange),
+  a link lost while waiting, retry after a failure, an empty GetStatus,
+  disposal during an exchange, and the session becoming unusable;
+- no golden transcript from the reference Python client: neither the system
+  Python nor PlatformIO's Python has the `cryptography` package installed;
 - serial reply parsing, scan de-duplication, and `ProvisioningService` progress
   and log redaction.
 
@@ -154,9 +195,9 @@ a physical ESP32 yet. In particular:
 - the USB serial query: whether opening the port with DTR/RTS deasserted
   avoids resetting this board's USB-UART bridge, and how Bluetooth virtual COM
   ports behave (probes are abandoned after 1.5 s);
-- how the firmware behaves after `Connected`. The client expects BLE to stay up
-  long enough to read the status; the IDF default auto-stop is 30 s after the
-  device gets an IP address.
+- the real BLE teardown timing after `Connected` and after
+  `wifi_prov_mgr_disable_auto_stop`. The fake device only simulates a link
+  drop right after the Connected read, or while still connecting.
 
 ## Tests
 
