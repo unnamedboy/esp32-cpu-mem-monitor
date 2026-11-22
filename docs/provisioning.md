@@ -49,16 +49,19 @@ daemon running.
    ESP32 USB-serial bridge ([which ones](#serial-pairing-code-query)), the
    wizard reads the code over the serial port and shows *Read automatically over
    USB*. Close any serial monitor first: a COM port can only be open in one program.
-   Otherwise type the 8-character code from the serial log. Codes use the letters A–Z without I and
-   O and the digits 2–9; case, spaces and dashes are ignored.
+   The USB read runs when you select a device; to retry it (for example after plugging
+   in the cable), click **Rescan** and select the device again. Otherwise type the
+   8-character code from the serial log. Codes use the letters A–Z without I and O and
+   the digits 2–9; case, spaces and dashes are ignored.
 5. **Wi-Fi.** Enter the network name (SSID) and password, or click **Use this PC's
    Wi-Fi** to copy the network this PC is on. Windows 11 may ask once whether apps may
    use your location, because it treats Wi-Fi details as location data; if you
-   decline, type the name. **The ESP32 supports 2.4 GHz only.** If you use **Use this PC's
-   Wi-Fi** and this PC is connected on 5 or 6 GHz, the wizard warns you; either way,
-   make sure the router also offers the network on 2.4 GHz.
-6. **Click Pair.** Progress shows each step: connect, secure session, send
-   Wi-Fi settings, wait for Wi-Fi. **Cancel** stops the attempt; closing the wizard
+   decline, type the name. **The ESP32 supports 2.4 GHz only.** If you use **Use this
+   PC's Wi-Fi** and Windows reports that this PC is connected on 5 or 6 GHz, the wizard
+   warns you; either way, make sure the router also offers the network on 2.4 GHz.
+6. **Click Pair.** Progress shows the steps: connect to device, secure session, send
+   Wi-Fi settings, wait for Wi-Fi, save device address and daemon connects (after a lost
+   Bluetooth link, the save step checks the network connection instead). **Cancel** stops the attempt; closing the wizard
    cancels everything.
 7. **Done.** When the device reports its IP address, the wizard saves it as
    `FallbackAddress` in the user settings file and changes nothing else. The daemon
@@ -84,8 +87,8 @@ afterwards, and the password is never written to disk or to the log.
 | Bluetooth is off / no usable BLE adapter | Turn Bluetooth on, or use a PC with a BLE adapter. |
 
 Reopening the wizard right after closing it can miss the USB pairing code, because an
-abandoned serial probe may still hold the COM port for a moment. Wait briefly and
-select the device again, or type the code.
+abandoned serial probe may still hold the COM port for a moment. Wait briefly, click
+**Rescan** and select the device again (that repeats the USB read), or type the code.
 
 ## Re-pairing and changing networks
 
@@ -99,9 +102,11 @@ credentials and restarts straight into pairing mode.
   GPIO0 low ([why](hardware.md#boot-button-gpio0)).
 - Do not hold BOOT while pressing EN/RESET or plugging in power: that starts the ESP32's
   ROM download mode instead of the firmware.
-- If the device is power-cycled before pairing completes, the request has already been
-  used up: it boots with the `secrets.h` fallback if there is one, otherwise into
-  pairing mode again (the credentials are already erased).
+- If the device is power-cycled before it has received new Wi-Fi settings, the request
+  has already been used up and the old credentials are erased: it boots with the
+  `secrets.h` fallback if there is one, otherwise into pairing mode again. Once it has
+  received settings (for example after an attempt that timed out), it boots with those
+  instead; use the BOOT gesture again rather than power-cycling.
 
 ### Boards that already have Wi-Fi settings
 
@@ -126,7 +131,7 @@ For development without the pairing app, copy
 `firmware/src/secrets.h` (ignored by git) and set `WIFI_SSID` and `WIFI_PASSWORD`. The
 fallback is used only when no paired credentials are stored, and it is kept in RAM
 only, so it is never mistaken for paired credentials later. Rebuild and upload the
-firmware after creating the file. Stored credentials always win; to go back to the
+firmware after creating the file. Stored credentials take priority over the fallback; to go back to the
 fallback, use the BOOT gesture and then power-cycle without pairing.
 
 Without pairing, the daemon has no saved IP address (`FallbackAddress`). If
@@ -154,8 +159,8 @@ address from the serial line `Wi-Fi connected: ssid=… ip=…`.
 - **USB is trusted.** Anyone with physical USB access can read the code from the serial
   log or with the [serial query](#serial-pairing-code-query) while the device is in
   pairing mode. The code is not printed outside pairing mode.
-- **Pairing window.** Pairing mode only runs on a device without credentials or after
-  the BOOT gesture. Bluetooth is turned off about 35 s after a successful pairing, and
+- **Pairing window.** Pairing mode only runs on a device without stored or compiled-in
+  credentials, or after the BOOT gesture. Bluetooth is turned off about 35 s after a successful pairing, and
   on boots that don't pair the Bluetooth memory is released entirely.
 - **Credentials on the device** are stored in the ESP32's standard Wi-Fi NVS storage,
   **without** flash or NVS encryption. Someone with the board can read them out. See the
@@ -195,8 +200,9 @@ connection. The client treats a dropped link during step 4 (or a stale step-2 re
 read back from the characteristic) as "wrong pairing code". The device keeps
 advertising, so the user can retry.
 
-If an exchange fails half-way, the two keystreams can no longer be aligned; the client
-discards the session and reconnects.
+If an exchange fails half-way, the two keystreams can no longer be aligned. The client
+marks the session unusable and the attempt ends; there is no automatic reconnect. Each
+new attempt (clicking **Pair** again) opens a new BLE connection and session.
 
 ### Sending Wi-Fi settings
 
@@ -286,8 +292,8 @@ before the client can read the result). Implementation notes:
 - **Wi-Fi drops during the 35 s after success** (for example the router reboots): the
   provisioning manager reports this as a credential failure, but the firmware keeps the
   credentials, stops BLE early, and lets its normal reconnect policy take over.
-- **An IP address before the credentials are accepted.** On every pairing the device
-  gets its IP address a moment before the manager confirms success, so the firmware
+- **An IP address before the credentials are accepted.** On a successful pairing the
+  device normally gets its IP address a moment before the manager confirms success, so the firmware
   waits for that confirmation. It logs a warning only if the wait lasts 5 s.
 - **Build settings.** BLE pairing depends on a linker flag and a larger app partition;
   see [firmware.md](firmware.md#toolchain).

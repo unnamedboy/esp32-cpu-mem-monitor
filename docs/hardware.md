@@ -48,7 +48,7 @@ A CPU/MEM gauge face for a generic square panel voltmeter is in
 | --- | --- | --- | --- |
 | 5 V / USB | USB-C | ESP32 board and carrier | Confirmed for development; keep USB-C reachable for flashing and serial |
 | 3.3 V logic | Board/carrier regulator | ESP32 GPIO and I2C | Confirmed |
-| DAC output | DAC module | CPU and memory gauge inputs | Configured 0–5 V; gauge requirements unverified |
+| DAC output | DAC module | CPU and memory gauge inputs | Configured 0–5 V (module output unverified); gauge requirements unverified |
 | 12 V backlight | Boost converter; its 5 V input source is undecided and unverified | Voltmeter backlights only | Selected; verify voltage under load, input current, polarity and heat |
 
 Check the boost converter's continuous current rating, wire colours, protection and
@@ -66,7 +66,7 @@ All assignments live in [`firmware/src/config.h`](../firmware/src/config.h).
 | DAC | address `0x59` (`DAC_I2C_ADDRESS`) | I2C device | ESP32 side 3.3 V; module pull-up voltage unverified | Verify against the real module |
 | CPU gauge | DAC channel 0 (`CPU_OUTPUT_CHANNEL`) | DAC output | Configured 0–5 V (module output unverified) | `resmon/cpu` |
 | Memory gauge | DAC channel 1 (`MEM_OUTPUT_CHANNEL`) | DAC output | Configured 0–5 V (module output unverified) | `resmon/mem` |
-| BOOT button | GPIO0 (`BOOT_BUTTON_PIN`) | Input | 3.3 V | On-board button, no extra wiring |
+| BOOT button | GPIO0 (`BOOT_BUTTON_PIN`) | Input | 3.3 V | On-board button, no extra wiring (assumed from the standard ESP32 dev-board design; not yet checked on this board) |
 
 The firmware quantises each percentage to 256 steps (0–255) and scales that to the
 GP8413's 15-bit code (0–32767), so 100 % is the top of the configured 0–5 V range. The
@@ -101,10 +101,10 @@ Rows marked unverified are design intent, not tested wiring.
 
 | Component | ESP32 connection | Direction | Voltage domain | Power | Protection/conditioning | Firmware configuration | Validation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GP8413-compatible I2C DAC (exact module unverified) | I2C: SDA GPIO21, SCL GPIO22 (carrier I2C header; exact label unverified) | SDA bidirectional; SCL output from ESP32 (open-drain; bus is bidirectional); analogue outputs | ESP32 side 3.3 V; module pull-up voltage unverified; outputs configured 0–5 V | Unverified: module supply pin and allowed voltage | Unverified: pull-ups, output loading | `DAC_I2C_ADDRESS = 0x59`, `CPU_OUTPUT_CHANNEL = 0`, `MEM_OUTPUT_CHANNEL = 1` | Unverified |
+| GP8413-compatible I2C DAC (exact module unverified) | I2C: SDA GPIO21, SCL GPIO22 (carrier I2C header; exact label unverified) | SDA bidirectional; SCL output from ESP32 (open-drain; bus is bidirectional); analogue outputs | ESP32 side 3.3 V; module pull-up voltage unverified; outputs configured 0–5 V | Unverified: module supply pin, allowed voltage and GND connection | Unverified: pull-ups, output loading | `DAC_I2C_ADDRESS = 0x59`, `CPU_OUTPUT_CHANNEL = 0`, `MEM_OUTPUT_CHANNEL = 1` | Unverified |
 | CPU gauge (panel voltmeter) | DAC channel 0 | DAC output → gauge input | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/cpu`, 0–100 % (out-of-range values are ignored) | Unverified |
 | Memory gauge (panel voltmeter) | DAC channel 1 | DAC output → gauge input | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/mem`, 0–100 % (out-of-range values are ignored) | Unverified |
-| On-board BOOT push-button (ESP32-WROOM-32 dev board; board revision unverified) | GPIO0, on the board; no header wiring | Input | 3.3 V (button pulls GPIO0 to GND) | Board 3.3 V and GND | Internal pull-up (`INPUT_PULLUP`); any on-board pull-up unverified; 50 ms firmware debounce | `BOOT_BUTTON_PIN = 0`, `BOOT_BUTTON_ACTIVE_LOW = true`, `BOOT_BUTTON_DEBOUNCE_MS = 50`, `BOOT_BUTTON_MIN_HOLD_MS = 5000`, `BOOT_BUTTON_MAX_HOLD_MS = 15000` | Unverified: hold-and-release and the auto-program interaction not bench-tested |
+| On-board BOOT push-button (ESP32-WROOM-32 dev board; board revision unverified) | GPIO0, on the board; no header wiring | Input | 3.3 V (button pulls GPIO0 to GND; assumed from the standard ESP32 dev-board design, not yet checked on this board) | Board 3.3 V and GND | Internal pull-up (`INPUT_PULLUP`); any on-board pull-up unverified; 50 ms firmware debounce | `BOOT_BUTTON_PIN = 0`, `BOOT_BUTTON_ACTIVE_LOW = true`, `BOOT_BUTTON_DEBOUNCE_MS = 50`, `BOOT_BUTTON_MIN_HOLD_MS = 5000`, `BOOT_BUTTON_MAX_HOLD_MS = 15000` | Unverified: hold-and-release and the auto-program interaction not bench-tested |
 | Voltmeter backlights | None | Power only | Planned 12 V rail (backlight rating unverified) | Boost converter output; converter input source undecided and unverified | Unverified: polarity, current draw, switch/fuse, shared ground | None | Unverified load test |
 
 When you wire or change a connection, update this table with the same fields and say

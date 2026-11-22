@@ -69,7 +69,12 @@ rather than scattering constants or branching through `main.cpp`.
 
 ## Main loop
 
-`loop()` never blocks. Each pass:
+`loop()` is designed not to block. There are two known exceptions: a `resmon/status`
+subscriber that stops reading can stall it
+([known limitation](protocol.md#known-limitation)), and when provisioning gives up and
+switches to the `secrets.h` fallback while the provisioning manager is still running,
+shutting the manager down can wait once for up to the BLE cleanup delay (5 s). Each
+pass:
 
 - reads the BOOT button (50 ms debounce);
 - reads at most 64 bytes of serial input;
@@ -111,9 +116,9 @@ provisioning manager has started Wi-Fi itself.
 
 ### Outputs
 
-Both gauges stay at 0 V from boot until the first valid message for them arrives.
-A valid payload (`0..100`; anything else is ignored) is quantised to 0–255 and
-written to the DAC immediately, scaled to the 15-bit code 0–32767. After 5 s without an
+If the DAC is found, `initDac()` sets both outputs to DAC code 0, and they stay there
+until the first valid message for them arrives. A valid payload (`0..100`; anything
+else is ignored) is quantised to 0–255 and written to the DAC at once, scaled to the 15-bit code 0–32767. After 5 s without an
 update a metric falls by one step every 50 ms until it reaches zero. Re-pairing with the
 BOOT button sets both outputs to zero before the restart.
 

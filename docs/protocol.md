@@ -79,7 +79,7 @@ Rules for consumers:
 
 ### How the daemon uses it
 
-The daemon subscribes to `Device:StatusTopic` after every connect (it uses a clean
+The daemon subscribes to `Device:StatusTopic` after every successful connect (it uses a clean
 session, so each reconnect needs a new subscription). It accepts a message only if it
 is valid UTF-8, at most 1 KB, a JSON object, and has an integer `v` of 1. Valid
 messages are rate-limited to a burst of 3 followed by one message per 5 s; messages

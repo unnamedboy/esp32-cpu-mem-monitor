@@ -16,7 +16,7 @@ URL, tenant or token: you enter them yourself.
    and fill in URL, Auth mode, Username and Token.
 3. Click **Test**. It pushes one test line and shows the HTTP status (Loki
    answers 204 on success) or the error.
-4. Click **Save**. The change applies immediately. Turning the sink off stops collection
+4. Click **Save**. The change applies without a restart. Turning the sink off stops collection
    and discards anything still queued.
 
 `/loki/api/v1/push` is appended to the URL only when it has no path, so a full push URL
@@ -98,7 +98,8 @@ The sink's own messages, such as failed pushes, stay in the local log.
 
 ## Reliability
 
-The sink never blocks or slows sampling or MQTT publishing.
+Sampling and MQTT publishing never wait for Loki; the sampling loop only adds a metrics
+entry to the queue.
 
 - Network errors, timeouts and 5xx responses are retried with backoff (1 s doubling to
   60 s) for as long as the outage lasts. Entries are lost only if the bounded queue

@@ -45,9 +45,10 @@ zero about 13 s later.
 - **Credentials belong to the device.** Wi-Fi credentials go from the wizard to the
   ESP32 over an encrypted BLE session (ESP-IDF's official provisioning, no custom
   crypto) and are stored only there. The PC never stores the Wi-Fi password.
-- **Non-blocking everywhere.** The firmware's `loop()` and the daemon's sampling loop
-  never wait for the network; connecting, reconnecting and pushing to Loki happen in the
-  background with bounded backoff.
+- **Non-blocking by design.** The firmware's `loop()` and the daemon's sampling loop
+  don't wait for the network; connecting, reconnecting and pushing to Loki happen in the
+  background with bounded backoff. The firmware has two known exceptions, listed in
+  [firmware.md](firmware.md#main-loop).
 - **Optional hardware fails safe.** The firmware compiles and runs without a DAC and
   reports it in its diagnostics. The daemon runs without a device and keeps retrying.
 - **Testable cores.** Firmware decisions live in pure headers under `firmware/include`

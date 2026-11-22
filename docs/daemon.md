@@ -44,14 +44,14 @@ is a plain console runner with no test framework.
 
 - **UI thread.** `Program.Main` runs on an STA thread and owns the Windows Forms message
   loop: tray icon, notifications, dialogs and the pairing wizard. The wizard's Bluetooth
-  and serial work is async on this thread, so the UI never blocks.
+  and serial work is async on this thread, so the UI stays responsive.
 - **Sampling loop.** `MonitorService` is a hosted `BackgroundService`. It samples on a
   fixed-rate schedule (missed ticks are skipped, not bunched up) and also wakes when
   settings change.
 - **Connection attempts** run on the thread pool. A sampling tick only checks state and
   starts an attempt when one is due; it never waits for a connect.
-- **Loki sink** (if enabled) runs its own send loop and never blocks the loggers or the
-  sampling loop.
+- **Loki sink** (if enabled) runs its own send loop; loggers and the sampling loop only
+  enqueue entries and never wait for the network.
 
 Startup order: the tray is created before the host starts, so the "connection failed"
 notification handler is attached before the first attempt can fail. The UI language is
@@ -93,7 +93,8 @@ Settings come from these sources, lowest to highest priority:
 The user file holds **only the values set there**, so anything not listed keeps coming
 from `appsettings.json` or the defaults. Both JSON files are watched and changes apply
 within about a second, without a restart. A new interval reschedules the next sample;
-a host, fallback or port change drops the connection and reconnects immediately.
+a host, fallback or port change drops the connection and reconnects at once (or on
+resume, if sending is paused).
 
 Invalid values never stop the daemon: they are replaced by the default or clamped, with
 a warning in the log. A JSON file that cannot be parsed contributes nothing and is
@@ -160,10 +161,12 @@ only be set in JSON or the environment.
   stays up for min(`ReconnectMaxBackoffMs`, 30 s) does. A broker that accepts and
   immediately drops connections therefore stays backed off.
 - A failed publish marks the connection lost.
-- Each outage shows one "MQTT connection failed" notification, and one "MQTT
-  reconnected" notice when it recovers. The first failure is logged as a warning; later
-  ones at Debug, with a summary every 20 attempts.
-- The status topic is subscribed in every connect attempt (clean session). A topic
+- The "MQTT connection failed" notification is shown only when a connect attempt fails,
+  at most once per outage. Only after that notification has been shown does a later
+  successful connect show "MQTT reconnected". A dropped connection that the next attempt
+  restores shows neither. The first failed attempt is logged as a warning, later ones at
+  Debug, with a summary every 20 attempts.
+- The status topic is subscribed after every successful connect (clean session). A topic
   change re-subscribes in the background without reconnecting. A failed subscription
   is logged and never affects publishing.
 - `ConnectionGeneration` increases with every new connection; the pairing wizard uses
@@ -201,7 +204,7 @@ DeviceStatusForwarder ─┘   (bounded,         (batching,       (HttpClient, g
                             drop-oldest)      retry)            auth, 10 s timeout)
 ```
 
-- **Sources never block.** They enqueue and return. The queue assigns strictly
+- **Sources don't wait for the network.** They enqueue and return. The queue assigns strictly
   increasing nanosecond timestamps across the process. Lines over 16,384 characters are truncated
   with a marker.
 - **No feedback loop.** The logger provider ignores the
@@ -238,8 +241,8 @@ The UI is in English (the neutral language) and Simplified Chinese.
   the MQTT payloads are unaffected.
 - **Live switching.** `UiLanguageMonitor` re-applies the setting on every configuration
   reload. The tray menu re-reads its texts at once. Each dialog captures a `StringSet`
-  when it opens and keeps that language for everything it shows later, so a dialog never
-  mixes languages.
+  when it opens and keeps that language for everything it shows later, so a dialog does
+  not mix languages (apart from Windows' own message-box buttons).
 - **Logs stay English.** Where a message is both logged and shown, the code carries a
   `UiMessage` (a key plus arguments, created only through typed factories in
   `UiMessage.Factories.cs`). The log gets the English text with configuration keys

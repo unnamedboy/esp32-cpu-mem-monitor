@@ -54,8 +54,8 @@ with nothing attached, so you can start with just the board on USB.
 What the firmware expects: a GP8413-compatible DAC (DFRobot GP8XXX library) at I2C
 address `0x59`, on the I2C bus at GPIO21 (SDA) and GPIO22 (SCL); the actual module is
 not yet verified. The address is `DAC_I2C_ADDRESS` in
-[`firmware/src/config.h`](firmware/src/config.h). Many GP8413 boards set their address
-with jumpers or switches, so check that the two match.
+[`firmware/src/config.h`](firmware/src/config.h). Check whether your module has address
+jumpers or switches, and that they match.
 
 Before wiring anything, read the [connection table](docs/hardware.md#connections) and
 the [safety notes](docs/hardware.md#electrical-safety), in particular the check of the
@@ -108,7 +108,8 @@ daemon\ResourceMonitorDaemon\bin\Release\net9.0-windows10.0.19041.0\ResourceMoni
 
 The app lives in the notification area; on Windows 11 its icon may be in the hidden-icons
 overflow. Until a device is paired, an "MQTT connection failed" notification (on the
-first run: *No device found — click to pair*) is expected. There is no installer yet;
+[first run](docs/daemon.md#first-run-pairing-prompt): *No device found — click to
+pair*) is expected. There is no installer yet;
 to start the daemon with Windows, put a shortcut to the exe in your Startup folder.
 
 ### 3. Pair the device
@@ -143,7 +144,7 @@ separates sections) override both ([how the layers work](docs/daemon.md#layers))
 | `Ui:Language` | `auto` | `auto`, `en` or `zh-Hans` |
 
 Changes to the JSON files apply while the daemon runs; a host or port change reconnects
-automatically. Invalid values are reset to the default or clamped into range, with a
+at once (or on resume, if sending is paused). Invalid values are reset to the default or clamped into range, with a
 warning in the log.
 
 Environment variables are read only when the daemon starts. Set them and start the exe
@@ -175,8 +176,8 @@ The tray menu, notifications and dialogs are available in English and Simplified
 Chinese. With `auto` the daemon follows the Windows display language: Simplified
 Chinese display languages get the Chinese UI, everything else (including Traditional
 Chinese) gets English. Change it with **Language** in the settings dialog, or force it with
-`RESMON_Ui__Language`. The menu switches immediately; dialogs that are already open keep
-their language. The log is always English.
+`RESMON_Ui__Language`. The menu switches as soon as the setting is applied; dialogs that are already open
+keep their language. The log is always English.
 
 The documentation uses the English labels; the Chinese UI has the same layout and menu
 order.
@@ -188,7 +189,7 @@ order.
 | "MQTT connection failed" notification | Is the ESP32 powered and on the same network? Does `resmon.local` resolve on this PC? Pairing saves the device's IP as a fallback; you can also set **Host** to the IP. The daemon keeps retrying in the background. |
 | Gauges sink to zero | No valid data for 5 s: sending is paused (tray menu), the daemon is not running, or the connection dropped. |
 | Device doesn't show up in the wizard | It is not in pairing mode: use the BOOT gesture (hold 5–15 s, release) and **Rescan**. Check that Bluetooth is on. |
-| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read is only tried on ports that could be an ESP32 USB-serial bridge ([rules](docs/provisioning.md#serial-pairing-code-query)); otherwise type the code from the serial log. |
+| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read is only tried on ports that could be an ESP32 USB-serial bridge ([rules](docs/provisioning.md#serial-pairing-code-query)); to retry the USB read, click **Rescan** in the wizard and select the device again; otherwise type the code from the serial log. |
 | Pairing fails | See the [message table](docs/provisioning.md#if-pairing-fails). Remember the ESP32 needs 2.4 GHz. |
 | Serial log says `DAC not found at 0x59` | Check the DAC wiring and address; the firmware runs on without outputs. |
 | Upload fails with `Failed to connect to ESP32: Timed out waiting for packet header` | Use a USB data cable (not a charge-only one) and check the COM port driver. If the board needs it, hold BOOT while the upload starts connecting, then release it. |
