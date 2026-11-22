@@ -340,6 +340,70 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual("prov-config", BleProvisioningTransport.ParseUserDescription(Encoding.UTF8.GetBytes("Prov-Config\0")));
                 AssertEqual("proto-ver", BleProvisioningTransport.ParseUserDescription(Encoding.UTF8.GetBytes(" proto-ver \n")));
             }),
+
+            // ---- USB serial pairing-code query ----------------------------------------------
+
+            ("PopLineParser parses a valid reply", () =>
+            {
+                AssertEqual<PopReply?>(new PopReply.Available("PROV_RESMON_A1B2C3", "ABCDEFGH"),
+                    PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=ABCDEFGH"));
+            }),
+            ("PopLineParser accepts CRLF and LF line endings and log noise before the reply", () =>
+            {
+                var expected = new PopReply.Available("PROV_RESMON_A1B2C3", "XYZ23456");
+                AssertEqual<PopReply?>(expected, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456\r\n"));
+                AssertEqual<PopReply?>(expected, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456\r"));
+                AssertEqual<PopReply?>(expected, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456\n"));
+                AssertEqual<PopReply?>(expected, PopLineParser.Parse("\u001b[0mRESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456"));
+            }),
+            ("PopLineParser parses the unavailable reply", () =>
+            {
+                AssertEqual<PopReply?>(new PopReply.Unavailable("provisioned"), PopLineParser.Parse("RESMON-POP unavailable state=provisioned\r\n"));
+                AssertEqual<PopReply?>(new PopReply.Unavailable("connecting"), PopLineParser.Parse("RESMON-POP unavailable state=connecting"));
+                AssertEqual<PopReply?>(new PopReply.Unavailable("unknown"), PopLineParser.Parse("RESMON-POP unavailable"));
+            }),
+            ("PopLineParser ignores garbage, boot logs, the hint line and the echoed query", () =>
+            {
+                foreach (var line in new[]
+                {
+                    "", "\r\n", "ets Jun  8 2016 00:22:57", "rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)",
+                    "I (512) wifi_prov_mgr: Provisioning started with service name : PROV_RESMON_A1B2C3",
+                    "Provisioning: name=PROV_RESMON_A1B2C3 pop=ABCDEFGH", "RESMON?POP", "RESMON-POP", "RESMON-POP ",
+                    "RESMON-POP name=PROV_RESMON_A1B2C3", "RESMON-POP pop=ABCDEFGH", "ÿþ\u0000RESMON",
+                })
+                {
+                    AssertEqual<PopReply?>(null, PopLineParser.Parse(line));
+                }
+            }),
+            ("PopLineParser rejects wrong names and malformed codes", () =>
+            {
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("RESMON-POP name=PROV_OTHER_A1B2C3 pop=ABCDEFGH"));
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_a1b2c3 pop=ABCDEFGH")); // lowercase hex
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3D pop=ABCDEFGH"));
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=ABCDEFG0")); // 0 not in alphabet
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=ABCDEFGHJ"));
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=abcdefgh"));
+            }),
+            ("SerialPopReader picks the code of the device being paired only", () =>
+            {
+                var matches = new[]
+                {
+                    new UsbPopMatch("COM3", "PROV_RESMON_111111", "AAAAAAAA"),
+                    new UsbPopMatch("COM7", "PROV_RESMON_A1B2C3", "BBBBBBBB"),
+                };
+                AssertEqual("BBBBBBBB", SerialPopReader.FindPop(matches, "PROV_RESMON_A1B2C3"));
+                AssertEqual<string?>(null, SerialPopReader.FindPop(matches, "PROV_RESMON_999999"));
+            }),
+            ("Pairing code values are redacted from ToString and normalized from user input", () =>
+            {
+                AssertTrue(!new UsbPopMatch("COM3", "PROV_RESMON_111111", "SECRETPP").ToString().Contains("SECRETPP"), "UsbPopMatch leaks pop");
+                AssertTrue(!new PopReply.Available("PROV_RESMON_111111", "SECRETPP").ToString().Contains("SECRETPP"), "PopReply leaks pop");
+                AssertTrue(PairingCode.TryNormalize(" abcd-efgh ", out var code));
+                AssertEqual("ABCDEFGH", code);
+                AssertTrue(!PairingCode.TryNormalize("ABCDEFG", out _), "7 chars accepted");
+                AssertTrue(!PairingCode.TryNormalize("ABCDEFGI", out _), "I accepted");
+                AssertTrue(!PairingCode.TryNormalize(null, out _), "null accepted");
+            }),
         };
 
         // NIST SP 800-38A, F.5.5 CTR-AES256.Encrypt / F.5.6 CTR-AES256.Decrypt
