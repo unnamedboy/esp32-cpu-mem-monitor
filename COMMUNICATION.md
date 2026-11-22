@@ -59,6 +59,17 @@ firmware sends `wifi` = `connected` and `prov` = `provisioned` or
 During the BLE grace period after a successful provisioning the device is
 already connected and reports `provisioned`.
 
+`rssi` is read with `esp_wifi_sta_get_ap_info()` rather than `WiFi.RSSI()`,
+because the Arduino accessor reports nothing after in-boot BLE provisioning.
+The firmware's `status_last` diagnostic counts publish attempts, including
+those with no subscriber; it does not confirm delivery.
+
 Consumers ignore unknown fields. A missing status topic is not an error: older
-firmware does not publish it. The `resmon/cpu` and `resmon/mem` contract above
+firmware does not publish it.
+
+Known limitation: publishing writes to each subscriber's TCP connection from
+`loop()`. A subscriber that keeps its connection alive but stops reading could,
+once the ESP32 send buffer fills (about 20 status messages), stall `loop()` for
+up to about 10 s per publish (`WiFiClient::write` retries). Keep-alive normally
+drops such clients first. The `resmon/cpu` and `resmon/mem` contract above
 is unchanged.
