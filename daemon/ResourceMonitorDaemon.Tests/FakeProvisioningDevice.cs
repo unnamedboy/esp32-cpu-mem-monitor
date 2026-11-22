@@ -27,6 +27,7 @@ namespace ResourceMonitorDaemon.Tests
         private byte[]? _clientPubkey;
         private byte[]? _lastResponse0;
         private bool _failedAttempt;
+        private WifiStationState? _settledState; // Connected/ConnectionFailed persist until the next ApplyConfig
         private bool _sessionEstablished;
         private bool _connectionClosed;
 
@@ -56,6 +57,7 @@ namespace ResourceMonitorDaemon.Tests
         public string? ReceivedPassphrase { get; private set; }
         public bool Applied { get; private set; }
         public int StatusPolls { get; private set; }
+        public int SetConfigCount { get; private set; }
         public List<string> EndpointLog { get; } = new();
         public List<byte[]> ConfigCiphertexts { get; } = new();
         public bool Disposed { get; private set; }
@@ -254,6 +256,7 @@ namespace ResourceMonitorDaemon.Tests
             switch (msg)
             {
                 case 2: // TypeCmdSetConfig -> TypeRespSetConfig(3), resp_set_config(13)
+                    SetConfigCount++;
                     writer.WriteVarintField(1, 3);
                     writer.WriteMessageField(13, r => WriteStatus(r, SetConfigStatus));
                     break;
@@ -266,6 +269,7 @@ namespace ResourceMonitorDaemon.Tests
                     {
                         Applied = true;
                         _failedAttempt = false;
+                        _settledState = null;
                         StatusPolls = 0;
                     }
 
@@ -279,9 +283,16 @@ namespace ResourceMonitorDaemon.Tests
                     }
 
                     StatusPolls++;
-                    var state = !Applied ? WifiStationState.Disconnected
-                        : StatusPolls <= ConnectingPolls ? WifiStationState.Connecting
-                        : FinalState;
+                    // Before ApplyConfig a real v4.4.7 device reports Connecting: prov_ctx is calloc'd, so
+                    // wifi_state is 0 (WIFI_PROV_STA_CONNECTING). It never sends Disconnected (wifi_config.c
+                    // maps WIFI_PROV_STA_DISCONNECTED to ConnectionFailed).
+                    var state = !Applied ? WifiStationState.Connecting
+                        : _settledState ?? (StatusPolls <= ConnectingPolls ? WifiStationState.Connecting : FinalState);
+                    if (Applied && state is WifiStationState.Connected or WifiStationState.ConnectionFailed)
+                    {
+                        _settledState = state;
+                    }
+
                     if (state == WifiStationState.ConnectionFailed)
                     {
                         _failedAttempt = true;

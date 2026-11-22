@@ -137,16 +137,30 @@ namespace ResourceMonitorDaemon.Provisioning
 
                 var client = new WifiConfigClient(session, _pollInterval, _connectTimeout);
                 progress?.Report(ProvisioningStep.SendingWifiConfig);
-                if (await client.DetectPreviousFailureAsync(cancellationToken).ConfigureAwait(false))
+                var initial = await client.CheckStatusBeforeConfigAsync(cancellationToken).ConfigureAwait(false);
+                WifiProvisioningResult result;
+                if (initial?.State == WifiStationState.Connected)
                 {
-                    _logger.LogInformation("Provisioning {Device}: device reports an earlier failed Wi-Fi attempt; retrying.", device.Name);
+                    // It joined Wi-Fi after an earlier attempt ended in Timeout/ConnectionLost. Sending the
+                    // credentials again would only make ApplyConfig fail with InternalError.
+                    _logger.LogInformation("Provisioning {Device}: device already connected to Wi-Fi; not sending credentials again.",
+                        device.Name);
+                    result = new WifiProvisioningResult.Connected(WifiConfigClient.NormalizeIp4(initial.Ip4Address));
+                }
+                else
+                {
+                    if (initial?.State == WifiStationState.ConnectionFailed)
+                    {
+                        _logger.LogInformation("Provisioning {Device}: device reports an earlier failed Wi-Fi attempt; retrying.", device.Name);
+                    }
+
+                    await client.SetConfigAsync(ssid, password, cancellationToken).ConfigureAwait(false);
+                    await client.ApplyConfigAsync(cancellationToken).ConfigureAwait(false);
+
+                    progress?.Report(ProvisioningStep.WaitingForWifiConnection);
+                    result = await client.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                await client.SetConfigAsync(ssid, password, cancellationToken).ConfigureAwait(false);
-                await client.ApplyConfigAsync(cancellationToken).ConfigureAwait(false);
-
-                progress?.Report(ProvisioningStep.WaitingForWifiConnection);
-                var result = await client.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
                 switch (result)
                 {
                     case WifiProvisioningResult.Connected connected:

@@ -149,7 +149,14 @@ key until it is disposed.
     and session. So before sending credentials, the client sends one GetStatus
     to learn whether the device still reports ConnectionFailed. The reset does
     not clear the device's `wifi_state` (`manager.c`), so that answer survives
-    across sessions.
+    across sessions. Before any ApplyConfig, an unconfigured device reports
+    Connecting (`wifi_state` 0).
+  - If this check returns Connected, the device already joined Wi-Fi after an
+    earlier attempt ended in `Timeout` or `ConnectionLost`. The client then
+    sends no credentials and returns `Connected(ip4)` directly, because a new
+    ApplyConfig would fail and the user would be told to restart a device that
+    is working. On a real device, answering Connected also makes the firmware
+    finish provisioning and stop BLE.
   - In v4.4.7, ApplyConfig only returns InternalError when
     `wifi_prov_mgr_configure_sta` fails or no config was set. The client
     therefore always turns it into `ProvisioningRetryRejectedException`.

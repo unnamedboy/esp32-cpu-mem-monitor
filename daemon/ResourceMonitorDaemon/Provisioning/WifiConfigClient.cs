@@ -61,34 +61,47 @@ namespace ResourceMonitorDaemon.Provisioning
         }
 
         /// <summary>
-        /// Sends SetConfig, ApplyConfig and waits for the device to join the network.
+        /// Checks the current status, then sends SetConfig, ApplyConfig and waits for the device to join
+        /// the network. If the device already reports Connected (it joined after an earlier attempt that
+        /// ended in Timeout/ConnectionLost), no credentials are sent and Connected is returned directly.
         /// The byte copies made from the passphrase are zeroed after encryption; the caller's string
         /// itself cannot be wiped, so drop references to it promptly.
         /// </summary>
         public async Task<WifiProvisioningResult> ConfigureAsync(string ssid, string passphrase, CancellationToken cancellationToken)
         {
-            await DetectPreviousFailureAsync(cancellationToken).ConfigureAwait(false);
+            var initial = await CheckStatusBeforeConfigAsync(cancellationToken).ConfigureAwait(false);
+            if (initial?.State == WifiStationState.Connected)
+            {
+                return new WifiProvisioningResult.Connected(NormalizeIp4(initial.Ip4Address));
+            }
+
             await SetConfigAsync(ssid, passphrase, cancellationToken).ConfigureAwait(false);
             await ApplyConfigAsync(cancellationToken).ConfigureAwait(false);
             return await WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// Best effort: asks for the current status once, before sending credentials, to learn whether an
-        /// earlier attempt (possibly from an earlier session) failed. The device keeps reporting
-        /// ConnectionFailed until a new attempt starts, even after wifi_prov_mgr_reset_sm_state_on_failure().
-        /// Returns true if it did. A non-success or malformed answer is ignored; transport errors propagate.
+        /// Best effort: asks for the current status once, before sending credentials. The device's Wi-Fi
+        /// state survives reconnects and wifi_prov_mgr_reset_sm_state_on_failure(), so this reveals
+        /// <list type="bullet">
+        /// <item>ConnectionFailed: an earlier attempt failed (a retry may be refused without a device reset);</item>
+        /// <item>Connected: the device already joined Wi-Fi in this provisioning run; do not send
+        /// credentials again (ApplyConfig would fail). Note that on a real device this answer makes the
+        /// firmware finish provisioning and shut BLE down shortly afterwards;</item>
+        /// <item>Connecting: the normal state of a device that has not been configured yet.</item>
+        /// </list>
+        /// Returns null if the device answered with a non-success status or a malformed message;
+        /// transport errors propagate.
         /// </summary>
-        public async Task<bool> DetectPreviousFailureAsync(CancellationToken cancellationToken)
+        public async Task<WifiStatus?> CheckStatusBeforeConfigAsync(CancellationToken cancellationToken)
         {
             try
             {
-                var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
-                return status.State == WifiStationState.ConnectionFailed;
+                return await GetStatusAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (ProvisioningProtocolException)
             {
-                return false;
+                return null;
             }
         }
 

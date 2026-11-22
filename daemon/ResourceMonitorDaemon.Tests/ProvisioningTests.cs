@@ -668,6 +668,38 @@ namespace ResourceMonitorDaemon.Tests
                     () => service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "password1", null, CancellationToken.None));
                 AssertTrue(other is not ProvisioningRetryRejectedException, "only InternalError means a stuck state machine");
             })),
+            ("ProvisionAsync on a device that already joined Wi-Fi returns Connected without resending credentials", () => RunAsync(async () =>
+            {
+                // First run: the device takes longer than the (shortened) wait, so the client reports Timeout.
+                var device = new FakeProvisioningDevice("K7M3P9QX") { ConnectingPolls = int.MaxValue };
+                var logger = new CapturingLogger();
+                var service = new ProvisioningService(logger, (_, _) => Task.FromResult<IProvisioningTransport>(device),
+                    TimeSpan.FromMilliseconds(5), TimeSpan.FromMilliseconds(100));
+                var first = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "first-pass", null, CancellationToken.None);
+                AssertTrue(first is WifiProvisioningResult.Timeout, $"expected Timeout, got {first}");
+                AssertEqual(1, device.SetConfigCount);
+
+                // The device joins afterwards; the user retries with the same device.
+                device.ConnectingPolls = 0;
+                var steps = new SyncProgress<ProvisioningStep>();
+                var second = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "second-pass", steps, CancellationToken.None);
+
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), second);
+                AssertEqual(1, device.SetConfigCount);               // credentials were not sent again
+                AssertEqual("first-pass", device.ReceivedPassphrase);
+                AssertTrue(!steps.Items.Contains(ProvisioningStep.WaitingForWifiConnection), "should not wait again");
+                AssertTrue(logger.Lines.Any(l => l.Contains("already connected")), "missing 'already connected' log");
+            })),
+            ("ConfigureAsync on an already-connected device returns Connected without SetConfig", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 0 };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+                await client.ConfigureAsync("home", "first-pass", CancellationToken.None);
+                var again = await client.ConfigureAsync("home", "second-pass", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), again);
+                AssertEqual(1, device.SetConfigCount);
+            })),
             ("ConnectionLost wording does not assume a disconnect", () => RunAsync(async () =>
             {
                 var device = new FakeProvisioningDevice("ABCDEFGH") { DisconnectWhileConnecting = true };
@@ -694,7 +726,7 @@ namespace ResourceMonitorDaemon.Tests
                 release.SetResult();
 
                 var status = await inFlight; // must not throw ObjectDisposedException from the semaphore or cipher
-                AssertEqual(WifiStationState.Disconnected, status.State);
+                AssertEqual(WifiStationState.Connecting, status.State); // unconfigured device, like real v4.4.7
                 await AssertThrowsAsync<ObjectDisposedException>(() => client.GetStatusAsync(CancellationToken.None));
                 session.Dispose(); // idempotent
             })),
