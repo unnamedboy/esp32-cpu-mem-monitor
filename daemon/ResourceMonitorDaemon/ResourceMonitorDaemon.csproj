@@ -19,4 +19,9 @@
     <PackageReference Include="System.IO.Ports" Version="10.0.8" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Non-secret defaults; per-user overrides live in %LocalAppData%\ResourceMonitorDaemon\settings.json -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
