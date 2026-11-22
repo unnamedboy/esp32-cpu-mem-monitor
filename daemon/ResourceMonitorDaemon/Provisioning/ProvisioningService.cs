@@ -137,32 +137,28 @@ namespace ResourceMonitorDaemon.Provisioning
 
                 var client = new WifiConfigClient(session, _pollInterval, _connectTimeout);
                 progress?.Report(ProvisioningStep.SendingWifiConfig);
-                var initial = await client.CheckStatusBeforeConfigAsync(cancellationToken).ConfigureAwait(false);
-                WifiProvisioningResult result;
-                if (initial?.State == WifiStationState.Connected)
-                {
-                    // It joined Wi-Fi after an earlier attempt ended in Timeout/ConnectionLost. Sending the
-                    // credentials again would only make ApplyConfig fail with InternalError.
-                    _logger.LogInformation("Provisioning {Device}: device already connected to Wi-Fi; not sending credentials again.",
-                        device.Name);
-                    result = new WifiProvisioningResult.Connected(WifiConfigClient.NormalizeIp4(initial.Ip4Address));
-                }
-                else
-                {
-                    if (initial?.State == WifiStationState.ConnectionFailed)
-                    {
-                        _logger.LogInformation("Provisioning {Device}: device reports an earlier failed Wi-Fi attempt; retrying.", device.Name);
-                    }
+                var result = await client.ConfigureAsync(
+                    ssid,
+                    password,
+                    beforeWaiting: () => progress?.Report(ProvisioningStep.WaitingForWifiConnection),
+                    cancellationToken).ConfigureAwait(false);
 
-                    await client.SetConfigAsync(ssid, password, cancellationToken).ConfigureAwait(false);
-                    await client.ApplyConfigAsync(cancellationToken).ConfigureAwait(false);
-
-                    progress?.Report(ProvisioningStep.WaitingForWifiConnection);
-                    result = await client.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+                if (client.PreviousAttemptFailed)
+                {
+                    _logger.LogInformation("Provisioning {Device}: device had reported an earlier failed Wi-Fi attempt.", device.Name);
                 }
 
+                // The SSID is never logged, only whether it matched.
                 switch (result)
                 {
+                    case WifiProvisioningResult.Connected { AlreadyConnected: true } already:
+                        _logger.LogInformation(
+                            "Provisioning {Device}: device already connected to Wi-Fi ({Network}); credentials were not sent again. Address {Address}.",
+                            device.Name,
+                            already.JoinedDifferentNetwork ? "a different network than requested"
+                                : already.JoinedSsid is null ? "network not reported" : "the requested network",
+                            already.Ip4Address ?? "(not reported)");
+                        break;
                     case WifiProvisioningResult.Connected connected:
                         _logger.LogInformation("Provisioning {Device}: joined Wi-Fi, address {Address}.",
                             device.Name, connected.Ip4Address ?? "(not reported)");

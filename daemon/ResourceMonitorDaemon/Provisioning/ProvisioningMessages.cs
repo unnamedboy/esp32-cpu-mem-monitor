@@ -139,7 +139,8 @@ namespace ResourceMonitorDaemon.Provisioning
         ProtocommStatus Status,
         WifiStationState StaState,
         WifiConnectFailedReason FailReason,
-        string? Ip4Address);
+        string? Ip4Address,
+        string? ConnectedSsid);
 
     /// <summary>Encoders/decoders for the Security1 session handshake (endpoint prov-session).</summary>
     internal static class Sec1Messages
@@ -313,6 +314,7 @@ namespace ResourceMonitorDaemon.Provisioning
             var staState = WifiStationState.Connected;
             var failReason = WifiConnectFailedReason.AuthError;
             string? ip4 = null;
+            string? connectedSsid = null;
             var connectedPresent = false;
 
             var reader = new ProtoReader(data);
@@ -352,6 +354,10 @@ namespace ResourceMonitorDaemon.Provisioning
                                 {
                                     ip4 = Encoding.UTF8.GetString(connected.ReadLengthDelimited());
                                 }
+                                else if (f2 == ProtoFields.ConnectedSsid && w2 == ProtoWireType.LengthDelimited)
+                                {
+                                    connectedSsid = Encoding.UTF8.GetString(connected.ReadLengthDelimited()).TrimEnd('\0');
+                                }
                                 else
                                 {
                                     connected.SkipField(w2);
@@ -378,7 +384,7 @@ namespace ResourceMonitorDaemon.Provisioning
                 staState = WifiStationState.Connecting;
             }
 
-            return new WifiConfigResponse(msgType, status, staState, failReason, ip4);
+            return new WifiConfigResponse(msgType, status, staState, failReason, ip4, connectedSsid);
         }
     }
 }

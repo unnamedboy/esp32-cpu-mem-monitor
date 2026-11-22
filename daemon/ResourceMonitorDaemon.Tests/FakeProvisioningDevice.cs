@@ -51,6 +51,8 @@ namespace ResourceMonitorDaemon.Tests
         public bool CloseLinkAfterConnected { get; set; }
         public int EmptyStatusPolls { get; set; }
         public ProtocommStatus? ApplyStatusOverride { get; set; }
+        /// <summary>SSID reported when connected; defaults to the SSID received in SetConfig.</summary>
+        public string? JoinedSsid { get; set; }
 
         // Observations
         public string? ReceivedSsid { get; private set; }
@@ -324,6 +326,11 @@ namespace ResourceMonitorDaemon.Tests
                             r.WriteMessageField(11, c =>
                             {
                                 c.WriteBytesField(1, Encoding.ASCII.GetBytes(Ip4Address));
+                                if ((JoinedSsid ?? ReceivedSsid) is { Length: > 0 } joined)
+                                {
+                                    c.WriteBytesField(3, Encoding.UTF8.GetBytes(joined));
+                                }
+
                                 c.WriteVarintField(2, 3);
                                 c.WriteVarintField(5, 6);
                             });
