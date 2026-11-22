@@ -26,8 +26,8 @@ What already works is listed under [Features](../README.md#features) and
 - Total 12 V backlight current, whether the boost converter has enough continuous
   current and thermal margin, and whether the rail needs a switch, fuse or connector
   harness.
-- Which 5 V supply feeds the boost converter. Don't use the carrier's 5 V header or USB
-  until the backlight input current has been measured against that supply's limit.
+- Which 5 V supply feeds the boost converter (see the
+  [safety note](hardware.md#electrical-safety)).
 - Enclosure material, antenna clearance, and how users reach the BOOT button.
 
 ## Open software decisions

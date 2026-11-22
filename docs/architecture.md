@@ -37,14 +37,16 @@ zero about 13 s later.
 - **Plain MQTT on a trusted LAN.** QoS 0, nothing retained, no authentication or TLS.
   The latest value is all that matters, and losing a sample is harmless. Anything on
   the LAN can publish to the gauges, or subscribe to `resmon/cpu` and `resmon/mem` and
-  so see when the PC is busy or idle. It can also read the status, which is why the
-  status payload carries no network identifiers and the daemon rate-limits what it
-  forwards.
+  so see when the PC is busy or idle. It can also read the status (so it carries no
+  network identifiers) or publish a fake one (so the daemon validates and rate-limits
+  what it forwards).
 - **Minimal payloads.** A metric is a bare decimal string, and the topic says which
   metric it is. This keeps the firmware parser trivial and easy to test.
 - **Credentials belong to the device.** Wi-Fi credentials go from the wizard to the
   ESP32 over an encrypted BLE session (ESP-IDF's official provisioning, no custom
-  crypto) and are stored only there. The PC never stores the Wi-Fi password.
+  crypto) and are stored only there. The daemon never stores the Wi-Fi password (the
+  optional `secrets.h` development fallback keeps it in plain text in your source tree
+  and firmware build).
 - **Non-blocking by design.** The firmware's `loop()` and the daemon's sampling loop
   don't wait for the network; connecting, reconnecting and pushing to Loki happen in the
   background with bounded backoff. The firmware has two known exceptions, listed in

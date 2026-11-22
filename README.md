@@ -117,7 +117,8 @@ to start the daemon with Windows, put a shortcut to the exe in your Startup fold
 Right-click the tray icon, choose **Pair device…**, pick the
 `PROV_RESMON_…` device, confirm the pairing code was read over USB (or type it from the
 serial log), enter your Wi-Fi name and password, and click **Pair**. When the device has joined Wi-Fi, the wizard saves its IP address and
-the daemon connects; the gauges start moving.
+the daemon connects. The gauges start moving if they are wired; otherwise the serial
+log's `DAC values: cpu=… mem=…` line starts changing.
 
 Bluetooth pairing has not yet been tested on real hardware. If it fails for you, the
 [`secrets.h` development fallback](docs/provisioning.md#development-fallback-secretsh)
@@ -255,6 +256,7 @@ before a pull request.
 - Wi-Fi credentials are stored on the ESP32 unencrypted
   ([security model](docs/provisioning.md#security-model)).
 - The MQTT broker has no authentication; use it on a trusted network.
-- One device per network is the expected setup: with several, `resmon.local` is
-  ambiguous and the saved IP address is what identifies yours.
+- One device per network is the expected setup. With several, `resmon.local` may
+  resolve to another monitor; set **Host** to your device's IP address
+  ([details](docs/provisioning.md#limitations)).
 - No installer or autostart yet.

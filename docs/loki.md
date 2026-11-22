@@ -70,7 +70,8 @@ All streams use fixed, low-cardinality labels, plus `host="<PC name>"` when
 
 ## What is sent, and privacy
 
-Nothing is collected or sent until you enable the sink and enter a URL. The one exception
+Nothing is kept or sent until you enable the sink and enter a URL; lines logged during
+startup are briefly buffered in memory and discarded if the sink is off. The one exception
 is **Test**: it pushes a single fixed line (`Resource Monitor daemon: observability test
 line`) to the URL in the dialog, with the credentials and host label entered there, even
 while the sink is not enabled. Data only ever goes to the URL you entered.
@@ -97,7 +98,10 @@ Pairing lines at Information level name the device as `PROV_RESMON_XXXXXX`, whos
 suffix is the last three bytes of the ESP32's Wi-Fi MAC address. Pairing lines with the
 device's Bluetooth and IP addresses are [Debug-level](daemon.md#logging-and-diagnostics),
 so they are forwarded only if you lower both `MinLevel` and the `Logging` filter to
-Debug. The device status never contains an SSID, password, IP or MAC address.
+Debug. The device status never contains an SSID, password, IP or MAC address. Note that
+any client on the LAN can publish to `resmon/status`, so the forwarded text fields
+(`build` up to 64 characters, `wifi` and `prov` up to 32) can carry arbitrary text into
+Loki.
 
 The sink's own messages, such as failed pushes, stay in the local log.
 

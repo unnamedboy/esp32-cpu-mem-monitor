@@ -82,7 +82,8 @@ afterwards, and the password is never written to disk or to the log.
 | Wrong pairing code | Check the code in the serial log and try again. |
 | No Wi-Fi result within 30 s | Check the SSID, password and 2.4 GHz, then try again. A retry also detects a device that joined Wi-Fi late. |
 | Lost the Bluetooth link | The wizard first tries the configured `Host:Port` (default `resmon.local:1883`) for up to 15 s. If the device is still unreachable, rescan; if it no longer appears, use the BOOT gesture and pair again. |
-| The device did not accept another attempt after the previous one failed, or The device could not accept the Wi-Fi settings; it may still be handling an earlier attempt (for example a retry after the 30 s timeout) | Use the BOOT gesture, then rescan and pair. Don't power-cycle instead: the device has already stored the earlier settings and would restart with them and without Bluetooth. |
+| "The device did not accept another attempt after the previous one failed" | Use the BOOT gesture, then rescan and pair. Don't power-cycle instead: the device has already stored the earlier settings and would restart with them and without Bluetooth. |
+| "The device could not accept the Wi-Fi settings; it may still be handling an earlier attempt" (for example a retry after the 30 s timeout) | Same as above: use the BOOT gesture, then rescan and pair; don't power-cycle. |
 | The device is already connected to network "…" | It joined a different network in an earlier attempt. To switch, use the BOOT gesture and pair again. |
 | No device in pairing mode found | Check power and pairing mode, then **Rescan**. |
 | Bluetooth is off / no usable BLE adapter | Turn Bluetooth on, or use a PC with a BLE adapter. |
@@ -252,7 +253,7 @@ it.
   | `connecting` | Has credentials, not connected (yet) |
   | `provisioned` | Connected with paired credentials |
   | `dev-fallback` | Connected with `secrets.h` credentials |
-  | `error` | Pairing mode could not start (including when the pairing code could not be loaded from NVS) |
+  | `error` | Pairing mode could not start (including when the pairing code could not be loaded from NVS), or the Wi-Fi driver failed to initialise |
   | `starting` | Setup not finished (not normally seen) |
 
 - Other log lines are interleaved on the same port; ignore lines that don't start with
@@ -307,8 +308,11 @@ before the client can read the result). Implementation notes:
   offers Security0 and Security1.
 - Only the SSID and password are provisioned. The host name, MQTT port and topics are
   compile-time settings in `config.h`, and the wizard does not offer them.
-- `resmon.local` is ambiguous when several monitors share a network; the saved IP
-  address (`FallbackAddress`) is then the reliable way to reach the paired one.
+- **Several monitors on one network.** `resmon.local` may then resolve to a different
+  monitor. The daemon always tries `Host` (default `resmon.local`) first and uses the
+  saved IP address (`FallbackAddress`) only when connecting to `Host` fails, so the saved
+  address does not help here. Set **Host** in the settings dialog to your device's IP
+  address instead; the dialog shows the address pairing saved as **Fallback address**.
 
 ## Testing on hardware
 

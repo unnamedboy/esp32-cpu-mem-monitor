@@ -93,6 +93,6 @@ another client on the LAN from flooding the log or your Loki.
 
 The firmware writes status messages to each subscriber's TCP connection from its main
 loop. A client that keeps its connection open but stops reading (for example a
-suspended `mosquitto_sub`) fills the ESP32's send buffer after about 20 messages. After
+suspended `mosquitto_sub`) fills the ESP32's send buffer after about 20 messages (an estimate). After
 that, each publish can stall the loop for 10 s or more. MQTT keep-alive normally drops
 such a client first; this has not yet been checked on hardware.

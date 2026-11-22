@@ -146,8 +146,8 @@ of copied. Fields set by `RESMON_` environment variables are shown read-only wit
 would persist environment overrides and freeze `appsettings.json` values.
 
 The settings dialog edits `Host`, `Port`, `CpuTopic`, `MemTopic`, `SampleIntervalMs` and
-the language, and shows `FallbackAddress` read-only. The backoff and timeout values can
-only be set in JSON or the environment.
+the language, and shows `FallbackAddress` read-only. `StatusTopic` and the backoff and timeout
+values can only be set in JSON or the environment.
 
 ## MQTT connection
 
@@ -331,7 +331,10 @@ as pure, unit-tested code.
   `netsh wlan show interfaces` (decoded with the OEM code page) and recognizes English
   and Chinese labels; otherwise no warning is shown.
 - **Ambiguity.** `resmon.local` can resolve to a different monitor when several share a
-  network; the wizard cannot tell them apart when no IP address was reported.
+  network. The daemon tries `Host` first and the saved `FallbackAddress` only when that
+  fails, and the wizard's connection check also goes through `Host`, so whenever `Host`
+  resolves to another monitor the check can confirm a connection to the wrong device
+  ([workaround](provisioning.md#limitations)).
 
 ### First-run pairing prompt
 
@@ -379,6 +382,9 @@ English first. What is covered:
   (one message per topic per interval, pause and resume, interval changes), the
   shutdown budget, and the serial port filter.
 - **`LocalizationTests.cs`**: see [Localization](#localization).
+
+To add a test, add a `(name, action)` entry to the `All` list of the matching test file;
+a new test file needs its `All` list added to the test runner's `Program.cs`.
 
 The wizard and dialog layouts are not unit-tested. If you change a layout, check the
 dialog by eye in English and Simplified Chinese, at 100 % and 150 % display scaling.
