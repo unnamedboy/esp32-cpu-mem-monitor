@@ -87,6 +87,7 @@ namespace ResourceMonitorDaemon
 
         private static readonly string[] DeviceSectionPath = { DeviceSettings.SectionName };
         private static readonly string[] LokiSectionPath = LokiSettings.SectionName.Split(ConfigurationPath.KeyDelimiter);
+        private static readonly string[] LokiOwnedKeys = UserLokiSettingsPatch.FieldNames.Append(LokiSettings.TokenKey).ToArray();
 
         private static readonly JsonDocumentOptions ReadOptions = new()
         {
@@ -172,7 +173,8 @@ namespace ResourceMonitorDaemon
                     throw new ArgumentException("Invalid observability settings: " + string.Join(" ", errors), nameof(edit));
                 }
 
-                WriteSectionLocked(LokiSectionPath, UserLokiSettingsPatch.FieldNames, JsonSerializer.SerializeToNode(patch, LokiWriteOptions)!.AsObject());
+                // Also owns (and so removes) a hand-written plain "Token" key: tokens are never kept in plain text.
+                WriteSectionLocked(LokiSectionPath, LokiOwnedKeys, JsonSerializer.SerializeToNode(patch, LokiWriteOptions)!.AsObject());
             }
 
             // Describe() shows the URL host only and never the token ciphertext.

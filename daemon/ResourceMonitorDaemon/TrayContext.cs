@@ -48,7 +48,7 @@ namespace ResourceMonitorDaemon
             contextMenu.Items.Add("-");
             contextMenu.Items.Add("⚙ 设置 (Settings)…", null, OnSettingsClick);
             contextMenu.Items.Add("查看日志 (Log)", null, OnViewLog);
-            contextMenu.Items.Add("可观测性 (Observability)…", null, OnObservabilityClick);
+            contextMenu.Items.Add(ObservabilityText.TrayMenuItem, null, OnObservabilityClick);
             contextMenu.Items.Add("-");
             contextMenu.Items.Add("退出 (Exit)", null, OnExitAsync);
 
@@ -170,7 +170,7 @@ namespace ResourceMonitorDaemon
             {
                 if (_observabilityForm?.DialogResult == DialogResult.OK)
                 {
-                    ShowBalloon(3000, "可观测性已保存 (Observability saved)", "新设置已生效，无需重启 (applied without restart)", ToolTipIcon.Info);
+                    ShowBalloon(3000, ObservabilityText.SavedBalloonTitle, ObservabilityText.SavedBalloonText, ToolTipIcon.Info);
                 }
 
                 _observabilityForm?.Dispose();

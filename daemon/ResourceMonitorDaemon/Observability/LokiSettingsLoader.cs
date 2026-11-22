@@ -154,6 +154,11 @@ namespace ResourceMonitorDaemon.Observability
                 warnings.Add($"Observability:Loki:AuthMode is {result.AuthMode} but no token is configured; requests are sent without credentials.");
             }
 
+            if (result.Enabled && LokiUrl.SendsCredentialsInsecurely(result))
+            {
+                warnings.Add("Observability:Loki sends credentials over unencrypted http://; use an https:// Url.");
+            }
+
             if (result.Enabled && result.AuthMode == LokiAuthMode.Basic && result.Username.Length == 0)
             {
                 warnings.Add("Observability:Loki:AuthMode is Basic but Username is empty.");

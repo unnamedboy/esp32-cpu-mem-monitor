@@ -58,7 +58,7 @@ namespace ResourceMonitorDaemon.Observability
                 .Where(environmentOverriddenFields.Contains)
                 .ToList();
 
-            Text = "可观测性 (Observability) - Resource Monitor";
+            Text = ObservabilityText.WindowTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -78,8 +78,8 @@ namespace ResourceMonitorDaemon.Observability
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            _enabled = new CheckBox { Text = "发送到 Grafana Loki (send to Grafana Loki)", Checked = effective.Enabled, AutoSize = true };
-            _url = new TextBox { Text = effective.Url, Width = 340, PlaceholderText = "https://logs-prod-xxx.grafana.net  /  http://loki:3100" };
+            _enabled = new CheckBox { Text = ObservabilityText.EnabledCheckBox, Checked = effective.Enabled, AutoSize = true };
+            _url = new TextBox { Text = effective.Url, Width = 340, PlaceholderText = ObservabilityText.UrlPlaceholder };
             _authMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
             _authMode.Items.AddRange(Enum.GetNames<LokiAuthMode>());
             _authMode.SelectedItem = effective.AuthMode.ToString();
@@ -88,12 +88,12 @@ namespace ResourceMonitorDaemon.Observability
             {
                 Width = 240,
                 UseSystemPasswordChar = true,
-                PlaceholderText = _tokenFromEnvironment ? "(env)" : _hasSavedToken ? "已保存 (saved)" : "未设置 (not set)",
+                PlaceholderText = _tokenFromEnvironment ? ObservabilityText.TokenFromEnvironmentPlaceholder : _hasSavedToken ? ObservabilityText.TokenSavedPlaceholder : ObservabilityText.TokenNotSetPlaceholder,
             };
-            _clearToken = new Button { Text = "清除 (Clear)", AutoSize = true, Enabled = _hasSavedToken && !_tokenFromEnvironment };
+            _clearToken = new Button { Text = ObservabilityText.ClearTokenButton, AutoSize = true, Enabled = _hasSavedToken && !_tokenFromEnvironment };
             _clearToken.Click += OnClearToken;
-            _tenant = new TextBox { Text = effective.TenantId, Width = 200, PlaceholderText = "(optional X-Scope-OrgID)" };
-            _hostLabel = new CheckBox { Text = "添加 host 标签 (add host=<PC name> label)", Checked = effective.IncludeHostLabel, AutoSize = true };
+            _tenant = new TextBox { Text = effective.TenantId, Width = 200, PlaceholderText = ObservabilityText.TenantPlaceholder };
+            _hostLabel = new CheckBox { Text = ObservabilityText.HostLabelCheckBox, Checked = effective.IncludeHostLabel, AutoSize = true };
             _metricsInterval = new NumericUpDown
             {
                 Minimum = LokiSettingsValidator.MinMetricsIntervalSeconds,
@@ -102,10 +102,10 @@ namespace ResourceMonitorDaemon.Observability
                 Width = 100,
             };
 
-            AddField(layout, "启用 (Enabled)", nameof(LokiSettings.Enabled), _enabled);
-            AddField(layout, "地址 (Url)", nameof(LokiSettings.Url), _url);
-            AddField(layout, "认证 (Auth mode)", nameof(LokiSettings.AuthMode), _authMode);
-            AddField(layout, "用户名 (Username)", nameof(LokiSettings.Username), _username);
+            AddField(layout, ObservabilityText.EnabledLabel, nameof(LokiSettings.Enabled), _enabled);
+            AddField(layout, ObservabilityText.UrlLabel, nameof(LokiSettings.Url), _url);
+            AddField(layout, ObservabilityText.AuthModeLabel, nameof(LokiSettings.AuthMode), _authMode);
+            AddField(layout, ObservabilityText.UsernameLabel, nameof(LokiSettings.Username), _username);
             var tokenRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             tokenRow.Controls.Add(_token);
             tokenRow.Controls.Add(_clearToken);
@@ -114,12 +114,12 @@ namespace ResourceMonitorDaemon.Observability
                 _token.ReadOnly = true;
             }
 
-            AddRow(layout, _tokenFromEnvironment ? "令牌 (Token) (env):" : "令牌 (Token):", tokenRow);
-            AddField(layout, "租户 (Tenant)", nameof(LokiSettings.TenantId), _tenant);
-            AddField(layout, "主机标签 (Host label)", nameof(LokiSettings.IncludeHostLabel), _hostLabel);
-            AddField(layout, "指标间隔 s (Metrics, 0 = off)", nameof(LokiSettings.MetricsIntervalSeconds), _metricsInterval);
+            AddRow(layout, (_tokenFromEnvironment ? ObservabilityText.TokenLabel + ObservabilityText.EnvironmentSuffix : ObservabilityText.TokenLabel) + ":", tokenRow);
+            AddField(layout, ObservabilityText.TenantLabel, nameof(LokiSettings.TenantId), _tenant);
+            AddField(layout, ObservabilityText.HostLabelLabel, nameof(LokiSettings.IncludeHostLabel), _hostLabel);
+            AddField(layout, ObservabilityText.MetricsIntervalLabel, nameof(LokiSettings.MetricsIntervalSeconds), _metricsInterval);
 
-            _test = new Button { Text = "测试连接 (Test)", AutoSize = true };
+            _test = new Button { Text = ObservabilityText.TestButton, AutoSize = true };
             _test.Click += OnTest;
             _testResult = new Label { AutoSize = true, MaximumSize = new Size(360, 0), Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) };
             var testRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
@@ -127,23 +127,15 @@ namespace ResourceMonitorDaemon.Observability
             testRow.Controls.Add(_testResult);
             AddRow(layout, string.Empty, testRow);
 
-            AddNote(
-                layout,
-                "令牌只以 DPAPI 加密形式保存（仅当前 Windows 用户可解密），不会写入日志；留空保留已保存的令牌。" + Environment.NewLine +
-                "(The token is stored DPAPI-encrypted for this Windows user only and never logged; leave it empty to keep the saved token.)",
-                SystemColors.GrayText);
-            AddNote(layout, $"保存到 (Saved to): {store.FilePath}", SystemColors.GrayText);
+            AddNote(layout, ObservabilityText.TokenNote, SystemColors.GrayText);
+            AddNote(layout, ObservabilityText.SavedToNote(store.FilePath), SystemColors.GrayText);
             if (EnvironmentOverriddenFields.Count > 0)
             {
-                AddNote(
-                    layout,
-                    "标记 (env) 的字段由环境变量决定，只读且不会保存 (fields marked (env) come from RESMON_ environment variables; read-only, not saved): "
-                        + string.Join(", ", EnvironmentOverriddenFields),
-                    Color.DarkOrange);
+                AddNote(layout, ObservabilityText.EnvironmentFieldsNote(EnvironmentOverriddenFields), Color.DarkOrange);
             }
 
-            var save = new Button { Text = "保存 (Save)", AutoSize = true };
-            var cancel = new Button { Text = "取消 (Cancel)", AutoSize = true, DialogResult = DialogResult.Cancel };
+            var save = new Button { Text = ObservabilityText.SaveButton, AutoSize = true };
+            var cancel = new Button { Text = ObservabilityText.CancelButton, AutoSize = true, DialogResult = DialogResult.Cancel };
             save.Click += OnSave;
 
             // The form is shown modeless, where a button's DialogResult does not close it.
@@ -187,7 +179,7 @@ namespace ResourceMonitorDaemon.Observability
                 }
             }
 
-            AddRow(layout, fromEnvironment ? $"{label} (env):" : $"{label}:", control);
+            AddRow(layout, (fromEnvironment ? label + ObservabilityText.EnvironmentSuffix : label) + ":", control);
         }
 
         private static void AddRow(TableLayoutPanel layout, string label, Control control)
@@ -232,7 +224,7 @@ namespace ResourceMonitorDaemon.Observability
         {
             _clearRequested = true;
             _token.Text = string.Empty;
-            _token.PlaceholderText = "将清除 (will be cleared on Save)";
+            _token.PlaceholderText = ObservabilityText.TokenWillBeClearedPlaceholder;
             _clearToken.Enabled = false;
         }
 
@@ -245,8 +237,15 @@ namespace ResourceMonitorDaemon.Observability
                 return;
             }
 
+            if (LokiUrl.SendsCredentialsInsecurely(candidate)
+                && MessageBox.Show(this, ObservabilityText.InsecureTestQuestion, ObservabilityText.MessageBoxCaption, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                ShowTestResult(null, ObservabilityText.TestNotSent);
+                return;
+            }
+
             _test.Enabled = false;
-            ShowTestResult(null, "测试中… (testing…)");
+            ShowTestResult(null, ObservabilityText.Testing);
             _testCancellation?.Dispose();
             _testCancellation = new CancellationTokenSource(TestTimeout);
             try
@@ -256,7 +255,7 @@ namespace ResourceMonitorDaemon.Observability
             }
             catch (OperationCanceledException)
             {
-                ShowTestResult(false, "已取消或超时 (cancelled or timed out)");
+                ShowTestResult(false, ObservabilityText.TestCancelled);
             }
             catch (Exception ex)
             {
@@ -286,8 +285,8 @@ namespace ResourceMonitorDaemon.Observability
             };
             _testResult.Text = success switch
             {
-                true => "成功 (OK): " + text,
-                false => "失败 (Failed): " + text,
+                true => ObservabilityText.TestSucceeded(text),
+                false => ObservabilityText.TestFailed(text),
                 null => text,
             };
         }
@@ -300,7 +299,7 @@ namespace ResourceMonitorDaemon.Observability
             var errors = LokiSettingsValidator.Validate(edited with { Token = typedToken }).ToList();
             if (errors.Count > 0)
             {
-                MessageBox.Show(this, string.Join(Environment.NewLine, errors), "设置无效 (Invalid settings)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, string.Join(Environment.NewLine, errors), ObservabilityText.InvalidSettingsCaption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -308,8 +307,8 @@ namespace ResourceMonitorDaemon.Observability
                 && Uri.TryCreate(edited.Url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp
                 && MessageBox.Show(
                     this,
-                    "凭据将通过未加密的 HTTP 发送。继续保存？" + Environment.NewLine + "(Credentials would be sent over unencrypted HTTP. Save anyway?)",
-                    "Observability",
+                    ObservabilityText.InsecureSaveQuestion,
+                    ObservabilityText.MessageBoxCaption,
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning) != DialogResult.Yes)
             {
@@ -338,7 +337,7 @@ namespace ResourceMonitorDaemon.Observability
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.Cryptography.CryptographicException)
             {
-                MessageBox.Show(this, $"无法保存设置 (Unable to save settings):{Environment.NewLine}{ex.Message}", "Observability", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, ObservabilityText.SaveFailed(ex.Message), ObservabilityText.MessageBoxCaption, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 

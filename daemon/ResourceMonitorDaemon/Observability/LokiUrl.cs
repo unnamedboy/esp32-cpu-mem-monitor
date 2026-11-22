@@ -56,6 +56,14 @@ namespace ResourceMonitorDaemon.Observability
             return new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty }.Uri.AbsoluteUri;
         }
 
+        /// <summary>
+        /// True when <paramref name="settings"/> would send a token (Basic or Bearer) over plain
+        /// <c>http://</c>.
+        /// </summary>
+        public static bool SendsCredentialsInsecurely(LokiSettings settings) =>
+            settings.AuthMode != LokiAuthMode.None && settings.HasToken
+            && Uri.TryCreate(settings.Url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp;
+
         /// <summary>True when the absolute URL carries user info.</summary>
         public static bool HasUserInfo(string url) =>
             Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) && uri.UserInfo.Length > 0;
