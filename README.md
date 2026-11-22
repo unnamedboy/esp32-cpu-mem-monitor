@@ -155,8 +155,9 @@ Settings (section `Observability:Loki`; environment form `RESMON_Observability__
 Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-daemon--grafana-loki-streams). What is sent:
 
 - daemon log lines at or above `MinLevel`, redacted before they are sent:
-  - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`;
-  - the Windows user name becomes `<user>`;
+  - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`, including their short 8.3 forms such as `C:\Users\ABCDEF~1`;
+  - any other `\Users\<name>\` path segment becomes `\Users\<user>\`;
+  - the Windows user name becomes `<user>`. This is a whole-word match, so if your account name is a common word (for example `admin`), that word is replaced in ordinary text too, e.g. "Run as <user>". Privacy wins over readability here;
   - the PC name becomes `<host>`, unless you enabled `IncludeHostLabel`.
 
   Apart from this, the lines are the same text as `daemon.log` and can contain the broker host or IP address you configured.
@@ -164,7 +165,9 @@ Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-da
 - the device status, with only the documented fields and at most one message every 5 s. It contains no SSID, password, IP or MAC address.
 
 Messages from the sink itself, for example failed pushes, stay in the local log only. The sink never blocks or slows sampling or MQTT publishing. Failed pushes are retried with backoff up to 60 s, and on Exit the daemon spends at most 2 s flushing.
-A batch is at most 1 MiB and is given up after 8 attempts or 10 minutes. The given-up entries are dropped and counted in the local log.
+During an outage (network errors, timeouts, 5xx) the daemon keeps retrying indefinitely. Nothing is given up; entries are lost only if the bounded queue (`QueueCapacity`) overflows, which drops the oldest entries and reports it in the local log. Entries older than Loki's own limit (`reject_old_samples_max_age`, about a week by default) are rejected by Loki with a 400, which drops that batch.
+
+A batch is at most 1 MiB, measured as raw UTF-8 JSON. A batch that is too large (413), or that is still throttled (429 without Retry-After), is split in half. A single entry that is still rejected after splitting is dropped and counted in the local log.
 
 Example LogQL queries (Grafana Explore):
 

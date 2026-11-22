@@ -202,12 +202,18 @@ settings or environment; the repository and `appsettings.json` hold none of it.
   - 429, 5xx, timeouts and network errors keep the batch and retry the same batch with
     exponential backoff (`ReconnectBackoff`, 1 s doubling to 60 s). `Retry-After` is honoured up
     to 60 s.
-  - After 3 throttled (429) attempts, a batch is split in half.
-  - A batch is given up after 8 attempts or 10 minutes since its first failure; Loki rejects old
-    entries anyway. Given-up entries are counted in `DroppedByServer` and logged as a Warning once
-    until a push succeeds.
-  - Batches are capped at 1 MiB of uncompressed line data. Single lines are truncated at 16 KB
-    with a marker.
+  - Network errors, timeouts and 5xx are retried with no attempt or age limit, so an outage of
+    any length loses only what the bounded drop-oldest queue drops. Only one batch, plus its split
+    halves, is held outside the queue. Loki rejects entries older than its
+    `reject_old_samples_max_age` with a 400, and that drops the batch.
+  - After 3 throttled attempts (429 without Retry-After), a batch is split in half. A single
+    entry throttled that often is given up: it is counted in `DroppedByServer` and logged as a
+    Warning once until a push succeeds. 429 with Retry-After is retried for as long as the server
+    asks.
+  - Batches are capped at 1 MiB of uncompressed body. The body is written as raw UTF-8
+    (`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`): quotes, backslashes and control characters
+    are still escaped, and the size estimate counts those escapes, so CJK text is not doubled by
+    `\uXXXX`. Single lines are truncated at 16 KB with a marker.
   - 413 splits the batch in half and retries at once; a single entry that is still too large is
     dropped.
   - Other 4xx and 3xx responses drop the batch. This is logged as a Warning once per status code
@@ -234,8 +240,11 @@ Privacy notes:
 - Data is sent only to the URL the user configured.
 - Forwarded log lines pass through `LokiLogRedactor` first:
   - `%LOCALAPPDATA%`, `%APPDATA%` and `%USERPROFILE%` prefixes replace the real folders;
+  - the 8.3 short forms of those folders are replaced too, and any remaining
+    `\Users\<name>\` or `/Users/<name>/` segment becomes `<user>`;
   - the Windows user name becomes `<user>` (whole word, case-insensitive, names of at least
-    3 characters);
+    3 characters). If the account name is a common word such as `admin`, that word is also
+    replaced in ordinary text. This is accepted in favour of privacy.
   - the PC name becomes `<host>`, unless `IncludeHostLabel` is on.
 
   Otherwise they are the same text as `daemon.log`, so they can contain the broker host name or
