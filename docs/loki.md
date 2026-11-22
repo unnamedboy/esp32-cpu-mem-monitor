@@ -12,9 +12,9 @@ URL, tenant or token: you enter them yourself.
      an access-policy token with the `logs:write` scope. Auth mode `Basic`.
    - **Self-hosted Loki**: for example `http://loki:3100`, usually auth mode `None`. Set
      Tenant only if multi-tenancy is enabled (sent as `X-Scope-OrgID`).
-2. Open **Observability…** (可观测性…) from the tray menu, tick **Send to Grafana Loki**,
+2. Open **Observability…** from the tray menu, tick **Send to Grafana Loki**,
    and fill in URL, Auth mode, Username and Token.
-3. Click **Test** (测试连接). It pushes one test line and shows the HTTP status (Loki
+3. Click **Test**. It pushes one test line and shows the HTTP status (Loki
    answers 204 on success) or the error.
 4. Click **Save**. The change applies immediately. Turning the sink off stops collection
    and discards anything still queued.
@@ -84,9 +84,10 @@ URL. Log lines are redacted first:
 - the PC name becomes `<host>`, unless `IncludeHostLabel` is on.
 
 Apart from that the lines match `daemon.log`. They can contain the broker host name or
-IP address you configured, and log lines from pairing can contain the paired device's
-Wi-Fi IP address and Bluetooth address; such lines are forwarded only if their level is
-at or above `MinLevel`. The device status never contains an SSID, password, IP or
+IP address you configured, including a `FallbackAddress` saved by the pairing wizard.
+The paired device's Bluetooth address and Wi-Fi IP address are logged only at Debug
+level, so they are forwarded only if you lower both `MinLevel` and the `Logging`
+filter to Debug. The device status never contains an SSID, password, IP or
 MAC address. The sink's own messages, such as failed pushes, stay in the local log.
 
 ## Reliability

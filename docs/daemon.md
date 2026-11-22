@@ -58,9 +58,12 @@ notification handler is attached before the first attempt can fail. The UI langu
 applied before any UI text exists.
 
 Shutdown: **Exit** hides the icon and ends the message loop. `Program.Main` then stops
-the host once, within `ShutdownTimeout` (currently 3 s). Services stop in reverse
-registration order: `MonitorService` first (cancelling any in-flight connect), then the
-Loki sink, which gets up to `ShutdownFlushBudget` (2 s) to flush. If the host fails to
+the host once. Services stop in reverse registration order: `MonitorService` first,
+which cancels any in-flight connect and closes the MQTT client within
+`MqttConnection.MaxShutdownDuration` (1 s), then the Loki sink, which gets up to
+`ObservabilityService.ShutdownFlushBudget` (2 s) for a final flush. The host stop budget,
+`Program.ShutdownTimeout`, is the sum of the two plus 1 s, so 4 s at most; a healthy
+Exit takes milliseconds. If the host fails to
 start, the tray icon is removed and the error is logged and shown in a message box.
 
 ## Sampling and publishing
@@ -178,6 +181,10 @@ Received status messages are validated and, if Loki is enabled, forwarded; see
   path, memory use, the UI language and the Loki configuration (host, auth mode and
   whether a token is set; never the token). Connection changes are logged as they
   happen.
+- Pairing logs name the device and the result at Information level. The device's
+  Bluetooth address and Wi-Fi IP address are logged only at Debug level; a saved IP
+  address appears later as the configured `FallbackAddress` in the settings and
+  connection lines.
 - Log messages are always English, whatever the UI language.
 
 ## Optional Loki sink
@@ -271,7 +278,7 @@ bundled with Arduino-ESP32 2.0.17) and its reference client, `esp_prov`.
 | `IProvisioningTransport` | `SendAsync(endpoint, data, ct)` seam; tests use an in-memory fake device |
 | `Security1Session` | X25519 key exchange, key derivation with the pairing code, AES-256-CTR, Command0/1 handshake |
 | `WifiConfigClient` | GetStatus check → SetConfig → ApplyConfig → status polling; returns `Connected` (with IP, if usable), `Failed`, `Timeout` or `ConnectionLost` |
-| `SerialPopReader`, `PairingCode` | USB serial query and pairing-code validation |
+| `SerialPopReader`, `SerialPortFilter`, `PairingCode` | USB serial query (only on likely ESP32 ports, see [provisioning.md](provisioning.md#serial-pairing-code-query)) and pairing-code validation |
 | `ProtoWriter`/`ProtoReader`, `Sec1Messages`, `WifiConfigMessages` | Minimal hand-written protobuf codec for these messages |
 
 Errors are typed: `PairingCodeRejectedException`, `ProvisioningTransportException` (with
@@ -328,9 +335,8 @@ wizard. It is offered only if all of these hold:
   broker);
 - `Host` is the default `resmon.local` and `FallbackAddress` is empty;
 - the daemon has not connected since it started;
-- the daemon has not run before: no `daemon.log` older than this process, no
-  `daemon.log.1`, and no legacy `daemon.log` next to the executable or in the sibling
-  `net9.0-windows` build folder used by older versions.
+- the daemon has not run before: no log from an earlier run (including older builds
+  that wrote their log next to the executable).
 
 The click only works while the notification is on screen; Windows does not report
 clicks on notifications in the Action Center. If Windows suppresses the notification
@@ -360,10 +366,13 @@ English first. What is covered:
   in-memory device whose crypto uses different code paths from the client.
 - **`PairingTests.cs`**: the wizard's decisions, the first-run rule, the `netsh` parser,
   `BrokerProbe`.
+- **`MonitorServiceTests.cs`**: `MonitorService` end to end against an in-process broker
+  (one message per topic per interval, pause and resume, interval changes), the
+  shutdown budget, and the serial port filter.
 - **`LocalizationTests.cs`**: see [Localization](#localization).
 
-The wizard and dialog layouts are not unit-tested; they were checked by rendering them
-in both languages at 100 % and 150 % scaling.
+The wizard and dialog layouts are not unit-tested. If you change a layout, check the
+dialog by eye in English and Simplified Chinese, at 100 % and 150 % display scaling.
 
 ## Limitations
 

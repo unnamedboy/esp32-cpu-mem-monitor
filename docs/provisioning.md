@@ -37,18 +37,19 @@ daemon running.
 1. **Put the device in pairing mode.** A device without Wi-Fi settings does this by
    itself at startup. For a device that is already configured, or one built with
    `secrets.h`, use the [BOOT gesture](#re-pairing-and-changing-networks).
-2. **Open the wizard.** Right-click the tray icon and choose **Pair device…**
-   (配对设备…). On the very first run of the daemon, the first "MQTT connection failed"
+2. **Open the wizard.** Right-click the tray icon and choose **Pair device…**. On the
+   very first run of the daemon, the first "MQTT connection failed"
    notification instead says *No device found — click to pair*; clicking it opens the
    wizard (see [when the prompt appears](daemon.md#first-run-pairing-prompt)).
 3. **Select the device.** The wizard scans for 5 s and lists `PROV_RESMON_…` devices
    with their signal strength. A single device is selected automatically. Click
    **Rescan** if the device was not in pairing mode yet. If Bluetooth is off, turn it
    on in Windows Settings and rescan.
-4. **Pairing code.** If the device is connected to this PC by USB, the wizard reads
-   the code over the serial port and shows *Read automatically over USB*. Close any
-   serial monitor first: a COM port can only be open in one program. Otherwise type
-   the 8-character code from the serial log. Codes use the letters A–Z without I and
+4. **Pairing code.** If the device is connected to this PC by USB through a common
+   ESP32 USB-serial bridge (CP210x, CH340/CH343/CH9102, FTDI or Espressif native USB),
+   the wizard reads the code over the serial port and shows *Read automatically over
+   USB*. Close any serial monitor first: a COM port can only be open in one program.
+   Otherwise type the 8-character code from the serial log. Codes use the letters A–Z without I and
    O and the digits 2–9; case, spaces and dashes are ignored.
 5. **Wi-Fi.** Enter the network name (SSID) and password, or click **Use this PC's
    Wi-Fi** to copy the network this PC is on. Windows 11 may ask once whether apps may
@@ -56,7 +57,7 @@ daemon running.
    decline, type the name. **The ESP32 supports 2.4 GHz only.** The wizard warns you if
    this PC is connected on 5 or 6 GHz; make sure the router also offers the network on
    2.4 GHz.
-6. **Click Pair** (开始配对). Progress shows each step: connect, secure session, send
+6. **Click Pair.** Progress shows each step: connect, secure session, send
    Wi-Fi settings, wait for Wi-Fi. **Cancel** stops the attempt; closing the wizard
    cancels everything.
 7. **Done.** When the device reports its IP address, the wizard saves it as
@@ -94,9 +95,8 @@ The serial log shows `BOOT pressed: hold 5-15 s, then release …` and, after 5 
 credentials and restarts straight into pairing mode.
 
 - Releasing before 5 s does nothing.
-- Holding longer than 15 s is ignored. This protects against a serial tool that holds
-  the board's DTR line, which pulls GPIO0 low (see
-  [hardware.md](hardware.md#boot-button-gpio0)).
+- Holding longer than 15 s is ignored, as protection against serial tools that hold
+  GPIO0 low ([why](hardware.md#boot-button-gpio0)).
 - Do not hold BOOT while pressing EN/RESET or plugging in power: that starts the ESP32's
   ROM download mode instead of the firmware.
 - If the device is power-cycled before pairing completes, the request has already been
@@ -131,9 +131,16 @@ pairing.
 
 - **Transport.** BLE using the ESP-IDF `wifi_provisioning` manager and protocomm
   **Security1**: an X25519 key exchange, AES-256-CTR encryption, and a proof of
-  possession (the pairing code). No custom cryptography. The Windows client is an
-  independent implementation of the client side of the official protocol (the
-  reference client is ESP-IDF's `esp_prov` tool).
+  possession (the pairing code). The protocol is ESP-IDF's, unchanged. The Windows
+  client implements its client side with standard primitives (BouncyCastle X25519,
+  .NET AES) and is tested against the RFC 7748 and NIST SP 800-38A vectors and an
+  in-memory device; ESP-IDF's `esp_prov` tool is the reference client.
+- **What Security1 does and does not protect.** The Wi-Fi password is sent only after
+  the device has proved it knows the pairing code, so a fake device cannot simply
+  collect it. But a device that impersonates `PROV_RESMON_…` gets one handshake from
+  the client, and from that it can try to guess the 40-bit code offline. Security2
+  (SRP6a) would rule out that offline guess; it is not available in this ESP-IDF
+  version (see [Limitations](#limitations)).
 - **Pairing code.** Generated once with the hardware random number generator, stored
   in NVS (namespace `resmon`, key `pop`), and kept across re-pairing; only a full flash
   erase, or a missing or invalid stored value, produces a new one. 8 characters from a
@@ -149,10 +156,11 @@ pairing.
   [roadmap](roadmap.md) for the open decision on encryption.
 - **Credentials on the PC.** The daemon never stores the Wi-Fi password. Only the
   device's IP address is saved.
-- **Logs.** `platformio.ini` sets `CORE_DEBUG_LEVEL=1` (errors only) and
-  `config.h` refuses to build at level 3 or higher, because at level 5 the Arduino core
-  logs the received Wi-Fi password. The daemon never logs the password, the pairing
-  code or the SSID.
+- **Logs.** The firmware build is limited to a log level that cannot print the Wi-Fi
+  password ([details](firmware.md#toolchain)). The daemon never logs the password, the
+  pairing code or the SSID. The paired device's Bluetooth address and Wi-Fi IP address
+  are logged only at Debug level; a saved IP address later appears in the daemon's
+  settings and connection diagnostics as the configured `FallbackAddress`.
 
 ## Protocol reference
 
@@ -236,11 +244,20 @@ it.
 
 - Other log lines are interleaved on the same port; ignore lines that don't start with
   `RESMON-POP `.
-- Open the port with DTR and RTS both off. That avoids resetting the board and avoids
-  pulling GPIO0 low through the auto-program circuit. The Windows client does this,
-  sends `RESMON?POP` to the PC's serial ports, waits at most 1.5 s per port, and only
-  accepts a reply whose `name=` matches the selected BLE device. Other serial devices
-  attached to the PC may therefore receive that line too.
+- Open the port with DTR and RTS both off, so the board is not reset and GPIO0 is not
+  pulled low ([why](hardware.md#boot-button-gpio0)).
+
+The Windows client (`SerialPopReader`, `SerialPortFilter`) only sends the query to
+ports that are likely to be an ESP32:
+
+- Ports whose USB vendor is known are probed only for the common ESP32 USB-serial
+  bridges: Silicon Labs CP210x (`10C4`), WCH CH340/CH343/CH9102 (`1A86`), FTDI
+  (`0403`) and Espressif native USB (`303A`).
+- Ports of unknown origin are probed, unless they are legacy `\Device\Serial<n>` UARTs
+  or Bluetooth serial ports (`BthModem`, `BthEnum`).
+
+Each port gets at most 1.5 s, and only a reply whose `name=` matches the selected BLE
+device is accepted. With any other USB-serial bridge, type the code instead.
 
 ## Firmware behaviour worth knowing
 
@@ -254,18 +271,20 @@ before the client can read the result). Implementation notes:
   3 failed starts in a row it connects with the `secrets.h` fallback if there is one,
   or stays up and logs `Power-cycle to retry` every 30 s. The count survives software
   restarts and is cleared at power-on, on a successful start and by the BOOT gesture.
+- **A late start.** If BLE reports that it started after the 5 s timeout was already
+  handled (a retry restart pending, or given up), Bluetooth is in fact advertising:
+  the firmware cancels the restart, clears the re-pairing request, returns to pairing
+  mode and prints the pairing hint again. After a switch to the `secrets.h` fallback a
+  late start is ignored, because the provisioning manager was already shut down
+  (`decideProvisioningStarted()`).
 - **Wi-Fi drops during the 35 s after success** (for example the router reboots): the
   provisioning manager reports this as a credential failure, but the firmware keeps the
   credentials, stops BLE early, and lets its normal reconnect policy take over.
 - **An IP address before the credentials are accepted.** On every pairing the device
   gets its IP address a moment before the manager confirms success, so the firmware
   waits for that confirmation. It logs a warning only if the wait lasts 5 s.
-- **Bluetooth memory.** Arduino releases the Bluetooth memory before `setup()` unless
-  the Bluetooth support code is linked in; `platformio.ini` forces that with
-  `-Wl,-u,btStarted`. Without it BLE provisioning could never start.
-- **Partition table.** The BLE image is about 1.6 MB, so the build uses
-  `min_spiffs.csv` (two 1.875 MB app slots, 128 KB SPIFFS). The NVS location is
-  unchanged, so stored credentials and the pairing code survive the switch.
+- **Build settings.** BLE pairing depends on a linker flag and a larger app partition;
+  see [firmware.md](firmware.md#toolchain).
 
 ## Limitations
 
