@@ -40,7 +40,7 @@ Example:
 | `uptime_s` | int | `millis()/1000` (wraps after about 49 days; acceptable) |
 | `heap_free` | int | `ESP.getFreeHeap()` |
 | `heap_min` | int | `ESP.getMinFreeHeap()` |
-| `rssi` | int | `WiFi.RSSI()` when connected; omitted otherwise |
+| `rssi` | int | Wi-Fi RSSI in dBm, read with `esp_wifi_sta_get_ap_info()` when connected; omitted otherwise |
 | `wifi` | string | `connected` / `connecting` / `disconnected` |
 | `prov` | string | `provisioning` / `provisioned` / `dev-fallback` / `unconfigured` |
 | `dac` | bool | External DAC detected |

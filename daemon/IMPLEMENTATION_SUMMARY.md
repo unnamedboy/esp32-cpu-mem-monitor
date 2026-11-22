@@ -129,10 +129,13 @@ schedule, and never blocks the sampling loop:
 
 ### Device status topic
 
-- `MqttConnection` subscribes to `DeviceSettings.StatusTopic` (default `resmon/status`, QoS 0)
+- `MqttConnection` subscribes to `Device:StatusTopic` (default `resmon/status`, QoS 0)
   inside every connect attempt. The client uses a clean session, so every reconnect, including
   one after a broker restart, subscribes again. If only the topic changes, the client unsubscribes
-  and subscribes in the background without reconnecting. If the subscription is refused or fails,
+  and subscribes in the background without reconnecting. A topic change made while a connect
+  attempt is in flight (the attempt subscribes to its own snapshot) is caught on the next sampling
+  tick. If shutdown cancels the subscription, the just-connected client is closed. If the
+  subscription is refused or fails,
   the daemon logs a warning and keeps publishing cpu/mem.
 - Messages on the current status topic are raised through `MqttConnection.StatusMessageReceived`.
   The cpu/mem wire format, QoS 0 and non-retained publishing are unchanged.
@@ -171,7 +174,9 @@ settings or environment; the repository and `appsettings.json` hold none of it.
   1. `RESMON_Observability__Loki__Token`. It is plain text, never persisted and shown read-only
      in the dialog.
   2. `TokenProtected` in the user settings file. This is base64 DPAPI ciphertext, scope
-     CurrentUser, with app-specific entropy (`DpapiSecretProtector`). The
+     CurrentUser (`DpapiSecretProtector`). Its constant entropy is namespacing only: the code is
+     open source, so DPAPI CurrentUser is the protection boundary, and any program running as the
+     same Windows user could decrypt the value. The
      `System.Security.Cryptography.ProtectedData` assembly ships with the WindowsForms shared
      framework, so no package was added.
 
@@ -211,9 +216,11 @@ settings or environment; the repository and `appsettings.json` hold none of it.
     counted in `DroppedByServer` and logged as a Warning once until a push succeeds. With
     Retry-After it is retried for as long as the server asks.
   - Batches are capped at 1 MiB of uncompressed body. The body is written as raw UTF-8
-    (`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`): quotes, backslashes and control characters
-    are still escaped, and the size estimate counts those escapes, so CJK text is not doubled by
-    `\uXXXX`. Single lines are truncated at 16 KB with a marker.
+    (`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`), so CJK text is not doubled by `\uXXXX`.
+    The size estimate escapes each line with that same encoder, so whatever it still escapes
+    counts at its real size: quotes, backslashes, control characters, emoji and other non-BMP
+    characters (12 bytes), U+2028/U+2029, and private-use or unassigned characters. Single lines
+    are truncated at 16 KB with a marker, never inside a surrogate pair.
   - 413 splits the batch in half and retries at once; a single entry that is still too large is
     dropped.
   - Other 4xx and 3xx responses drop the batch. This is logged as a Warning once per status code
@@ -246,13 +253,17 @@ Privacy notes:
   - `%LOCALAPPDATA%`, `%APPDATA%` and `%USERPROFILE%` prefixes replace the real folders;
   - the 8.3 short forms of those folders are replaced too;
   - the profile folder in any other absolute path (`X:\Users\<name>` or `\\server\Users\<name>`,
-    either slash, any case, spaces allowed up to the next separator) becomes `<user>`. `Public`,
+    either slash, any case, spaces allowed) becomes `<user>`. The name ends at a separator,
+    `' ( ) , ;`, a character that is invalid in file names, or the end of the line, so a name
+    containing one of those is only partly replaced. `Public`,
     `Default`, `Default User` and `All Users` are kept, and relative paths and URLs such as
     `https://host/Users/123` are not touched;
   - cheap substring checks run before each regex, so a typical line costs about 0.3 µs;
   - the Windows user name becomes `<user>` (whole word, case-insensitive, names of at least
-    3 characters). If the account name is a common word such as `admin`, that word is also
-    replaced in ordinary text. This is accepted in favour of privacy.
+    3 characters; shorter names, such as two-character CJK account names, are left alone in free
+    text, but paths that contain them are still covered by the folder rules). If the account name
+    is a common word such as `admin`, that word is also replaced in ordinary text. This is accepted
+    in favour of privacy.
   - the PC name becomes `<host>`, unless `IncludeHostLabel` is on.
 
   Otherwise they are the same text as `daemon.log`, so they can contain the broker host name or

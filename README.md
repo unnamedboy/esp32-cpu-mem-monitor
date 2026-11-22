@@ -135,7 +135,7 @@ The daemon can push its own log, a metrics line and the ESP32 status (`resmon/st
 
 `/loki/api/v1/push` is appended to the Url only when it has no path, so a full push URL or a reverse-proxy path also works.
 
-The token is saved only as Windows DPAPI ciphertext (`TokenProtected`, current Windows user only) in `%LocalAppData%\ResourceMonitorDaemon\settings.json`. Leaving the token box empty keeps the saved token, and **清除 (Clear)** removes it. For automation, set `RESMON_Observability__Loki__Token`. That variable takes precedence and is never written to disk. A plain `Token` key in a JSON file is ignored with a warning. The daemon never logs the token, the `Authorization` header or the URL path. Its startup line shows only whether Loki is enabled, the URL host, the auth mode and whether a token is configured.
+The token is saved only as Windows DPAPI ciphertext (`TokenProtected`). Only the same Windows user on the same PC can decrypt it, and so can any program running as that user. It is stored in `%LocalAppData%\ResourceMonitorDaemon\settings.json`. Leaving the token box empty keeps the saved token, and **清除 (Clear)** removes it. For automation, set `RESMON_Observability__Loki__Token`. That variable takes precedence and is never written to disk. A plain `Token` key in a JSON file is ignored with a warning. The daemon never logs the token, the `Authorization` header or the URL path. Its startup line shows only whether Loki is enabled, the URL host, the auth mode and whether a token is configured.
 
 Settings (section `Observability:Loki`; environment form `RESMON_Observability__Loki__<Name>`):
 
@@ -156,8 +156,8 @@ Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-da
 
 - daemon log lines at or above `MinLevel`, redacted before they are sent:
   - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`, including their short 8.3 forms such as `C:\Users\ABCDEF~1`;
-  - the profile folder in any other absolute path (`C:\Users\<name>\…` or `\\server\Users\<name>\…`, either slash, spaces allowed) becomes `<user>`. The shared folders `Public`, `Default`, `Default User` and `All Users` are kept, and relative paths and URLs are not touched;
-  - the Windows user name becomes `<user>`. This is a whole-word match, so if your account name is a common word (for example `admin`), that word is replaced in ordinary text too, e.g. "Run as <user>". Privacy wins over readability here;
+  - the profile folder in any other absolute path (`C:\Users\<name>\…` or `\\server\Users\<name>\…`, either slash, spaces allowed) becomes `<user>`. The name ends at the next separator, a quote, a bracket, a comma, a semicolon, a character that is invalid in file names, or the end of the line, so a folder name that itself contains `' ( ) , ;` is only partly replaced. The shared folders `Public`, `Default`, `Default User` and `All Users` are kept, and relative paths and URLs are not touched;
+  - the Windows user name becomes `<user>`. This is a whole-word match, so if your account name is a common word (for example `admin`), that word is replaced in ordinary text too, e.g. "Run as <user>". Privacy wins over readability here. Names shorter than 3 characters (for example a two-character Chinese account name) are not replaced in free text, because that would mangle ordinary words; paths that contain them are still redacted by the folder rules above;
   - the PC name becomes `<host>`, unless you enabled `IncludeHostLabel`.
 
   Apart from this, the lines are the same text as `daemon.log` and can contain the broker host or IP address you configured.
@@ -167,7 +167,7 @@ Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-da
 Messages from the sink itself, for example failed pushes, stay in the local log only. The sink never blocks or slows sampling or MQTT publishing. Failed pushes are retried with backoff up to 60 s, and on Exit the daemon spends at most 2 s flushing.
 During an outage (network errors, timeouts, 5xx) the daemon keeps retrying indefinitely. Nothing is given up; entries are lost only if the bounded queue (`QueueCapacity`) overflows, which drops the oldest entries and reports it in the local log. Entries older than Loki's own limit (`reject_old_samples_max_age`, about a week by default) are rejected by Loki with a 400, which drops that batch. For a rejected batch, Loki usually stores the valid entries and reports `total ignored: N out of M`; the daemon then counts only those N as dropped. If Loki does not say, the local log says the batch was rejected and that Loki may have accepted some entries.
 
-A batch is at most 1 MiB, measured as raw UTF-8 JSON. A batch that is too large (413), or that is throttled (429) three times, is split in half; splitting never loses data. A single entry that still gets 413, or still gets 429 without Retry-After three times, is dropped and counted in the local log.
+A batch is at most 1 MiB, measured as the JSON actually sent: raw UTF-8, with the characters that must still be escaped (such as emoji, U+2028 and private-use characters) counted at their escaped size. A batch that is too large (413), or that is throttled (429) three times, is split in half; splitting never loses data. A single entry that still gets 413, or still gets 429 without Retry-After three times, is dropped and counted in the local log.
 
 Example LogQL queries (Grafana Explore):
 
