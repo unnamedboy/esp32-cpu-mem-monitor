@@ -60,7 +60,7 @@
   </data>
   <data name="Common_EnvFieldLabel" xml:space="preserve">
     <value>{0} (env):</value>
-    <comment>{0} = label</comment>
+    <comment>{0} = label. (env) stays literal (ASCII parentheses) in every language: a technical marker that matches the RESMON_ environment-variable note.</comment>
   </data>
   <data name="Common_SavedTo" xml:space="preserve">
     <value>Saved to: {0}</value>
@@ -68,15 +68,18 @@
   </data>
   <data name="Common_EnvironmentFieldsNote" xml:space="preserve">
     <value>Fields marked (env) come from RESMON_ environment variables; they are read-only and not saved: {0}</value>
-    <comment>{0} = fields</comment>
+    <comment>{0} = fields. (env) stays literal (ASCII parentheses) in every language: a technical marker that matches the RESMON_ environment-variable note.</comment>
   </data>
   <data name="Common_InvalidSettingsCaption" xml:space="preserve">
     <value>Invalid settings</value>
   </data>
   <data name="Common_SaveFailed" xml:space="preserve">
-    <value>Unable to save settings:
-{0}</value>
-    <comment>{0} = error</comment>
+    <value>Could not save the settings to {0}. Details are in the log.</value>
+    <comment>{0} = path</comment>
+  </data>
+  <data name="Common_SaveFailedInvalidFile" xml:space="preserve">
+    <value>Could not save: the settings file {0} already contains invalid values. Fix or remove them (details are in the log), then save again.</value>
+    <comment>{0} = path</comment>
   </data>
   <data name="Common_StartupFailed" xml:space="preserve">
     <value>Resource Monitor Daemon failed to start:
@@ -142,6 +145,10 @@ Log file: {1}</value>
 Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the background.</value>
     <comment>{0} = endpoint</comment>
   </data>
+  <data name="Tray_MqttEndpoint" xml:space="preserve">
+    <value>{0}:{1}</value>
+    <comment>{0} = host, {1} = port</comment>
+  </data>
   <data name="Tray_MqttEndpointWithFallback" xml:space="preserve">
     <value>{0}:{1}, fallback {2}</value>
     <comment>{0} = host, {1} = port, {2} = fallback</comment>
@@ -175,6 +182,18 @@ Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the backgr
   <data name="Settings_SampleInterval" xml:space="preserve">
     <value>Sample interval (ms)</value>
   </data>
+  <data name="Settings_StatusTopic" xml:space="preserve">
+    <value>Status topic</value>
+  </data>
+  <data name="Settings_ReconnectInitialBackoff" xml:space="preserve">
+    <value>Initial reconnect delay (ms)</value>
+  </data>
+  <data name="Settings_ReconnectMaxBackoff" xml:space="preserve">
+    <value>Maximum reconnect delay (ms)</value>
+  </data>
+  <data name="Settings_ConnectTimeout" xml:space="preserve">
+    <value>Connect timeout (ms)</value>
+  </data>
   <data name="Settings_FallbackAddress" xml:space="preserve">
     <value>Fallback address</value>
   </data>
@@ -193,49 +212,45 @@ Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the backgr
   <data name="Settings_LanguageNote" xml:space="preserve">
     <value>A new language applies to the tray menu at once and to windows opened afterwards.</value>
   </data>
-  <data name="Settings_ErrorHostEmpty" xml:space="preserve">
-    <value>Host must not be empty.</value>
+  <data name="Settings_ErrorEmpty" xml:space="preserve">
+    <value>{0} must not be empty.</value>
+    <comment>{0} = name. {0} = field. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorHostInvalid" xml:space="preserve">
-    <value>Host '{0}' is not a valid host name or IP address.</value>
-    <comment>{0} = host</comment>
+    <value>{0} '{1}' is not a valid host name or IP address.</value>
+    <comment>{0} = name, {1} = host. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorFallbackInvalid" xml:space="preserve">
-    <value>FallbackAddress '{0}' is not a dotted IPv4 address.</value>
-    <comment>{0} = address</comment>
-  </data>
-  <data name="Settings_ErrorPortRange" xml:space="preserve">
-    <value>Port {0} is outside 1..65535.</value>
-    <comment>{0} = port</comment>
-  </data>
-  <data name="Settings_ErrorTopicEmpty" xml:space="preserve">
-    <value>{0} must not be empty.</value>
-    <comment>{0} = name</comment>
+    <value>{0} '{1}' is not a dotted IPv4 address.</value>
+    <comment>{0} = name, {1} = address. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorTopicTooLong" xml:space="preserve">
     <value>{0} is longer than {1} characters.</value>
-    <comment>{0} = name, {1} = maxLength</comment>
+    <comment>{0} = name, {1} = maxLength. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorTopicWildcard" xml:space="preserve">
     <value>{0} '{1}' must not contain MQTT wildcards '#' or '+'.</value>
-    <comment>{0} = name, {1} = topic</comment>
+    <comment>{0} = name, {1} = topic. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorTopicWhitespace" xml:space="preserve">
     <value>{0} must not contain control characters or leading/trailing spaces.</value>
-    <comment>{0} = name</comment>
+    <comment>{0} = name. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorRange" xml:space="preserve">
     <value>{0} {1} is outside {2}..{3}.</value>
-    <comment>{0} = name, {1} = value, {2} = min, {3} = max</comment>
+    <comment>{0} = name, {1} = value, {2} = min, {3} = max. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorTopicsEqual" xml:space="preserve">
-    <value>CpuTopic and MemTopic must be different.</value>
+    <value>{0} and {1} must be different.</value>
+    <comment>{0} = cpuTopic, {1} = memTopic. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorStatusTopicCollides" xml:space="preserve">
-    <value>StatusTopic must differ from CpuTopic and MemTopic.</value>
+    <value>{0} must differ from {1} and {2}.</value>
+    <comment>{0} = statusTopic, {1} = cpuTopic, {2} = memTopic. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorBackoffOrder" xml:space="preserve">
-    <value>ReconnectMaxBackoffMs must not be smaller than ReconnectInitialBackoffMs.</value>
+    <value>{0} must not be smaller than {1}.</value>
+    <comment>{0} = maxBackoff, {1} = initialBackoff. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Observability_WindowTitle" xml:space="preserve">
     <value>Observability - Resource Monitor</value>
@@ -275,6 +290,15 @@ Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the backgr
   </data>
   <data name="Observability_MetricsInterval" xml:space="preserve">
     <value>Metrics interval (s, 0 = off)</value>
+  </data>
+  <data name="Observability_BatchMaxEntries" xml:space="preserve">
+    <value>Batch size (entries)</value>
+  </data>
+  <data name="Observability_QueueCapacity" xml:space="preserve">
+    <value>Queue capacity (entries)</value>
+  </data>
+  <data name="Observability_FlushInterval" xml:space="preserve">
+    <value>Flush interval (ms)</value>
   </data>
   <data name="Observability_TokenFromEnvironment" xml:space="preserve">
     <value>(env)</value>
@@ -482,11 +506,10 @@ You can also use the tray menu → Pair device.</value>
     <comment>{0} = address</comment>
   </data>
   <data name="Pairing_SaveFailed" xml:space="preserve">
-    <value>Could not save the device address: {0}</value>
-    <comment>{0} = error</comment>
+    <value>Could not save the device address; see the log for details.</value>
   </data>
   <data name="Pairing_FallbackOverriddenByEnvironment" xml:space="preserve">
-    <value>Note: FallbackAddress is set by the RESMON_Device__FallbackAddress environment variable; the saved value is not used.</value>
+    <value>Note: the fallback address is set by the RESMON_Device__FallbackAddress environment variable; the saved value is not used.</value>
   </data>
   <data name="Pairing_Succeeded" xml:space="preserve">
     <value>Paired: the device joined Wi-Fi at {0} (saved as the fallback address).</value>

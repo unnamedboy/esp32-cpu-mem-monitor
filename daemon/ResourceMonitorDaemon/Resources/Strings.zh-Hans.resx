@@ -59,19 +59,23 @@
   </data>
   <data name="Common_EnvFieldLabel" xml:space="preserve">
     <value>{0} (env)：</value>
+    <comment>(env) stays literal (ASCII parentheses) in every language: a technical marker that matches the RESMON_ environment-variable note.</comment>
   </data>
   <data name="Common_SavedTo" xml:space="preserve">
     <value>保存到：{0}</value>
   </data>
   <data name="Common_EnvironmentFieldsNote" xml:space="preserve">
     <value>标记 (env) 的字段由 RESMON_ 环境变量决定，只读且不会保存：{0}</value>
+    <comment>(env) stays literal (ASCII parentheses) in every language: a technical marker that matches the RESMON_ environment-variable note.</comment>
   </data>
   <data name="Common_InvalidSettingsCaption" xml:space="preserve">
     <value>设置无效</value>
   </data>
   <data name="Common_SaveFailed" xml:space="preserve">
-    <value>无法保存设置：
-{0}</value>
+    <value>无法将设置保存到 {0}，详情见日志。</value>
+  </data>
+  <data name="Common_SaveFailedInvalidFile" xml:space="preserve">
+    <value>无法保存：设置文件 {0} 中已有无效的值。请修正或删除这些值（详情见日志）后再保存。</value>
   </data>
   <data name="Common_StartupFailed" xml:space="preserve">
     <value>Resource Monitor Daemon 启动失败：
@@ -125,7 +129,7 @@
     <value>已应用；以下字段仍由环境变量决定：{0}</value>
   </data>
   <data name="Tray_NoLogYet" xml:space="preserve">
-    <value>暂无日志记录。</value>
+    <value>尚未生成日志文件。</value>
   </data>
   <data name="Tray_MqttFailedTitle" xml:space="preserve">
     <value>MQTT 连接失败</value>
@@ -133,6 +137,9 @@
   <data name="Tray_MqttFailedText" xml:space="preserve">
     <value>无法连接 ESP32 的 MQTT 服务（{0}）。
 请确认 ESP32 已通电，并与本机处于同一 Wi-Fi。正在后台重试。</value>
+  </data>
+  <data name="Tray_MqttEndpoint" xml:space="preserve">
+    <value>{0}:{1}</value>
   </data>
   <data name="Tray_MqttEndpointWithFallback" xml:space="preserve">
     <value>{0}:{1}，备用地址 {2}</value>
@@ -144,7 +151,7 @@
     <value>已连接 ESP32 的 MQTT 服务 {0}:{1}。</value>
   </data>
   <data name="Tray_MqttReconnectedViaFallback" xml:space="preserve">
-    <value>已通过备用地址连接 ESP32 的 MQTT 服务 {0}:{1}（替代 {2}）。</value>
+    <value>已连接 ESP32 的 MQTT 服务 {0}:{1}（{2} 的备用地址）。</value>
   </data>
   <data name="Settings_WindowTitle" xml:space="preserve">
     <value>设置 - Resource Monitor</value>
@@ -164,6 +171,18 @@
   <data name="Settings_SampleInterval" xml:space="preserve">
     <value>采样间隔（毫秒）</value>
   </data>
+  <data name="Settings_StatusTopic" xml:space="preserve">
+    <value>状态主题</value>
+  </data>
+  <data name="Settings_ReconnectInitialBackoff" xml:space="preserve">
+    <value>初始重连间隔（毫秒）</value>
+  </data>
+  <data name="Settings_ReconnectMaxBackoff" xml:space="preserve">
+    <value>最大重连间隔（毫秒）</value>
+  </data>
+  <data name="Settings_ConnectTimeout" xml:space="preserve">
+    <value>连接超时（毫秒）</value>
+  </data>
   <data name="Settings_FallbackAddress" xml:space="preserve">
     <value>备用地址</value>
   </data>
@@ -182,41 +201,35 @@
   <data name="Settings_LanguageNote" xml:space="preserve">
     <value>更改语言后，托盘菜单立即切换，之后打开的窗口使用新语言。</value>
   </data>
-  <data name="Settings_ErrorHostEmpty" xml:space="preserve">
-    <value>主机不能为空。</value>
+  <data name="Settings_ErrorEmpty" xml:space="preserve">
+    <value>{0}不能为空。</value>
   </data>
   <data name="Settings_ErrorHostInvalid" xml:space="preserve">
-    <value>主机“{0}”不是有效的主机名或 IP 地址。</value>
+    <value>{0}“{1}”不是有效的主机名或 IP 地址。</value>
   </data>
   <data name="Settings_ErrorFallbackInvalid" xml:space="preserve">
-    <value>备用地址（FallbackAddress）“{0}”不是点分十进制的 IPv4 地址。</value>
-  </data>
-  <data name="Settings_ErrorPortRange" xml:space="preserve">
-    <value>端口 {0} 超出范围 1..65535。</value>
-  </data>
-  <data name="Settings_ErrorTopicEmpty" xml:space="preserve">
-    <value>{0} 不能为空。</value>
+    <value>{0}“{1}”不是点分十进制的 IPv4 地址。</value>
   </data>
   <data name="Settings_ErrorTopicTooLong" xml:space="preserve">
-    <value>{0} 超过 {1} 个字符。</value>
+    <value>{0}超过 {1} 个字符。</value>
   </data>
   <data name="Settings_ErrorTopicWildcard" xml:space="preserve">
     <value>{0}“{1}”不能包含 MQTT 通配符“#”或“+”。</value>
   </data>
   <data name="Settings_ErrorTopicWhitespace" xml:space="preserve">
-    <value>{0} 不能包含控制字符或首尾空格。</value>
+    <value>{0}不能包含控制字符或首尾空格。</value>
   </data>
   <data name="Settings_ErrorRange" xml:space="preserve">
-    <value>{0} 的值 {1} 超出范围 {2}..{3}。</value>
+    <value>{0}的值 {1} 超出范围 {2}..{3}。</value>
   </data>
   <data name="Settings_ErrorTopicsEqual" xml:space="preserve">
-    <value>CpuTopic 和 MemTopic 不能相同。</value>
+    <value>{0}和{1}不能相同。</value>
   </data>
   <data name="Settings_ErrorStatusTopicCollides" xml:space="preserve">
-    <value>StatusTopic 必须与 CpuTopic 和 MemTopic 不同。</value>
+    <value>{0}必须与 {1}、{2}不同。</value>
   </data>
   <data name="Settings_ErrorBackoffOrder" xml:space="preserve">
-    <value>ReconnectMaxBackoffMs 不能小于 ReconnectInitialBackoffMs。</value>
+    <value>{0}不能小于{1}。</value>
   </data>
   <data name="Observability_WindowTitle" xml:space="preserve">
     <value>可观测性 - Resource Monitor</value>
@@ -256,6 +269,15 @@
   </data>
   <data name="Observability_MetricsInterval" xml:space="preserve">
     <value>指标间隔（秒，0 = 关闭）</value>
+  </data>
+  <data name="Observability_BatchMaxEntries" xml:space="preserve">
+    <value>批量大小（条）</value>
+  </data>
+  <data name="Observability_QueueCapacity" xml:space="preserve">
+    <value>队列容量（条）</value>
+  </data>
+  <data name="Observability_FlushInterval" xml:space="preserve">
+    <value>发送间隔（毫秒）</value>
   </data>
   <data name="Observability_TokenFromEnvironment" xml:space="preserve">
     <value>(env)</value>
@@ -388,13 +410,13 @@
     <value>使用 USB 读取的配对码</value>
   </data>
   <data name="Pairing_CodeHint" xml:space="preserve">
-    <value>配对码共 8 位，在设备的 USB 串口日志中（115200 波特）：Provisioning: name=PROV_RESMON_… pop=…</value>
+    <value>配对码共 8 位，位于设备 USB 串口日志（115200 波特）中的 "Provisioning: name=... pop=..." 一行。</value>
   </data>
   <data name="Pairing_WifiGroup" xml:space="preserve">
     <value>3. Wi-Fi</value>
   </data>
   <data name="Pairing_SsidLabel" xml:space="preserve">
-    <value>网络名称 (SSID)：</value>
+    <value>网络名称（SSID）：</value>
   </data>
   <data name="Pairing_PasswordLabel" xml:space="preserve">
     <value>密码：</value>
@@ -415,10 +437,10 @@
     <value>无法读取本机当前 Wi-Fi（未连接，或 Windows 未授予位置权限），请手动输入。</value>
   </data>
   <data name="Pairing_SsidPrefilled" xml:space="preserve">
-    <value>已填入此电脑当前连接的 Wi-Fi。</value>
+    <value>已填入本机当前连接的 Wi-Fi。</value>
   </data>
   <data name="Pairing_SsidPrefilledNot24GHz" xml:space="preserve">
-    <value>已填入此电脑当前的 Wi-Fi；此电脑通过 5/6 GHz 连接。ESP32 只能连接 2.4 GHz，请确认路由器同时提供 2.4 GHz。</value>
+    <value>已填入本机当前的 Wi-Fi；本机通过 5/6 GHz 连接。ESP32 只能连接 2.4 GHz，请确认路由器同时提供 2.4 GHz。</value>
   </data>
   <data name="Pairing_ProgressGroup" xml:space="preserve">
     <value>4. 配对</value>
@@ -454,10 +476,10 @@
     <value>已保存设备地址 {0}</value>
   </data>
   <data name="Pairing_SaveFailed" xml:space="preserve">
-    <value>无法保存设备地址：{0}</value>
+    <value>无法保存设备地址，详情见日志。</value>
   </data>
   <data name="Pairing_FallbackOverriddenByEnvironment" xml:space="preserve">
-    <value>注意：FallbackAddress 由环境变量 RESMON_Device__FallbackAddress 决定，保存的值不会生效。</value>
+    <value>注意：备用地址由环境变量 RESMON_Device__FallbackAddress 决定，保存的值不会生效。</value>
   </data>
   <data name="Pairing_Succeeded" xml:space="preserve">
     <value>配对成功：设备已连接 Wi-Fi，IP 地址 {0}（已保存为备用地址）。</value>
@@ -508,7 +530,7 @@
     <value>蓝牙已关闭。请在 Windows 设置中打开蓝牙，然后点击“重新扫描”。</value>
   </data>
   <data name="Pairing_ScanBluetoothUnavailable" xml:space="preserve">
-    <value>此电脑没有可用的低功耗蓝牙 (BLE)，无法扫描设备。</value>
+    <value>本机没有可用的低功耗蓝牙（BLE），无法扫描设备。</value>
   </data>
   <data name="Pairing_ScanFailedRescan" xml:space="preserve">
     <value>蓝牙扫描失败，请点击“重新扫描”。</value>
@@ -541,7 +563,7 @@
     <value>蓝牙已关闭，请在 Windows 设置中打开蓝牙后重试。</value>
   </data>
   <data name="Provisioning_BluetoothUnavailable" xml:space="preserve">
-    <value>此电脑没有可用的低功耗蓝牙 (BLE)。</value>
+    <value>本机没有可用的低功耗蓝牙（BLE）。</value>
   </data>
   <data name="Provisioning_DeviceNotFound" xml:space="preserve">
     <value>找不到该设备，它可能已退出配对模式。请重新扫描。</value>

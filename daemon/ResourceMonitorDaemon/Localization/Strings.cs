@@ -60,7 +60,8 @@ namespace ResourceMonitorDaemon.Localization
         public static string Common_SavedTo(string path) => Format(nameof(Common_SavedTo), path);
         public static string Common_EnvironmentFieldsNote(string fields) => Format(nameof(Common_EnvironmentFieldsNote), fields);
         public static string Common_InvalidSettingsCaption => Get(nameof(Common_InvalidSettingsCaption));
-        public static string Common_SaveFailed(string error) => Format(nameof(Common_SaveFailed), error);
+        public static string Common_SaveFailed(string path) => Format(nameof(Common_SaveFailed), path);
+        public static string Common_SaveFailedInvalidFile(string path) => Format(nameof(Common_SaveFailedInvalidFile), path);
         public static string Common_StartupFailed(string error, string logPath) => Format(nameof(Common_StartupFailed), error, logPath);
 
         public static string Tray_Pause => Get(nameof(Tray_Pause));
@@ -80,7 +81,8 @@ namespace ResourceMonitorDaemon.Localization
         public static string Tray_AppliedEnvironmentOverride(string fields) => Format(nameof(Tray_AppliedEnvironmentOverride), fields);
         public static string Tray_NoLogYet => Get(nameof(Tray_NoLogYet));
         public static string Tray_MqttFailedTitle => Get(nameof(Tray_MqttFailedTitle));
-        public static string Tray_MqttFailedText(string endpoint) => Format(nameof(Tray_MqttFailedText), endpoint);
+        public static string Tray_MqttFailedText(object endpoint) => Format(nameof(Tray_MqttFailedText), endpoint);
+        public static string Tray_MqttEndpoint(string host, int port) => Format(nameof(Tray_MqttEndpoint), host, port);
         public static string Tray_MqttEndpointWithFallback(string host, int port, string fallback) => Format(nameof(Tray_MqttEndpointWithFallback), host, port, fallback);
         public static string Tray_MqttReconnectedTitle => Get(nameof(Tray_MqttReconnectedTitle));
         public static string Tray_MqttReconnectedText(string address, int port) => Format(nameof(Tray_MqttReconnectedText), address, port);
@@ -92,24 +94,26 @@ namespace ResourceMonitorDaemon.Localization
         public static string Settings_CpuTopic => Get(nameof(Settings_CpuTopic));
         public static string Settings_MemTopic => Get(nameof(Settings_MemTopic));
         public static string Settings_SampleInterval => Get(nameof(Settings_SampleInterval));
+        public static string Settings_StatusTopic => Get(nameof(Settings_StatusTopic));
+        public static string Settings_ReconnectInitialBackoff => Get(nameof(Settings_ReconnectInitialBackoff));
+        public static string Settings_ReconnectMaxBackoff => Get(nameof(Settings_ReconnectMaxBackoff));
+        public static string Settings_ConnectTimeout => Get(nameof(Settings_ConnectTimeout));
         public static string Settings_FallbackAddress => Get(nameof(Settings_FallbackAddress));
         public static string Settings_Language => Get(nameof(Settings_Language));
         public static string Settings_LanguageAutomatic => Get(nameof(Settings_LanguageAutomatic));
         public static string Settings_LanguageEnglish => Get(nameof(Settings_LanguageEnglish));
         public static string Settings_LanguageChineseSimplified => Get(nameof(Settings_LanguageChineseSimplified));
         public static string Settings_LanguageNote => Get(nameof(Settings_LanguageNote));
-        public static string Settings_ErrorHostEmpty => Get(nameof(Settings_ErrorHostEmpty));
-        public static string Settings_ErrorHostInvalid(string host) => Format(nameof(Settings_ErrorHostInvalid), host);
-        public static string Settings_ErrorFallbackInvalid(string address) => Format(nameof(Settings_ErrorFallbackInvalid), address);
-        public static string Settings_ErrorPortRange(int port) => Format(nameof(Settings_ErrorPortRange), port);
-        public static string Settings_ErrorTopicEmpty(string name) => Format(nameof(Settings_ErrorTopicEmpty), name);
+        public static string Settings_ErrorEmpty(string name) => Format(nameof(Settings_ErrorEmpty), name);
+        public static string Settings_ErrorHostInvalid(string name, string host) => Format(nameof(Settings_ErrorHostInvalid), name, host);
+        public static string Settings_ErrorFallbackInvalid(string name, string address) => Format(nameof(Settings_ErrorFallbackInvalid), name, address);
         public static string Settings_ErrorTopicTooLong(string name, int maxLength) => Format(nameof(Settings_ErrorTopicTooLong), name, maxLength);
         public static string Settings_ErrorTopicWildcard(string name, string topic) => Format(nameof(Settings_ErrorTopicWildcard), name, topic);
         public static string Settings_ErrorTopicWhitespace(string name) => Format(nameof(Settings_ErrorTopicWhitespace), name);
         public static string Settings_ErrorRange(string name, int value, int min, int max) => Format(nameof(Settings_ErrorRange), name, value, min, max);
-        public static string Settings_ErrorTopicsEqual => Get(nameof(Settings_ErrorTopicsEqual));
-        public static string Settings_ErrorStatusTopicCollides => Get(nameof(Settings_ErrorStatusTopicCollides));
-        public static string Settings_ErrorBackoffOrder => Get(nameof(Settings_ErrorBackoffOrder));
+        public static string Settings_ErrorTopicsEqual(string cpuTopic, string memTopic) => Format(nameof(Settings_ErrorTopicsEqual), cpuTopic, memTopic);
+        public static string Settings_ErrorStatusTopicCollides(string statusTopic, string cpuTopic, string memTopic) => Format(nameof(Settings_ErrorStatusTopicCollides), statusTopic, cpuTopic, memTopic);
+        public static string Settings_ErrorBackoffOrder(string maxBackoff, string initialBackoff) => Format(nameof(Settings_ErrorBackoffOrder), maxBackoff, initialBackoff);
 
         public static string Observability_WindowTitle => Get(nameof(Observability_WindowTitle));
         public static string Observability_MessageBoxCaption => Get(nameof(Observability_MessageBoxCaption));
@@ -124,6 +128,9 @@ namespace ResourceMonitorDaemon.Localization
         public static string Observability_Tenant => Get(nameof(Observability_Tenant));
         public static string Observability_HostLabel => Get(nameof(Observability_HostLabel));
         public static string Observability_MetricsInterval => Get(nameof(Observability_MetricsInterval));
+        public static string Observability_BatchMaxEntries => Get(nameof(Observability_BatchMaxEntries));
+        public static string Observability_QueueCapacity => Get(nameof(Observability_QueueCapacity));
+        public static string Observability_FlushInterval => Get(nameof(Observability_FlushInterval));
         public static string Observability_TokenFromEnvironment => Get(nameof(Observability_TokenFromEnvironment));
         public static string Observability_TokenSaved => Get(nameof(Observability_TokenSaved));
         public static string Observability_TokenNotSet => Get(nameof(Observability_TokenNotSet));
@@ -190,7 +197,7 @@ namespace ResourceMonitorDaemon.Localization
         public static string Pairing_StepCheckNetwork => Get(nameof(Pairing_StepCheckNetwork));
         public static string Pairing_StepNoAddress => Get(nameof(Pairing_StepNoAddress));
         public static string Pairing_StepSaved(string address) => Format(nameof(Pairing_StepSaved), address);
-        public static string Pairing_SaveFailed(string error) => Format(nameof(Pairing_SaveFailed), error);
+        public static string Pairing_SaveFailed => Get(nameof(Pairing_SaveFailed));
         public static string Pairing_FallbackOverriddenByEnvironment => Get(nameof(Pairing_FallbackOverriddenByEnvironment));
         public static string Pairing_Succeeded(string address) => Format(nameof(Pairing_Succeeded), address);
         public static string Pairing_SucceededNoAddress(string host) => Format(nameof(Pairing_SucceededNoAddress), host);

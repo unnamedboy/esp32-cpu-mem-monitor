@@ -241,7 +241,8 @@ namespace ResourceMonitorDaemon
                     _languageMonitor.Setting,
                     DaemonConfiguration.LoadLowerUiLanguage(AppContext.BaseDirectory),
                     DaemonConfiguration.IsUiLanguageOverriddenByEnvironment()),
-                _services.GetRequiredService<IUiSettingsStore>());
+                _services.GetRequiredService<IUiSettingsStore>(),
+                _loggerFactory.CreateLogger<SettingsForm>());
             _settingsForm.FormClosed += (_, _) =>
             {
                 if (_settingsForm?.DialogResult == DialogResult.OK)
@@ -278,7 +279,8 @@ namespace ResourceMonitorDaemon
                 store.LoadLoki(),
                 store,
                 services.GetRequiredService<ISecretProtector>(),
-                DaemonConfiguration.GetEnvironmentOverriddenLokiFields());
+                DaemonConfiguration.GetEnvironmentOverriddenLokiFields(),
+                _loggerFactory.CreateLogger<ObservabilityForm>());
             _observabilityForm.FormClosed += (_, _) =>
             {
                 if (_observabilityForm?.DialogResult == DialogResult.OK)

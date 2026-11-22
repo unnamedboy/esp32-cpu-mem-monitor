@@ -197,7 +197,7 @@ namespace ResourceMonitorDaemon.Observability
             }
             catch (OperationCanceledException)
             {
-                var timedOut = new UiMessage(nameof(Strings.Observability_RequestTimedOut), (int)RequestTimeout.TotalSeconds);
+                var timedOut = UiMessage.Observability_RequestTimedOut((int)RequestTimeout.TotalSeconds);
                 return new LokiPushResult(LokiPushOutcome.Retry, null, timedOut.English) { LocalizedDetail = timedOut };
             }
             catch (HttpRequestException ex)

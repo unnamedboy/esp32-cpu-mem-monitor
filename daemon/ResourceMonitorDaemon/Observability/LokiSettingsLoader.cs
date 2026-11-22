@@ -24,6 +24,12 @@ namespace ResourceMonitorDaemon.Observability
         public const int MaxUsernameLength = 256;
         public const int MaxTokenLength = 4096;
 
+        // Range fields as named in messages: configuration key in logs, dialog label in the UI.
+        private static readonly UiField MetricsIntervalField = new(nameof(LokiSettings.MetricsIntervalSeconds), nameof(Strings.Observability_MetricsInterval));
+        private static readonly UiField BatchMaxEntriesField = new(nameof(LokiSettings.BatchMaxEntries), nameof(Strings.Observability_BatchMaxEntries));
+        private static readonly UiField QueueCapacityField = new(nameof(LokiSettings.QueueCapacity), nameof(Strings.Observability_QueueCapacity));
+        private static readonly UiField FlushIntervalField = new(nameof(LokiSettings.FlushIntervalMs), nameof(Strings.Observability_FlushInterval));
+
         /// <summary>Loki/Mimir tenant ids: at most 150 bytes of <c>[A-Za-z0-9!-_.*'()]</c>, not "." or "..".</summary>
         public const int MaxTenantIdLength = 150;
 
@@ -33,7 +39,7 @@ namespace ResourceMonitorDaemon.Observability
             username == null || username.Length == 0
                 ? null
                 : username.Length > MaxUsernameLength || username.Any(char.IsControl) || username.Contains(':') || username != username.Trim()
-                    ? new UiMessage(nameof(Strings.Observability_ErrorUsername), MaxUsernameLength)
+                    ? UiMessage.Observability_ErrorUsername(MaxUsernameLength)
                     : null;
 
         /// <summary>The token goes into an HTTP header: printable ASCII without spaces only.</summary>
@@ -43,7 +49,7 @@ namespace ResourceMonitorDaemon.Observability
             token == null || token.Length == 0
                 ? null
                 : token.Length > MaxTokenLength || token.Any(c => c < '!' || c > '~')
-                    ? new UiMessage(nameof(Strings.Observability_ErrorToken), MaxTokenLength)
+                    ? UiMessage.Observability_ErrorToken(MaxTokenLength)
                     : null;
 
         public static string? ValidateTenantId(string? tenantId) => TenantIdProblem(tenantId)?.English;
@@ -59,7 +65,7 @@ namespace ResourceMonitorDaemon.Observability
                 || tenantId is "." or ".."
                 || tenantId.Any(c => !(char.IsAsciiLetterOrDigit(c) || "!-_.*'()".Contains(c))))
             {
-                return new UiMessage(nameof(Strings.Observability_ErrorTenantId), MaxTenantIdLength);
+                return UiMessage.Observability_ErrorTenantId(MaxTenantIdLength);
             }
 
             return null;
@@ -88,21 +94,21 @@ namespace ResourceMonitorDaemon.Observability
 
             if (!Enum.IsDefined(settings.AuthMode))
             {
-                errors.Add(new UiMessage(nameof(Strings.Observability_ErrorAuthMode)));
+                errors.Add(UiMessage.Observability_ErrorAuthMode());
             }
 
             Add(UsernameProblem(settings.Username));
             if (settings.AuthMode == LokiAuthMode.Basic && settings.Enabled && settings.Username.Length == 0)
             {
-                errors.Add(new UiMessage(nameof(Strings.Observability_ErrorBasicNeedsUsername)));
+                errors.Add(UiMessage.Observability_ErrorBasicNeedsUsername());
             }
 
             Add(TokenProblem(settings.Token));
             Add(TenantIdProblem(settings.TenantId));
-            Add(DeviceSettingsValidator.RangeProblem(settings.MetricsIntervalSeconds, MinMetricsIntervalSeconds, MaxMetricsIntervalSeconds, nameof(LokiSettings.MetricsIntervalSeconds)));
-            Add(DeviceSettingsValidator.RangeProblem(settings.BatchMaxEntries, MinBatchMaxEntries, MaxBatchMaxEntries, nameof(LokiSettings.BatchMaxEntries)));
-            Add(DeviceSettingsValidator.RangeProblem(settings.QueueCapacity, MinQueueCapacity, MaxQueueCapacity, nameof(LokiSettings.QueueCapacity)));
-            Add(DeviceSettingsValidator.RangeProblem(settings.FlushIntervalMs, MinFlushIntervalMs, MaxFlushIntervalMs, nameof(LokiSettings.FlushIntervalMs)));
+            Add(DeviceSettingsValidator.RangeProblem(settings.MetricsIntervalSeconds, MinMetricsIntervalSeconds, MaxMetricsIntervalSeconds, MetricsIntervalField));
+            Add(DeviceSettingsValidator.RangeProblem(settings.BatchMaxEntries, MinBatchMaxEntries, MaxBatchMaxEntries, BatchMaxEntriesField));
+            Add(DeviceSettingsValidator.RangeProblem(settings.QueueCapacity, MinQueueCapacity, MaxQueueCapacity, QueueCapacityField));
+            Add(DeviceSettingsValidator.RangeProblem(settings.FlushIntervalMs, MinFlushIntervalMs, MaxFlushIntervalMs, FlushIntervalField));
             return errors;
         }
 

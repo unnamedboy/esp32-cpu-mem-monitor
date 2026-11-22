@@ -148,7 +148,7 @@ namespace ResourceMonitorDaemon.Tests
                         "SampleIntervalMs 100 is outside 250..60000.",
                         DeviceSettingsValidator.Validate(new DeviceSettings { SampleIntervalMs = 100 }).Single());
                     AssertEqual(
-                        "SampleIntervalMs 的值 100 超出范围 250..60000。",
+                        "采样间隔（毫秒）的值 100 超出范围 250..60000。",
                         DeviceSettingsValidator.Problems(new DeviceSettings { SampleIntervalMs = 100 }).Single().Localized);
 
                     var sanitizeWarnings = new List<string>();
@@ -161,7 +161,7 @@ namespace ResourceMonitorDaemon.Tests
                     AssertEqual("地址不能为空。", loki.Localized);
                     AssertEqual("Url must not be empty.", LokiSettingsValidator.Validate(new LokiSettings { Enabled = true, Url = "" }).Single());
 
-                    var timedOut = new UiMessage(nameof(Strings.Observability_RequestTimedOut), 10);
+                    var timedOut = UiMessage.Observability_RequestTimedOut(10);
                     var result = new LokiPushResult(LokiPushOutcome.Retry, null, timedOut.English) { LocalizedDetail = timedOut };
                     AssertEqual("timed out after 10 s", result.Detail);
                     AssertEqual("10 秒后超时", ObservabilityForm.DescribeTestResult(result));
@@ -282,6 +282,119 @@ namespace ResourceMonitorDaemon.Tests
                     UiCulture.Changed -= onChanged;
                     UiCulture.Apply(previous);
                 }
+            }),
+            ("Localization: UiMessage is built only by typed factories whose parameters match the placeholders", () =>
+            {
+                var english = ReadResourceSet(CultureInfo.InvariantCulture);
+                AssertTrue(typeof(UiMessage).GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).All(c => c.IsPrivate),
+                    "UiMessage constructors must stay private (use the factories)");
+                var factories = typeof(UiMessage).GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                    .Where(method => method.ReturnType == typeof(UiMessage))
+                    .ToList();
+                AssertTrue(factories.Count >= 20, $"only {factories.Count} factories");
+                foreach (var factory in factories)
+                {
+                    AssertTrue(english.ContainsKey(factory.Name), $"factory {factory.Name} has no resource");
+                    var parameters = factory.GetParameters();
+                    AssertEqual(PlaceholderIndexes(english[factory.Name]).Count, parameters.Length);
+                    var args = parameters.Select(parameter => parameter.ParameterType == typeof(UiField) ? new UiField("Field" + parameter.Position, null)
+                        : parameter.ParameterType == typeof(int) ? (object)(parameter.Position + 1)
+                        : "arg" + parameter.Position).ToArray();
+                    var message = (UiMessage)factory.Invoke(null, args)!;
+                    AssertEqual(factory.Name, message.Key);
+                    foreach (var culture in new[] { CultureInfo.InvariantCulture, English, Chinese })
+                    {
+                        var text = message.Format(culture);
+                        AssertTrue(args.All(arg => text.Contains(arg.ToString()!)), $"{factory.Name} ({culture.Name}) dropped an argument: {text}");
+                    }
+                }
+            }),
+            ("Localization: validation names fields by their dialog label in the UI and by their configuration key in the log", () =>
+            {
+                var bad = new DeviceSettings { CpuTopic = "same", MemTopic = "same", StatusTopic = "same", FallbackAddress = "nope", Port = 0, Host = "" };
+                var problems = DeviceSettingsValidator.Problems(bad);
+                var equal = problems.Single(p => p.Key == nameof(Strings.Settings_ErrorTopicsEqual));
+                AssertEqual("CpuTopic and MemTopic must be different.", equal.English);
+                var fallback = problems.Single(p => p.Key == nameof(Strings.Settings_ErrorFallbackInvalid));
+                AssertEqual("FallbackAddress 'nope' is not a dotted IPv4 address.", fallback.English);
+                AssertEqual("StatusTopic must differ from CpuTopic and MemTopic.", DeviceSettingsFields.StatusTopicCollides.English);
+                AssertEqual("ReconnectMaxBackoffMs must not be smaller than ReconnectInitialBackoffMs.", DeviceSettingsFields.BackoffOrder.English);
+                AssertEqual("CpuTopic must not be empty.", DeviceSettingsValidator.ValidateTopic("", "CpuTopic"));
+                AssertEqual("t must not be empty.", DeviceSettingsValidator.ValidateTopic("", "t"));   // unknown name: shown as is
+
+                InCulture(Chinese, () =>
+                {
+                    AssertEqual("CPU 主题和内存主题不能相同。", equal.Localized);
+                    AssertEqual("备用地址“nope”不是点分十进制的 IPv4 地址。", fallback.Localized);
+                    AssertEqual("状态主题必须与 CPU 主题、内存主题不同。", DeviceSettingsFields.StatusTopicCollides.Localized);
+                    AssertEqual("CPU 主题不能为空。", DeviceSettingsValidator.TopicProblem("", DeviceSettingsFields.CpuTopic)!.Localized);
+                    AssertEqual("端口的值 0 超出范围 1..65535。", DeviceSettingsValidator.PortProblem(0)!.Localized);
+                    var identifiers = new[] { "Host", "FallbackAddress", "Port", "CpuTopic", "MemTopic", "StatusTopic", "SampleIntervalMs", "Reconnect", "ConnectTimeoutMs" };
+                    var all = DeviceSettingsValidator.Problems(bad with { SampleIntervalMs = 1, ReconnectInitialBackoffMs = 1, ReconnectMaxBackoffMs = 1, ConnectTimeoutMs = 1 })
+                        .Concat(LokiSettingsValidator.Problems(new LokiSettings { MetricsIntervalSeconds = -1, BatchMaxEntries = 0, QueueCapacity = 0, FlushIntervalMs = 0 }))
+                        .Select(p => p.Localized).ToList();
+                    var leaking = all.Where(text => identifiers.Any(id => text.Contains(id, StringComparison.Ordinal))).ToList();
+                    AssertTrue(leaking.Count == 0, "configuration keys in zh dialog messages: " + string.Join(" | ", leaking));
+                    return 0;
+                });
+            }),
+            ("Localization: MQTT balloon texts format in one culture; the endpoint is logged in English", () =>
+            {
+                var endpoint = UiMessage.Tray_MqttEndpointWithFallback("resmon.local", 1883, "192.168.1.50");
+                InCulture(Chinese, () =>
+                {
+                    AssertEqual("resmon.local:1883, fallback 192.168.1.50", endpoint.English);   // the "endpoint changed" log line
+                    var text = UiMessage.Tray_MqttFailedText(endpoint).Format(Chinese);
+                    AssertTrue(text.Contains("resmon.local:1883，备用地址 192.168.1.50") && !text.Contains("fallback"), text);
+                    AssertTrue(UiMessage.Tray_MqttFailedText(endpoint).Format(English).Contains("(resmon.local:1883, fallback 192.168.1.50)"), "en");
+                    AssertEqual("resmon.local:1883", UiMessage.Tray_MqttEndpoint("resmon.local", 1883).English);
+                    return 0;
+                });
+            }),
+            ("Localization: save failures show a localized generic text; the language is saved even if the Device section is invalid", () =>
+            {
+                const string path = @"C:\x\settings.json";
+                AssertEqual(Strings.Common_SaveFailedInvalidFile(path), SettingsSaveFailure.Describe(new ArgumentException("Invalid settings: Port 0 is outside 1..65535."), path));
+                AssertEqual(Strings.Common_SaveFailed(path), SettingsSaveFailure.Describe(new IOException("disk full"), path));
+                AssertTrue(InCulture(Chinese, () => SettingsSaveFailure.Describe(new ArgumentException("x"), path)).StartsWith("无法保存", StringComparison.Ordinal), "zh");
+
+                using var temp = new TempDirectory();
+                var file = Path.Combine(temp.Path, "settings.json");
+                File.WriteAllText(file, """{ "Device": { "Port": 0 } }""");   // hand-edited invalid value
+                var store = new UserSettingsStore(file);
+                Exception? failure = null;
+                var thread = new Thread(() =>
+                {
+                    try
+                    {
+                        // Only the language changes in the dialog: the device patch is not written, so the
+                        // invalid Port does not block saving the language.
+                        using var form = new SettingsForm(
+                            new DeviceSettings(), new DeviceSettings(), store, new HashSet<string>(),
+                            new UiLanguageSetting(UiLanguage.Auto, UiLanguage.Auto, FromEnvironment: false), store,
+                            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+                        var box = (System.Windows.Forms.ComboBox)typeof(SettingsForm).GetField("_languageBox", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
+                        box.SelectedIndex = 2;   // zh-Hans
+                        typeof(SettingsForm).GetMethod("OnSave", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new object?[] { null, EventArgs.Empty });
+                        AssertEqual("zh-Hans", form.LanguageSetting);
+                        AssertEqual(System.Windows.Forms.DialogResult.OK, form.DialogResult);
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                thread.Join();
+                if (failure != null)
+                {
+                    throw new InvalidOperationException("settings dialog save failed: " + failure.GetBaseException().Message, failure);
+                }
+
+                AssertEqual("zh-Hans", store.LoadUiLanguage());
+                AssertEqual(0, store.Load().Port);   // the Device section was left alone
+                ProvisioningTests.AssertThrows<ArgumentException>(() => store.Update(patch => patch.Host = "other"));   // what the dialog avoids
             }),
             ("Localization: no CJK text or bilingual labels in daemon sources outside Resources", () =>
             {

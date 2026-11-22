@@ -786,7 +786,7 @@ namespace ResourceMonitorDaemon.Pairing
                     }
 
                     SetStep(StepSave, StepState.Failed);
-                    ShowResult($"{outcome.Message}\n{Strings.Pairing_SaveFailed(ex.Message)}", Tone.Warning);
+                    ShowResult($"{outcome.Message}\n{Strings.Pairing_SaveFailed}", Tone.Warning);
                 }
 
                 if (_closed)

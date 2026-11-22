@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Windows.Forms;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
@@ -154,7 +153,7 @@ namespace ResourceMonitorDaemon
                 {
                     _reconnectRequested = true;
                     _backoff.Reset();
-                    _logger.LogInformation("MQTT broker endpoint changed to {Endpoint}; reconnecting.", DescribeEndpoint(settings));
+                    _logger.LogInformation("MQTT broker endpoint changed to {Endpoint}; reconnecting.", DescribeEndpoint(settings).English);
                 }
                 else if (previous != null && previous.StatusTopic != settings.StatusTopic && IsConnectedLocked)
                 {
@@ -448,7 +447,7 @@ namespace ResourceMonitorDaemon
 
         private bool OnConnected(IMqttClient client, string address, DeviceSettings settings)
         {
-            string? reconnectedMessage = null;
+            UiMessage? reconnectedMessage = null;
             lock (_gate)
             {
                 if (_disposed)
@@ -477,10 +476,10 @@ namespace ResourceMonitorDaemon
 
                 if (_outageNotified)
                 {
-                    // User-visible balloon text: UI language (the log lines above stay English).
+                    // User-visible balloon text, formatted in the UI language when shown (the log lines above stay English).
                     reconnectedMessage = viaFallback
-                        ? Strings.Tray_MqttReconnectedViaFallback(address, settings.Port, settings.Host)
-                        : Strings.Tray_MqttReconnectedText(address, settings.Port);
+                        ? UiMessage.Tray_MqttReconnectedViaFallback(address, settings.Port, settings.Host)
+                        : UiMessage.Tray_MqttReconnectedText(address, settings.Port);
                     _outageNotified = false;
                 }
 
@@ -490,7 +489,7 @@ namespace ResourceMonitorDaemon
 
             if (reconnectedMessage != null)
             {
-                Notify(Strings.Tray_MqttReconnectedTitle, reconnectedMessage, ToolTipIcon.Info);
+                Notify(UiMessage.Tray_MqttReconnectedTitle(), reconnectedMessage, ToolTipIcon.Info);
             }
 
             return true;
@@ -526,8 +525,8 @@ namespace ResourceMonitorDaemon
             }
 
             if (notify && Notify(
-                    Strings.Tray_MqttFailedTitle,
-                    Strings.Tray_MqttFailedText(DescribeEndpoint(settings)),
+                    UiMessage.Tray_MqttFailedTitle(),
+                    UiMessage.Tray_MqttFailedText(DescribeEndpoint(settings)),
                     ToolTipIcon.Error))
             {
                 lock (_gate)
@@ -552,8 +551,12 @@ namespace ResourceMonitorDaemon
             }
         }
 
-        /// <summary>Returns true when a handler was attached and ran without throwing.</summary>
-        private bool Notify(string title, string message, ToolTipIcon icon)
+        /// <summary>
+        /// Returns true when a handler was attached and ran without throwing. Title and text are
+        /// formatted with one snapshot of the UI culture, so a language switch on another thread
+        /// cannot produce a mixed-language balloon.
+        /// </summary>
+        private bool Notify(UiMessage title, UiMessage message, ToolTipIcon icon)
         {
             var handler = OnNotification;
             if (handler == null)
@@ -563,7 +566,8 @@ namespace ResourceMonitorDaemon
 
             try
             {
-                handler(title, message, icon);
+                var culture = Strings.Culture;
+                handler(title.Format(culture), message.Format(culture), icon);
                 return true;
             }
             catch (Exception ex)
@@ -583,11 +587,11 @@ namespace ResourceMonitorDaemon
             }
         }
 
-        /// <summary>The endpoint(s) named in the failure balloon, in the UI language.</summary>
-        private static string DescribeEndpoint(DeviceSettings settings) =>
+        /// <summary>The endpoint(s): <see cref="UiMessage.English"/> for the log, formatted in the UI language inside the failure balloon.</summary>
+        private static UiMessage DescribeEndpoint(DeviceSettings settings) =>
             string.IsNullOrWhiteSpace(settings.FallbackAddress)
-                ? string.Create(CultureInfo.InvariantCulture, $"{settings.Host}:{settings.Port}")
-                : Strings.Tray_MqttEndpointWithFallback(settings.Host, settings.Port, settings.FallbackAddress);
+                ? UiMessage.Tray_MqttEndpoint(settings.Host, settings.Port)
+                : UiMessage.Tray_MqttEndpointWithFallback(settings.Host, settings.Port, settings.FallbackAddress);
 
         private static string Describe(Exception ex, int timeoutMs) =>
             ex is OperationCanceledException or TimeoutException or MQTTnet.Exceptions.MqttCommunicationTimedOutException

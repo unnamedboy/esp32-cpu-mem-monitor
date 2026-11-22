@@ -18,30 +18,30 @@ namespace ResourceMonitorDaemon.Observability
         {
             if (string.IsNullOrWhiteSpace(url))
             {
-                return new UiMessage(nameof(Strings.Observability_ErrorUrlEmpty));
+                return UiMessage.Observability_ErrorUrlEmpty();
             }
 
             var trimmed = url.Trim();
             if (trimmed.Length > MaxLength)
             {
-                return new UiMessage(nameof(Strings.Observability_ErrorUrlTooLong), MaxLength);
+                return UiMessage.Observability_ErrorUrlTooLong(MaxLength);
             }
 
             if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
                 || string.IsNullOrEmpty(uri.Host))
             {
-                return new UiMessage(nameof(Strings.Observability_ErrorUrlNotHttp));
+                return UiMessage.Observability_ErrorUrlNotHttp();
             }
 
             if (uri.UserInfo.Length > 0)
             {
-                return new UiMessage(nameof(Strings.Observability_ErrorUrlUserInfo));
+                return UiMessage.Observability_ErrorUrlUserInfo();
             }
 
             if (uri.Fragment.Length > 0)
             {
-                return new UiMessage(nameof(Strings.Observability_ErrorUrlFragment));
+                return UiMessage.Observability_ErrorUrlFragment();
             }
 
             return null;

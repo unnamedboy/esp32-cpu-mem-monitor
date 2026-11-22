@@ -1,4 +1,5 @@
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
 using ResourceMonitorDaemon.Localization;
 
 namespace ResourceMonitorDaemon.Observability
@@ -24,6 +25,7 @@ namespace ResourceMonitorDaemon.Observability
 
         private readonly IObservabilitySettingsStore _store;
         private readonly ISecretProtector _protector;
+        private readonly ILogger _logger;
         private readonly LokiSettings _effective;
         private readonly LokiSettings _lowerLayers;
         private readonly LokiSettings _displayed;
@@ -50,10 +52,12 @@ namespace ResourceMonitorDaemon.Observability
             UserLokiSettingsPatch saved,
             IObservabilitySettingsStore store,
             ISecretProtector protector,
-            IReadOnlySet<string> environmentOverriddenFields)
+            IReadOnlySet<string> environmentOverriddenFields,
+            ILogger logger)
         {
             _store = store;
             _protector = protector;
+            _logger = logger;
             _effective = effective;
             _lowerLayers = lowerLayers;
             _environmentFields = environmentOverriddenFields;
@@ -349,7 +353,9 @@ namespace ResourceMonitorDaemon.Observability
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.Cryptography.CryptographicException)
             {
-                MessageBox.Show(this, Strings.Common_SaveFailed(ex.Message), Strings.Observability_MessageBoxCaption, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // ex.Message never contains the token (validators and DPAPI errors do not repeat it).
+                _logger.LogWarning("Observability dialog: could not save to {Path}: {Error}", _store.FilePath, ex.Message);
+                MessageBox.Show(this, SettingsSaveFailure.Describe(ex, _store.FilePath), Strings.Observability_MessageBoxCaption, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 

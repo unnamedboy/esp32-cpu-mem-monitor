@@ -24,8 +24,9 @@ namespace ResourceMonitorDaemon
         public const int MaxTopicLength = 128;
         public const int MaxHostLength = 253;
 
-        // Each rule exists twice: a *Problem method returning the message as a UiMessage (English for
-        // logs, localized for dialogs) and the original string API returning the English text.
+        // Each rule exists twice: a *Problem method returning the message as a UiMessage (English with
+        // configuration keys for logs, localized with dialog labels for dialogs) and the original
+        // string API returning the English text.
 
         public static string? ValidateHost(string? host) => HostProblem(host)?.English;
 
@@ -33,13 +34,13 @@ namespace ResourceMonitorDaemon
         {
             if (string.IsNullOrWhiteSpace(host))
             {
-                return new UiMessage(nameof(Strings.Settings_ErrorHostEmpty));
+                return UiMessage.Settings_ErrorEmpty(DeviceSettingsFields.Host);
             }
 
             var trimmed = host.Trim();
             if (trimmed.Length > MaxHostLength || Uri.CheckHostName(trimmed) == UriHostNameType.Unknown)
             {
-                return new UiMessage(nameof(Strings.Settings_ErrorHostInvalid), trimmed);
+                return UiMessage.Settings_ErrorHostInvalid(DeviceSettingsFields.Host, trimmed);
             }
 
             return null;
@@ -59,7 +60,7 @@ namespace ResourceMonitorDaemon
                 || ip.AddressFamily != AddressFamily.InterNetwork
                 || trimmed.Count(c => c == '.') != 3)
             {
-                return new UiMessage(nameof(Strings.Settings_ErrorFallbackInvalid), trimmed);
+                return UiMessage.Settings_ErrorFallbackInvalid(DeviceSettingsFields.FallbackAddress, trimmed);
             }
 
             return null;
@@ -67,40 +68,40 @@ namespace ResourceMonitorDaemon
 
         public static string? ValidatePort(int port) => PortProblem(port)?.English;
 
-        public static UiMessage? PortProblem(int port) =>
-            port is >= 1 and <= 65535 ? null : new UiMessage(nameof(Strings.Settings_ErrorPortRange), port);
+        public static UiMessage? PortProblem(int port) => RangeProblem(port, 1, 65535, DeviceSettingsFields.Port);
 
-        public static string? ValidateTopic(string? topic, string name) => TopicProblem(topic, name)?.English;
+        public static string? ValidateTopic(string? topic, string name) => TopicProblem(topic, DeviceSettingsFields.ForName(name))?.English;
 
-        public static UiMessage? TopicProblem(string? topic, string name)
+        public static UiMessage? TopicProblem(string? topic, UiField field)
         {
             if (string.IsNullOrWhiteSpace(topic))
             {
-                return new UiMessage(nameof(Strings.Settings_ErrorTopicEmpty), name);
+                return UiMessage.Settings_ErrorEmpty(field);
             }
 
             if (topic.Length > MaxTopicLength)
             {
-                return new UiMessage(nameof(Strings.Settings_ErrorTopicTooLong), name, MaxTopicLength);
+                return UiMessage.Settings_ErrorTopicTooLong(field, MaxTopicLength);
             }
 
             if (topic.IndexOfAny(new[] { '#', '+' }) >= 0)
             {
-                return new UiMessage(nameof(Strings.Settings_ErrorTopicWildcard), name, topic);
+                return UiMessage.Settings_ErrorTopicWildcard(field, topic);
             }
 
             if (topic.Any(char.IsControl) || topic != topic.Trim())
             {
-                return new UiMessage(nameof(Strings.Settings_ErrorTopicWhitespace), name);
+                return UiMessage.Settings_ErrorTopicWhitespace(field);
             }
 
             return null;
         }
 
-        public static string? ValidateRange(int value, int min, int max, string name) => RangeProblem(value, min, max, name)?.English;
+        public static string? ValidateRange(int value, int min, int max, string name) =>
+            RangeProblem(value, min, max, DeviceSettingsFields.ForName(name))?.English;
 
-        public static UiMessage? RangeProblem(int value, int min, int max, string name) =>
-            value >= min && value <= max ? null : new UiMessage(nameof(Strings.Settings_ErrorRange), name, value, min, max);
+        public static UiMessage? RangeProblem(int value, int min, int max, UiField field) =>
+            value >= min && value <= max ? null : UiMessage.Settings_ErrorRange(field, value, min, max);
 
         /// <summary>Returns every problem with <paramref name="settings"/> in English; empty when valid.</summary>
         public static IReadOnlyList<string> Validate(DeviceSettings settings) =>
@@ -121,28 +122,28 @@ namespace ResourceMonitorDaemon
             Add(HostProblem(settings.Host));
             Add(FallbackAddressProblem(settings.FallbackAddress));
             Add(PortProblem(settings.Port));
-            Add(TopicProblem(settings.CpuTopic, nameof(DeviceSettings.CpuTopic)));
-            Add(TopicProblem(settings.MemTopic, nameof(DeviceSettings.MemTopic)));
+            Add(TopicProblem(settings.CpuTopic, DeviceSettingsFields.CpuTopic));
+            Add(TopicProblem(settings.MemTopic, DeviceSettingsFields.MemTopic));
             if (settings.CpuTopic == settings.MemTopic)
             {
-                errors.Add(new UiMessage(nameof(Strings.Settings_ErrorTopicsEqual)));
+                errors.Add(UiMessage.Settings_ErrorTopicsEqual(DeviceSettingsFields.CpuTopic, DeviceSettingsFields.MemTopic));
             }
 
-            Add(TopicProblem(settings.StatusTopic, nameof(DeviceSettings.StatusTopic)));
+            Add(TopicProblem(settings.StatusTopic, DeviceSettingsFields.StatusTopic));
             if (settings.StatusTopic == settings.CpuTopic || settings.StatusTopic == settings.MemTopic)
             {
-                errors.Add(new UiMessage(nameof(Strings.Settings_ErrorStatusTopicCollides)));
+                errors.Add(DeviceSettingsFields.StatusTopicCollides);
             }
 
-            Add(RangeProblem(settings.SampleIntervalMs, MinSampleIntervalMs, MaxSampleIntervalMs, nameof(DeviceSettings.SampleIntervalMs)));
-            Add(RangeProblem(settings.ReconnectInitialBackoffMs, MinBackoffMs, MaxBackoffMs, nameof(DeviceSettings.ReconnectInitialBackoffMs)));
-            Add(RangeProblem(settings.ReconnectMaxBackoffMs, MinBackoffMs, MaxBackoffMs, nameof(DeviceSettings.ReconnectMaxBackoffMs)));
+            Add(RangeProblem(settings.SampleIntervalMs, MinSampleIntervalMs, MaxSampleIntervalMs, DeviceSettingsFields.SampleIntervalMs));
+            Add(RangeProblem(settings.ReconnectInitialBackoffMs, MinBackoffMs, MaxBackoffMs, DeviceSettingsFields.ReconnectInitialBackoffMs));
+            Add(RangeProblem(settings.ReconnectMaxBackoffMs, MinBackoffMs, MaxBackoffMs, DeviceSettingsFields.ReconnectMaxBackoffMs));
             if (settings.ReconnectMaxBackoffMs < settings.ReconnectInitialBackoffMs)
             {
-                errors.Add(new UiMessage(nameof(Strings.Settings_ErrorBackoffOrder)));
+                errors.Add(DeviceSettingsFields.BackoffOrder);
             }
 
-            Add(RangeProblem(settings.ConnectTimeoutMs, MinConnectTimeoutMs, MaxConnectTimeoutMs, nameof(DeviceSettings.ConnectTimeoutMs)));
+            Add(RangeProblem(settings.ConnectTimeoutMs, MinConnectTimeoutMs, MaxConnectTimeoutMs, DeviceSettingsFields.ConnectTimeoutMs));
             return errors;
         }
 
@@ -230,5 +231,38 @@ namespace ResourceMonitorDaemon
 
             return clamped;
         }
+    }
+
+    /// <summary>
+    /// The <see cref="DeviceSettings"/> fields as named in messages: configuration key in logs,
+    /// dialog label (<c>Settings_*</c> resource) in the UI.
+    /// </summary>
+    public static class DeviceSettingsFields
+    {
+        public static readonly UiField Host = new(nameof(DeviceSettings.Host), nameof(Strings.Settings_Host));
+        public static readonly UiField FallbackAddress = new(nameof(DeviceSettings.FallbackAddress), nameof(Strings.Settings_FallbackAddress));
+        public static readonly UiField Port = new(nameof(DeviceSettings.Port), nameof(Strings.Settings_Port));
+        public static readonly UiField CpuTopic = new(nameof(DeviceSettings.CpuTopic), nameof(Strings.Settings_CpuTopic));
+        public static readonly UiField MemTopic = new(nameof(DeviceSettings.MemTopic), nameof(Strings.Settings_MemTopic));
+        public static readonly UiField StatusTopic = new(nameof(DeviceSettings.StatusTopic), nameof(Strings.Settings_StatusTopic));
+        public static readonly UiField SampleIntervalMs = new(nameof(DeviceSettings.SampleIntervalMs), nameof(Strings.Settings_SampleInterval));
+        public static readonly UiField ReconnectInitialBackoffMs = new(nameof(DeviceSettings.ReconnectInitialBackoffMs), nameof(Strings.Settings_ReconnectInitialBackoff));
+        public static readonly UiField ReconnectMaxBackoffMs = new(nameof(DeviceSettings.ReconnectMaxBackoffMs), nameof(Strings.Settings_ReconnectMaxBackoff));
+        public static readonly UiField ConnectTimeoutMs = new(nameof(DeviceSettings.ConnectTimeoutMs), nameof(Strings.Settings_ConnectTimeout));
+
+        private static readonly UiField[] All =
+        {
+            Host, FallbackAddress, Port, CpuTopic, MemTopic, StatusTopic, SampleIntervalMs, ReconnectInitialBackoffMs, ReconnectMaxBackoffMs, ConnectTimeoutMs,
+        };
+
+        /// <summary>Topic collision: StatusTopic vs. the two metric topics.</summary>
+        public static UiMessage StatusTopicCollides => UiMessage.Settings_ErrorStatusTopicCollides(StatusTopic, CpuTopic, MemTopic);
+
+        /// <summary>ReconnectMaxBackoffMs smaller than ReconnectInitialBackoffMs.</summary>
+        public static UiMessage BackoffOrder => UiMessage.Settings_ErrorBackoffOrder(ReconnectMaxBackoffMs, ReconnectInitialBackoffMs);
+
+        /// <summary>The field with configuration key <paramref name="name"/>, or one that shows <paramref name="name"/> as is.</summary>
+        public static UiField ForName(string name) =>
+            All.FirstOrDefault(field => string.Equals(field.Identifier, name, StringComparison.OrdinalIgnoreCase)) ?? new UiField(name, null);
     }
 }

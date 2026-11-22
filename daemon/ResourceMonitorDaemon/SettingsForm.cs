@@ -1,4 +1,5 @@
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
 using ResourceMonitorDaemon.Localization;
 
 namespace ResourceMonitorDaemon
@@ -9,6 +10,20 @@ namespace ResourceMonitorDaemon
     /// <c>RESMON_Ui__Language</c> overrides it.
     /// </summary>
     public sealed record UiLanguageSetting(string Effective, string LowerLayers, bool FromEnvironment);
+
+    /// <summary>
+    /// The user-facing text for a failed settings save. The exception text (English, or Windows'
+    /// own language for I/O errors) only goes to the log.
+    /// </summary>
+    public static class SettingsSaveFailure
+    {
+        /// <param name="exception">What <see cref="ISettingsStore.Update"/> (or a sibling store method) threw.</param>
+        /// <param name="filePath">The user settings file.</param>
+        public static string Describe(Exception exception, string filePath) =>
+            exception is ArgumentException
+                ? Strings.Common_SaveFailedInvalidFile(filePath)   // validation of the whole patch, e.g. a bad hand-edited value
+                : Strings.Common_SaveFailed(filePath);
+    }
 
     /// <summary>
     /// Small dialog for editing the user-facing connection settings and the UI language.
@@ -32,6 +47,8 @@ namespace ResourceMonitorDaemon
         private readonly DeviceSettings _lowerLayers;
         private readonly IReadOnlySet<string> _environmentFields;
         private readonly UiLanguageSetting _language;
+        private readonly ILogger _logger;
+        private string _savedLanguage;
         private readonly TextBox _host;
         private readonly NumericUpDown _port;
         private readonly TextBox _cpuTopic;
@@ -45,7 +62,8 @@ namespace ResourceMonitorDaemon
             ISettingsStore store,
             IReadOnlySet<string> environmentOverriddenFields,
             UiLanguageSetting language,
-            IUiSettingsStore uiStore)
+            IUiSettingsStore uiStore,
+            ILogger logger)
         {
             _store = store;
             _uiStore = uiStore;
@@ -53,6 +71,8 @@ namespace ResourceMonitorDaemon
             _lowerLayers = lowerLayers;
             _environmentFields = environmentOverriddenFields;
             _language = language;
+            _logger = logger;
+            _savedLanguage = language.Effective;
             LanguageSetting = language.Effective;
             EnvironmentOverriddenFields = UserDeviceSettingsPatch.DialogFieldNames
                 .Where(environmentOverriddenFields.Contains)
@@ -225,18 +245,27 @@ namespace ResourceMonitorDaemon
                 return;
             }
 
+            // The language is saved on its own and first: a problem with the Device section (for
+            // example an invalid hand-edited value in the user file) must not lose the choice.
             var selectedLanguage = SelectedLanguage;
             try
             {
-                _store.Update(patch => patch.ApplyDialogEdit(_lowerLayers, _displayed, edited, _environmentFields));
-                if (!_language.FromEnvironment && selectedLanguage != _language.Effective)
+                if (!_language.FromEnvironment && selectedLanguage != _savedLanguage)
                 {
                     _uiStore.UpdateUiLanguage(UiLanguage.ValueToStore(selectedLanguage, _language.LowerLayers));
+                    _savedLanguage = selectedLanguage;
+                }
+
+                // Nothing to write when no device field changed (ApplyDialogEdit would be a no-op).
+                if (edited != _displayed)
+                {
+                    _store.Update(patch => patch.ApplyDialogEdit(_lowerLayers, _displayed, edited, _environmentFields));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                MessageBox.Show(this, Strings.Common_SaveFailed(ex.Message), Strings.Common_ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _logger.LogWarning("Settings dialog: could not save to {Path}: {Error}", _store.FilePath, ex.Message);
+                MessageBox.Show(this, SettingsSaveFailure.Describe(ex, _store.FilePath), Strings.Common_ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
