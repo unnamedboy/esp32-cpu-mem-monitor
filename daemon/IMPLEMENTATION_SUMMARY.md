@@ -60,9 +60,11 @@ contributes nothing) and reported in the log.
 
 Changes apply without restart: both JSON files are watched
 (`reloadOnChange`, typically picked up within half a second) and
-`MonitorService` consumes `IOptionsMonitor<DeviceSettings>`. Topic and interval
-changes take effect on the next tick; a host, fallback or port change drops the
-current connection and reconnects. A single save can raise several watcher
+`MonitorService` consumes `IOptionsMonitor<DeviceSettings>`. The change callback
+wakes the sampling loop (it waits on a wake signal as well as the sample deadline),
+so changes apply within about a second even with a 60 s interval: a new interval
+reschedules the next sample, and a host, fallback or port change drops the current
+connection and starts reconnecting immediately (still in the background). A single save can raise several watcher
 reloads; identical settings are ignored and identical sanitize warnings are
 logged only once.
 
@@ -83,9 +85,10 @@ settingsStore.Update(patch => patch.FallbackAddress = "192.168.1.50");
   atomically (`settings.json.tmp` then replace; `IOException` on failure). Only
   non-null fields are written. Other top-level sections and unknown `Device` keys
   are preserved; comments and trailing commas are accepted when reading (comments
-  are not kept). An empty file is treated as empty; an unparsable file is copied to
-  `settings.json.<yyyyMMdd-HHmmss>.bak` (never overwriting an earlier backup) before
-  it is replaced.
+  are not kept). An empty file is treated as empty. A file that either parser rejects
+  (invalid JSON, a non-object root, exact or case-variant duplicate keys) is copied
+  to `settings.json.<yyyyMMdd-HHmmss>.bak` (never overwriting an earlier backup)
+  before it is replaced.
 - `ISettingsStore.Load()` — the fields set in the user file only (not
   `appsettings.json`, defaults or environment); never throws.
 - `ISettingsStore.Saved` — raised after a successful update. No reload call is
