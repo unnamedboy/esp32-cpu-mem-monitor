@@ -75,8 +75,30 @@ void test_credential_failure_after_success_keeps_credentials_and_stops() {
                           (int)decideCredentialFailureAction(true));
 }
 
+void test_connected_while_provisioning_without_success_stays_provisioning() {
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::StayProvisioning,
+                          (int)decideConnectedTransition(NetworkState::Provisioning, false));
+}
+
+void test_connected_after_provisioning_success_becomes_connected_stored() {
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnectedStored,
+                          (int)decideConnectedTransition(NetworkState::Provisioning, true));
+}
+
+void test_connected_in_station_states_becomes_connected() {
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnected,
+                          (int)decideConnectedTransition(NetworkState::Connecting, false));
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnected,
+                          (int)decideConnectedTransition(NetworkState::Connecting, true));
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnected,
+                          (int)decideConnectedTransition(NetworkState::Error, false));
+}
+
 void runProvisioningLogicTests() {
     UNITY_BEGIN();
+    RUN_TEST(test_connected_while_provisioning_without_success_stays_provisioning);
+    RUN_TEST(test_connected_after_provisioning_success_becomes_connected_stored);
+    RUN_TEST(test_connected_in_station_states_becomes_connected);
     RUN_TEST(test_credential_failure_before_success_resets_for_retry);
     RUN_TEST(test_credential_failure_after_success_keeps_credentials_and_stops);
     RUN_TEST(test_provisioning_start_failure_retries_then_stops);

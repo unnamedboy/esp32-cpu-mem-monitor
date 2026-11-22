@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 enum class BootAction {
-    // Start BLE provisioning (WiFiProv, Security1 + PoP).
+    // Start BLE provisioning (ESP-IDF provisioning manager, Security1 + PoP).
     EnterProvisioning,
     // Connect as STA with credentials from the Wi-Fi NVS store (provisioned).
     ConnectStoredCredentials,
@@ -120,6 +120,26 @@ inline uint32_t nextReconnectDelayMs(uint32_t currentMs, uint32_t minMs, uint32_
         return maxMs;
     }
     return currentMs * 2;
+}
+
+// What to do when the STA obtains an IP address.
+enum class ConnectedTransition {
+    // Normal STA operation: become Connected, keep the credential source.
+    BecomeConnected,
+    // Provisioning succeeded: become Connected with source = stored.
+    BecomeConnectedStored,
+    // Still provisioning and the credentials have NOT been accepted (e.g. the
+    // core's one automatic retry connected after the firmware had already
+    // reset the rejected credentials). Nothing is stored in NVS, so stay in
+    // provisioning mode and re-evaluate once provisioning succeeds.
+    StayProvisioning,
+};
+
+inline ConnectedTransition decideConnectedTransition(NetworkState state, bool provisioningSucceeded) {
+    if (state != NetworkState::Provisioning) {
+        return ConnectedTransition::BecomeConnected;
+    }
+    return provisioningSucceeded ? ConnectedTransition::BecomeConnectedStored : ConnectedTransition::StayProvisioning;
 }
 
 // What to do on WIFI_PROV_CRED_FAIL.
