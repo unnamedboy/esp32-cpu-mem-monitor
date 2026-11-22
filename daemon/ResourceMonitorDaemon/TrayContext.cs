@@ -14,8 +14,10 @@ namespace ResourceMonitorDaemon
         private readonly MonitorService _monitorService;
         private readonly ISettingsStore _settingsStore;
         private readonly SynchronizationContext? _uiContext;
+        private readonly System.Windows.Forms.Timer _updateTimer;
         private ToolStripMenuItem? _pauseResumeItem;
         private SettingsForm? _settingsForm;
+        private bool _exiting;
 
         public TrayContext(IHost host, string logFilePath, MonitorService monitorService, ISettingsStore settingsStore)
         {
@@ -55,20 +57,13 @@ namespace ResourceMonitorDaemon
             
             _monitorService.OnNotification = (title, message, icon) =>
             {
-                if (_uiContext != null)
-                {
-                    _uiContext.Post(_ => ShowBalloon(5000, title, message, icon), null);
-                }
-                else
-                {
-                    ShowBalloon(5000, title, message, icon);
-                }
+                _uiContext?.Post(_ => ShowBalloon(5000, title, message, icon), null);
             };
             
-            var updateTimer = new System.Windows.Forms.Timer();
-            updateTimer.Interval = 1000;
-            updateTimer.Tick += (s, e) => UpdatePauseResumeLabel();
-            updateTimer.Start();
+            _updateTimer = new System.Windows.Forms.Timer();
+            _updateTimer.Interval = 1000;
+            _updateTimer.Tick += (s, e) => UpdatePauseResumeLabel();
+            _updateTimer.Start();
         }
 
         private void UpdatePauseResumeLabel()
@@ -123,12 +118,20 @@ namespace ResourceMonitorDaemon
                 return;
             }
 
-            _settingsForm = new SettingsForm(_monitorService.CurrentSettings, _settingsStore);
+            _settingsForm = new SettingsForm(
+                _monitorService.CurrentSettings,
+                DaemonConfiguration.LoadLowerLayers(AppContext.BaseDirectory),
+                _settingsStore,
+                DaemonConfiguration.GetEnvironmentOverriddenDeviceFields());
             _settingsForm.FormClosed += (_, _) =>
             {
                 if (_settingsForm?.DialogResult == DialogResult.OK)
                 {
-                    ShowBalloon(2000, "设置已保存 (Settings saved)", "新设置已生效，无需重启 (applied without restart)", ToolTipIcon.Info);
+                    var overridden = _settingsForm.EnvironmentOverriddenFields;
+                    var message = overridden.Count == 0
+                        ? "新设置已生效，无需重启 (applied without restart)"
+                        : "已应用；以下字段仍由环境变量决定 (applied; still overridden by environment variables): " + string.Join(", ", overridden);
+                    ShowBalloon(3000, "设置已保存 (Settings saved)", message, ToolTipIcon.Info);
                 }
 
                 _settingsForm?.Dispose();
@@ -152,13 +155,33 @@ namespace ResourceMonitorDaemon
 
         private async void OnExitAsync(object? sender, EventArgs e)
         {
-            _settingsForm?.Close();
-            await _host.StopAsync(TimeSpan.FromSeconds(3));
-            _host.Dispose();
+            if (_exiting)
+            {
+                return;
+            }
+
+            // Hide the icon and disable the menu first so a slow stop cannot be re-triggered.
+            _exiting = true;
+            _updateTimer.Stop();
+            if (_notifyIcon.ContextMenuStrip != null)
+            {
+                _notifyIcon.ContextMenuStrip.Enabled = false;
+            }
 
             _notifyIcon.Visible = false;
-            _notifyIcon.Dispose();
+            _settingsForm?.Close();
 
+            try
+            {
+                await _host.StopAsync(TimeSpan.FromSeconds(3));
+            }
+            catch (Exception)
+            {
+                // Exit regardless; MonitorService logs stop problems itself.
+            }
+
+            _host.Dispose();
+            _notifyIcon.Dispose();
             Application.Exit();
         }
     }

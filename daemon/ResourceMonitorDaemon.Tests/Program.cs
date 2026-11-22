@@ -1,4 +1,8 @@
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ResourceMonitorDaemon;
 
 var tests = new (string Name, Action Run)[]
@@ -152,56 +156,167 @@ var tests = new (string Name, Action Run)[]
     }),
 
     // ---- UserSettingsStore ---------------------------------------------------------------
-    ("UserSettingsStore round-trips settings atomically", () =>
+    ("Update writes only the fields that were set; appsettings.json values keep applying", () =>
     {
         using var temp = new TempDir();
-        var path = Path.Combine(temp.Path, "nested", "settings.json");
-        var store = new UserSettingsStore(path);
-        AssertTrue(store.Load() == new DeviceSettings(), "missing file should yield defaults");
+        File.WriteAllText(Path.Combine(temp.Path, "appsettings.json"),
+            """{ "Device": { "Host": "app.host", "Port": 1999 } }""");
+        var userPath = Path.Combine(temp.Path, "user", "settings.json");
+        var store = new UserSettingsStore(userPath);
+        AssertTrue(store.Load().IsEmpty, "missing file should yield an empty patch");
 
         var saved = 0;
         store.Saved += (_, _) => saved++;
-        var settings = new DeviceSettings
-        {
-            Host = "esp32.lan",
-            FallbackAddress = "192.168.1.77",
-            Port = 1884,
-            CpuTopic = "lab/cpu",
-            MemTopic = "lab/mem",
-            SampleIntervalMs = 500,
-        };
-        store.Save(settings);
+        store.Update(patch => patch.FallbackAddress = "192.168.1.77");   // pairing-wizard pattern
         AssertEqual(1, saved);
-        AssertTrue(store.Load() == settings, "loaded settings differ from saved settings");
-        AssertTrue(!File.Exists(path + ".tmp"), "temporary file left behind");
-        AssertTrue(!File.ReadAllText(path).Contains("password", StringComparison.OrdinalIgnoreCase), "file mentions a password");
+        AssertTrue(!File.Exists(userPath + ".tmp"), "temporary file left behind");
 
-        // Pairing-wizard style partial update keeps the other values.
-        store.Save(store.Load() with { FallbackAddress = "192.168.1.78" });
-        var reloaded = store.Load();
-        AssertEqual("192.168.1.78", reloaded.FallbackAddress);
-        AssertEqual("esp32.lan", reloaded.Host);
+        var device = JsonNode.Parse(File.ReadAllText(userPath))!["Device"]!.AsObject();
+        AssertEqual("FallbackAddress", string.Join(",", device.Select(p => p.Key)));
+        AssertTrue(store.Load() == new UserDeviceSettingsPatch { FallbackAddress = "192.168.1.77" }, "patch round-trip");
+
+        var effective = LoadEffective(temp.Path, userPath);
+        AssertEqual("app.host", effective.Host);
+        AssertEqual(1999, effective.Port);
+        AssertEqual("192.168.1.77", effective.FallbackAddress);
+
+        // Clearing a field removes it from the file again.
+        store.Update(patch => patch.FallbackAddress = null);
+        AssertTrue(store.Load().IsEmpty, "field not removed");
+        AssertEqual("", LoadEffective(temp.Path, userPath).FallbackAddress);
     }),
-    ("UserSettingsStore preserves other sections and rejects invalid settings", () =>
+    ("Dialog save does not persist env-overridden values or copies of lower layers", () =>
+    {
+        using var temp = new TempDir();
+        File.WriteAllText(Path.Combine(temp.Path, "appsettings.json"),
+            """{ "Device": { "Host": "app.host", "Port": 1999, "CpuTopic": "app/cpu" } }""");
+        var userPath = Path.Combine(temp.Path, "settings.json");
+        var store = new UserSettingsStore(userPath);
+        store.Update(patch => { patch.Host = "user.host"; patch.FallbackAddress = "10.0.0.9"; });
+
+        const string envName = "RESMON_Device__Host";
+        var previous = Environment.GetEnvironmentVariable(envName);
+        try
+        {
+            Environment.SetEnvironmentVariable(envName, "env.host");
+            var envFields = DaemonConfiguration.GetEnvironmentOverriddenDeviceFields();
+            AssertTrue(envFields.Contains("Host"), "env field not detected");
+
+            // The dialog edits the effective values: Host shows env.host (read-only), the user
+            // changes only Port and leaves CpuTopic at the appsettings value.
+            var lowerLayers = DaemonConfiguration.LoadLowerLayers(temp.Path);
+            AssertEqual("app.host", lowerLayers.Host);
+            var edited = LoadEffective(temp.Path, userPath) with { Port = 1885 };
+            AssertEqual("env.host", edited.Host);
+            store.Update(patch => patch.ApplyDialogEdit(lowerLayers, edited, envFields));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, previous);
+        }
+
+        var saved = store.Load();
+        AssertEqual("user.host", saved.Host);            // env value not persisted; user value kept
+        AssertEqual(1885, saved.Port);
+        AssertEqual(null, saved.CpuTopic);               // equal to appsettings → not written
+        AssertEqual("10.0.0.9", saved.FallbackAddress);  // not shown in dialog → untouched
+        AssertTrue(!File.ReadAllText(userPath).Contains("env.host"), "env value written to file");
+
+        var effective = LoadEffective(temp.Path, userPath);
+        AssertEqual("user.host", effective.Host);
+
+        // Editing a value back to the lower-layer value removes it from the file.
+        store.Update(p => p.ApplyDialogEdit(DaemonConfiguration.LoadLowerLayers(temp.Path), effective with { Port = 1999 }, new HashSet<string>()));
+        AssertEqual(null, store.Load().Port);
+    }),
+    ("Update preserves other sections, unknown keys, and tolerates comments/trailing commas", () =>
     {
         using var temp = new TempDir();
         var path = Path.Combine(temp.Path, "settings.json");
-        File.WriteAllText(path, """{ "Logging": { "LogLevel": { "Default": "Debug" } }, "Device": { "Port": 1 } }""");
+        File.WriteAllText(path, """
+            {
+              // hand-edited
+              "Logging": { "LogLevel": { "Default": "Debug", }, },
+              "Device": { "port": 1884, "FutureKey": "keep", },
+            }
+            """);
         var store = new UserSettingsStore(path);
-        store.Save(new DeviceSettings { Port = 1885 });
-        var text = File.ReadAllText(path);
-        AssertTrue(text.Contains("\"Logging\""), "Logging section was dropped");
-        AssertEqual(1885, store.Load().Port);
+        AssertEqual(1884, store.Load().Port);
+        store.Update(patch => patch.CpuTopic = "lab/cpu");
 
-        AssertThrows<ArgumentException>(() => store.Save(new DeviceSettings { CpuTopic = "resmon/#" }));
-        AssertEqual(1885, store.Load().Port);
+        var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        AssertEqual("Debug", root["Logging"]!["LogLevel"]!["Default"]!.GetValue<string>());
+        AssertEqual("keep", root["Device"]!["FutureKey"]!.GetValue<string>());
+        AssertEqual("Port,CpuTopic", string.Join(",", root["Device"]!.AsObject().Select(p => p.Key).Where(k => k != "FutureKey")));
+        AssertEqual(1884, root["Device"]!["Port"]!.GetValue<int>());
+        AssertTrue(!File.Exists(store.BackupPath), "valid file should not be backed up");
+
+        AssertThrows<ArgumentException>(() => store.Update(patch => patch.MemTopic = "resmon/#"));
+        AssertEqual(null, store.Load().MemTopic);
     }),
-    ("UserSettingsStore.Load returns defaults for a corrupt file", () =>
+    ("Unparsable settings file: Load returns empty patch, Update backs it up first", () =>
     {
         using var temp = new TempDir();
         var path = Path.Combine(temp.Path, "settings.json");
-        File.WriteAllText(path, "not json at all");
-        AssertTrue(new UserSettingsStore(path).Load() == new DeviceSettings(), "expected defaults");
+        const string broken = "{ \"Logging\": { not json";
+        File.WriteAllText(path, broken);
+        var store = new UserSettingsStore(path);
+        AssertTrue(store.Load().IsEmpty, "expected empty patch");
+
+        store.Update(patch => patch.Port = 1886);
+        AssertEqual(broken, File.ReadAllText(store.BackupPath));
+        AssertEqual(1886, store.Load().Port);
+    }),
+    ("Saved settings reach a live configuration through the file watcher", () =>
+    {
+        using var temp = new TempDir();
+        var userPath = Path.Combine(temp.Path, "settings.json");
+        var configuration = new ConfigurationBuilder().AddDaemonSources(temp.Path, userPath).Build();
+        try
+        {
+            new UserSettingsStore(userPath).Update(patch => patch.Port = 1887);
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (DeviceSettingsLoader.Load(configuration, new List<string>()).Port != 1887 && stopwatch.ElapsedMilliseconds < 5000)
+            {
+                Thread.Sleep(50);
+            }
+
+            AssertEqual(1887, DeviceSettingsLoader.Load(configuration, new List<string>()).Port);
+        }
+        finally
+        {
+            (configuration as IDisposable)?.Dispose();
+        }
+    }),
+    ("Repeated reloads log the same invalid-setting warnings only once", () =>
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Device:Port"] = "0" })
+            .Build();
+        var captured = new CapturingLoggerProvider();
+        using var services = new ServiceCollection()
+            .AddLogging(logging => logging.AddProvider(captured))
+            .AddSingleton<IConfiguration>(configuration)
+            .AddDeviceSettings()
+            .BuildServiceProvider();
+        var monitor = services.GetRequiredService<IOptionsMonitor<DeviceSettings>>();
+        AssertEqual(DeviceSettings.DefaultPort, monitor.CurrentValue.Port);
+        for (var i = 0; i < 3; i++)
+        {
+            configuration.Reload();
+            AssertEqual(DeviceSettings.DefaultPort, monitor.CurrentValue.Port);
+        }
+
+        AssertEqual(1, captured.Messages.Count(m => m.Contains("Port 0")));
+    }),
+    ("Configuration load errors report the absolute file path", () =>
+    {
+        using var temp = new TempDir();
+        var userPath = Path.Combine(temp.Path, "settings.json");
+        File.WriteAllText(userPath, "{ broken");
+        var errors = new List<string>();
+        new ConfigurationBuilder().AddDaemonSources(temp.Path, userPath, errors.Add, reloadOnChange: false).Build();
+        AssertTrue(errors.Count == 1 && errors[0].Contains(Path.GetFullPath(userPath)), "message: " + string.Join(" | ", errors));
     }),
 
     // ---- DaemonLoggerProvider ------------------------------------------------------------
@@ -267,10 +382,53 @@ var tests = new (string Name, Action Run)[]
         AssertEqual(TimeSpan.FromSeconds(5), backoff.RecordFailure());
     }),
 
+    ("ReconnectBackoff keeps backing off a broker that drops connections immediately", () =>
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var backoff = new ReconnectBackoff(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(8), () => now);
+        var delays = new List<double>();
+        for (var i = 0; i < 5; i++)
+        {
+            AssertTrue(backoff.IsAttemptDue, $"attempt {i} not due");
+            backoff.RecordConnected();
+            now += TimeSpan.FromMilliseconds(200);            // broker drops after 200 ms
+            var delay = backoff.RecordDisconnected();
+            AssertTrue(delay != null, "short-lived connection reset the backoff");
+            delays.Add(delay!.Value.TotalSeconds);
+            AssertTrue(!backoff.IsAttemptDue, "flapping broker retried immediately");
+            now += delay.Value;
+        }
+
+        AssertEqual("1,2,4,8,8", string.Join(",", delays));
+    }),
+    ("ReconnectBackoff resets only after a connection stays up for the max delay", () =>
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var backoff = new ReconnectBackoff(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(8), () => now);
+        backoff.RecordFailure();
+        backoff.RecordFailure();
+        now += TimeSpan.FromSeconds(10);
+        backoff.RecordConnected();
+        AssertEqual(2, backoff.ConsecutiveFailures);          // success alone does not reset
+        now += backoff.StableConnectionThreshold;
+        AssertTrue(backoff.RecordDisconnected() == null, "stable connection should reset");
+        AssertEqual(0, backoff.ConsecutiveFailures);
+        AssertTrue(backoff.IsAttemptDue, "reconnect after a stable connection should be immediate");
+        AssertEqual(TimeSpan.FromSeconds(1), backoff.NextDelay);
+    }),
+
     // ---- MqttConnection (in-process loopback broker) --------------------------------------
     ("MqttConnection is non-blocking, uses the fallback, and notifies once per outage", () =>
     {
         MqttConnectionScenario.Run().GetAwaiter().GetResult();
+    }),
+    ("MqttConnection.DisposeAsync cancels an in-flight connect to unreachable addresses quickly", () =>
+    {
+        MqttConnectionScenario.DisposeWhileConnecting().GetAwaiter().GetResult();
+    }),
+    ("MqttConnection notifies an outage even if the handler is attached after the first failure", () =>
+    {
+        MqttConnectionScenario.LateNotificationHandler().GetAwaiter().GetResult();
     }),
 };
 
@@ -321,6 +479,35 @@ static void AssertThrows<TException>(Action action) where TException : Exception
     }
 
     throw new InvalidOperationException($"expected {typeof(TException).Name}");
+}
+
+static DeviceSettings LoadEffective(string appSettingsDirectory, string userSettingsPath)
+{
+    var configuration = new ConfigurationBuilder()
+        .AddDaemonSources(appSettingsDirectory, userSettingsPath, reloadOnChange: false)
+        .Build();
+    return DeviceSettingsLoader.Load(configuration, new List<string>());
+}
+
+sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    public System.Collections.Concurrent.ConcurrentQueue<string> Messages { get; } = new();
+
+    public ILogger CreateLogger(string categoryName) => new CapturingLogger(Messages);
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class CapturingLogger(System.Collections.Concurrent.ConcurrentQueue<string> messages) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            messages.Enqueue(formatter(state, exception));
+    }
 }
 
 sealed class TempDir : IDisposable

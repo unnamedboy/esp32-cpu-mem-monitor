@@ -1,5 +1,4 @@
 using System.Windows.Forms;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -47,18 +46,16 @@ namespace ResourceMonitorDaemon
             using var host = builder.Build();
             configurationErrors.Attach(host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ResourceMonitorDaemon.Configuration"));
 
-            // Apply settings saved from the tray dialog (or pairing wizard) immediately rather
-            // than waiting for the file watcher; IOptionsMonitor then notifies MonitorService.
+            // Settings saved by the tray dialog (or pairing wizard) reach MonitorService through
+            // the user settings file watcher and IOptionsMonitor; no explicit reload is needed.
             var settingsStore = host.Services.GetRequiredService<ISettingsStore>();
-            if (host.Services.GetRequiredService<IConfiguration>() is IConfigurationRoot configurationRoot)
-            {
-                settingsStore.Saved += (_, _) => configurationRoot.Reload();
-            }
 
-            host.StartAsync().GetAwaiter().GetResult();
-
+            // Create the tray first so its notification handler is attached before the
+            // connection's first attempt can fail.
             var svc = host.Services.GetRequiredService<MonitorService>();
             var tray = new TrayContext(host, _logFilePath, svc, settingsStore);
+
+            host.StartAsync().GetAwaiter().GetResult();
 
             Application.Run();
 

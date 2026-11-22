@@ -3,25 +3,36 @@ using System.Windows.Forms;
 namespace ResourceMonitorDaemon
 {
     /// <summary>
-    /// Small dialog for editing the user-facing connection settings. Values not shown here
-    /// (fallback address, backoff, timeouts) are carried over unchanged from the settings the
-    /// dialog was opened with. Saving goes through <see cref="ISettingsStore"/>, which triggers
-    /// a live reload in the running daemon.
+    /// Small dialog for editing the user-facing connection settings.
     /// </summary>
+    /// <remarks>
+    /// Shows the effective values. Fields overridden by <c>RESMON_Device__*</c> environment
+    /// variables are read-only and never saved. On Save, only values that differ from what
+    /// <c>appsettings.json</c> + defaults resolve to are written to the user settings file
+    /// (see <see cref="UserDeviceSettingsPatch.ApplyDialogEdit"/>); fields the dialog does not
+    /// show, such as FallbackAddress, are left untouched.
+    /// </remarks>
     public sealed class SettingsForm : Form
     {
         private readonly ISettingsStore _store;
-        private readonly DeviceSettings _original;
+        private readonly DeviceSettings _effective;
+        private readonly DeviceSettings _lowerLayers;
+        private readonly IReadOnlySet<string> _environmentFields;
         private readonly TextBox _host;
         private readonly NumericUpDown _port;
         private readonly TextBox _cpuTopic;
         private readonly TextBox _memTopic;
         private readonly NumericUpDown _interval;
 
-        public SettingsForm(DeviceSettings current, ISettingsStore store)
+        public SettingsForm(DeviceSettings effective, DeviceSettings lowerLayers, ISettingsStore store, IReadOnlySet<string> environmentOverriddenFields)
         {
             _store = store;
-            _original = current;
+            _effective = effective;
+            _lowerLayers = lowerLayers;
+            _environmentFields = environmentOverriddenFields;
+            EnvironmentOverriddenFields = UserDeviceSettingsPatch.DialogFieldNames
+                .Where(environmentOverriddenFields.Contains)
+                .ToList();
 
             Text = "设置 (Settings) - Resource Monitor";
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -43,38 +54,39 @@ namespace ResourceMonitorDaemon
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            _host = new TextBox { Text = current.Host, Width = 260 };
-            _port = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = Math.Clamp(current.Port, 1, 65535), Width = 100 };
-            _cpuTopic = new TextBox { Text = current.CpuTopic, Width = 260 };
-            _memTopic = new TextBox { Text = current.MemTopic, Width = 260 };
+            _host = new TextBox { Text = effective.Host, Width = 260 };
+            _port = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = Math.Clamp(effective.Port, 1, 65535), Width = 100 };
+            _cpuTopic = new TextBox { Text = effective.CpuTopic, Width = 260 };
+            _memTopic = new TextBox { Text = effective.MemTopic, Width = 260 };
             _interval = new NumericUpDown
             {
                 Minimum = DeviceSettingsValidator.MinSampleIntervalMs,
                 Maximum = DeviceSettingsValidator.MaxSampleIntervalMs,
                 Increment = 250,
-                Value = Math.Clamp(current.SampleIntervalMs, DeviceSettingsValidator.MinSampleIntervalMs, DeviceSettingsValidator.MaxSampleIntervalMs),
+                Value = Math.Clamp(effective.SampleIntervalMs, DeviceSettingsValidator.MinSampleIntervalMs, DeviceSettingsValidator.MaxSampleIntervalMs),
                 Width = 100,
             };
 
-            AddRow(layout, "主机 (Host):", _host);
-            AddRow(layout, "端口 (Port):", _port);
-            AddRow(layout, "CPU 主题 (CPU topic):", _cpuTopic);
-            AddRow(layout, "内存主题 (Memory topic):", _memTopic);
-            AddRow(layout, "采样间隔 ms (Interval):", _interval);
+            AddField(layout, "主机 (Host)", nameof(DeviceSettings.Host), _host);
+            AddField(layout, "端口 (Port)", nameof(DeviceSettings.Port), _port);
+            AddField(layout, "CPU 主题 (CPU topic)", nameof(DeviceSettings.CpuTopic), _cpuTopic);
+            AddField(layout, "内存主题 (Memory topic)", nameof(DeviceSettings.MemTopic), _memTopic);
+            AddField(layout, "采样间隔 ms (Interval)", nameof(DeviceSettings.SampleIntervalMs), _interval);
             AddRow(layout, "备用地址 (Fallback):", new Label
             {
-                Text = string.IsNullOrEmpty(current.FallbackAddress) ? "(none)" : current.FallbackAddress,
+                Text = string.IsNullOrEmpty(effective.FallbackAddress) ? "(none)" : effective.FallbackAddress,
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
             });
 
             AddNote(layout, $"保存到 (Saved to): {store.FilePath}", SystemColors.GrayText);
-            var deviceOverrides = DaemonConfiguration.GetEnvironmentOverrideNames()
-                .Where(name => name.StartsWith(DaemonConfiguration.EnvironmentPrefix + DeviceSettings.SectionName + "__", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (deviceOverrides.Count > 0)
+            if (EnvironmentOverriddenFields.Count > 0)
             {
-                AddNote(layout, "注意：环境变量优先于此处的设置 (environment variables override these values):\n" + string.Join(", ", deviceOverrides), Color.DarkOrange);
+                AddNote(
+                    layout,
+                    "标记 (env) 的字段由环境变量决定，只读且不会保存 (fields marked (env) come from RESMON_ environment variables; read-only, not saved): "
+                        + string.Join(", ", EnvironmentOverriddenFields),
+                    Color.DarkOrange);
             }
 
             var save = new Button { Text = "保存 (Save)", AutoSize = true };
@@ -97,6 +109,27 @@ namespace ResourceMonitorDaemon
             CancelButton = cancel;
         }
 
+        /// <summary>Dialog fields whose effective value comes from an environment variable.</summary>
+        public IReadOnlyList<string> EnvironmentOverriddenFields { get; }
+
+        private void AddField(TableLayoutPanel layout, string label, string field, Control control)
+        {
+            var fromEnvironment = _environmentFields.Contains(field);
+            if (fromEnvironment)
+            {
+                if (control is TextBox textBox)
+                {
+                    textBox.ReadOnly = true;
+                }
+                else
+                {
+                    control.Enabled = false;
+                }
+            }
+
+            AddRow(layout, fromEnvironment ? $"{label} (env):" : $"{label}:", control);
+        }
+
         private static void AddRow(TableLayoutPanel layout, string label, Control control)
         {
             var row = layout.RowCount++;
@@ -114,7 +147,7 @@ namespace ResourceMonitorDaemon
 
         private void OnSave(object? sender, EventArgs e)
         {
-            var updated = _original with
+            var edited = _effective with
             {
                 Host = _host.Text.Trim(),
                 Port = (int)_port.Value,
@@ -123,7 +156,7 @@ namespace ResourceMonitorDaemon
                 SampleIntervalMs = (int)_interval.Value,
             };
 
-            var errors = DeviceSettingsValidator.Validate(updated);
+            var errors = DeviceSettingsValidator.Validate(edited);
             if (errors.Count > 0)
             {
                 MessageBox.Show(this, string.Join(Environment.NewLine, errors), "设置无效 (Invalid settings)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -132,7 +165,7 @@ namespace ResourceMonitorDaemon
 
             try
             {
-                _store.Save(updated);
+                _store.Update(patch => patch.ApplyDialogEdit(_lowerLayers, edited, _environmentFields));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {

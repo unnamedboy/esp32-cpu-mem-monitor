@@ -51,30 +51,66 @@ namespace ResourceMonitorDaemon
             bool reloadOnChange = true)
         {
             builder.AddJsonFile(source =>
-            {
-                source.Path = Path.Combine(appSettingsDirectory, AppSettingsFileName);
-                ConfigureJsonSource(source, reloadOnChange, onLoadError);
-            });
-
+                ConfigureJsonSource(source, Path.Combine(appSettingsDirectory, AppSettingsFileName), reloadOnChange, onLoadError));
             builder.AddJsonFile(source =>
-            {
-                source.Path = Path.GetFullPath(userSettingsPath);
-                ConfigureJsonSource(source, reloadOnChange, onLoadError);
-            });
-
+                ConfigureJsonSource(source, userSettingsPath, reloadOnChange, onLoadError));
             builder.AddEnvironmentVariables(EnvironmentPrefix);
             return builder;
         }
 
-        private static void ConfigureJsonSource(JsonConfigurationSource source, bool reloadOnChange, Action<string>? onLoadError)
+        /// <summary>
+        /// Resolves <see cref="DeviceSettings"/> from the layers below the user settings file
+        /// (built-in defaults + <c>appsettings.json</c>). The settings dialog compares against
+        /// this so it only writes values that actually differ.
+        /// </summary>
+        public static DeviceSettings LoadLowerLayers(string appSettingsDirectory)
         {
+            var configuration = new ConfigurationBuilder()
+                .AddJsonFile(source =>
+                    ConfigureJsonSource(source, Path.Combine(appSettingsDirectory, AppSettingsFileName), reloadOnChange: false, onLoadError: null))
+                .Build();
+            return DeviceSettingsLoader.Load(configuration, new List<string>());
+        }
+
+        /// <summary>
+        /// <see cref="DeviceSettings"/> property names currently overridden by
+        /// <c>RESMON_Device__*</c> environment variables (case-insensitive set).
+        /// </summary>
+        public static IReadOnlySet<string> GetEnvironmentOverriddenDeviceFields()
+        {
+            var fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var prefix = DeviceSettings.SectionName + ConfigurationPath.KeyDelimiter;
+            foreach (var name in GetEnvironmentOverrideNames())
+            {
+                var key = name[EnvironmentPrefix.Length..].Replace("__", ConfigurationPath.KeyDelimiter, StringComparison.Ordinal);
+                if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var field = UserDeviceSettingsPatch.FieldNames.FirstOrDefault(
+                    f => string.Equals(f, key[prefix.Length..], StringComparison.OrdinalIgnoreCase));
+                if (field != null)
+                {
+                    fields.Add(field);
+                }
+            }
+
+            return fields;
+        }
+
+        private static void ConfigureJsonSource(JsonConfigurationSource source, string path, bool reloadOnChange, Action<string>? onLoadError)
+        {
+            // Keep the absolute path for messages; ResolveFileProvider() makes source.Path relative.
+            var fullPath = Path.GetFullPath(path);
+            source.Path = fullPath;
             source.Optional = true;
             source.ReloadOnChange = reloadOnChange;
             source.OnLoadException = context =>
             {
                 context.Ignore = true;
                 onLoadError?.Invoke(
-                    $"Ignoring configuration file '{source.Path}': {context.Exception.GetBaseException().Message}");
+                    $"Ignoring configuration file '{fullPath}': {context.Exception.GetBaseException().Message}");
             };
 
             // Absolute path → PhysicalFileProvider rooted at the nearest existing directory,
@@ -105,11 +141,19 @@ namespace ResourceMonitorDaemon
         /// </summary>
         public static IServiceCollection AddDeviceSettings(this IServiceCollection services)
         {
+            // One file save can raise several reloads (watcher events); only log a set of
+            // warnings when it differs from the previously logged set.
+            var deduplicator = new WarningDeduplicator();
             services.AddOptions<DeviceSettings>()
                 .Configure<IConfiguration, ILoggerFactory>((target, configuration, loggerFactory) =>
                 {
                     var warnings = new List<string>();
                     DeviceSettingsLoader.Load(configuration, warnings).CopyTo(target);
+                    if (!deduplicator.IsNew(warnings))
+                    {
+                        return;
+                    }
+
                     var logger = loggerFactory.CreateLogger("ResourceMonitorDaemon.Settings");
                     foreach (var warning in warnings)
                     {
@@ -120,6 +164,27 @@ namespace ResourceMonitorDaemon
             services.AddSingleton<IOptionsChangeTokenSource<DeviceSettings>>(provider =>
                 new ConfigurationChangeTokenSource<DeviceSettings>(provider.GetRequiredService<IConfiguration>()));
             return services;
+        }
+    }
+
+    internal sealed class WarningDeduplicator
+    {
+        private readonly object _gate = new();
+        private string _last = string.Empty;
+
+        public bool IsNew(IEnumerable<string> warnings)
+        {
+            var signature = string.Join("|", warnings);
+            lock (_gate)
+            {
+                if (signature == _last)
+                {
+                    return false;
+                }
+
+                _last = signature;
+                return signature.Length > 0;
+            }
         }
     }
 

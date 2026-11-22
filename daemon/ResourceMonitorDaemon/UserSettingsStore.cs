@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -10,15 +12,16 @@ namespace ResourceMonitorDaemon
     /// (<c>%LocalAppData%\ResourceMonitorDaemon\settings.json</c>).
     /// </summary>
     /// <remarks>
-    /// Usage for the settings UI / pairing wizard:
+    /// The file holds only the <c>Device</c> fields the user explicitly set
+    /// (<see cref="UserDeviceSettingsPatch"/>); everything else keeps coming from
+    /// <c>appsettings.json</c> or the built-in defaults, and <c>RESMON_*</c> environment
+    /// variables still win over it. The one pattern to change a value is
+    /// <see cref="Update"/>, e.g. for the pairing wizard:
     /// <code>
-    /// var settings = optionsMonitor.CurrentValue with { FallbackAddress = "192.168.1.50" };
-    /// store.Save(settings);   // validated, written atomically, then the running daemon reloads
+    /// store.Update(patch => patch.FallbackAddress = "192.168.1.50");
     /// </code>
-    /// The daemon picks up the change through the configuration file watcher, and
-    /// <c>Program</c> additionally forces a configuration reload on <see cref="Saved"/>,
-    /// so no restart is needed. Environment variables (<c>RESMON_*</c>) still take precedence
-    /// over values saved here.
+    /// Set a property to <c>null</c> to remove it from the file. The running daemon picks the
+    /// change up through the configuration file watcher (no restart).
     /// </remarks>
     public interface ISettingsStore
     {
@@ -26,28 +29,39 @@ namespace ResourceMonitorDaemon
         string FilePath { get; }
 
         /// <summary>
-        /// Returns the values persisted in the user settings file, with built-in defaults for
-        /// missing fields. Does not include <c>appsettings.json</c> or environment overrides.
-        /// A missing or unreadable file yields defaults (never throws).
+        /// Returns the fields set in the user settings file. A missing or unreadable file, or
+        /// an unparsable value, yields an empty/partial patch (never throws).
         /// </summary>
-        DeviceSettings Load();
+        UserDeviceSettingsPatch Load();
 
         /// <summary>
-        /// Validates and atomically writes every <see cref="DeviceSettings"/> value to the user
-        /// settings file. Other top-level sections already in the file are preserved.
+        /// Loads the current patch, lets <paramref name="edit"/> change it, validates it and
+        /// writes it atomically, all under one lock. Only non-null fields are written; other
+        /// top-level sections and unknown <c>Device</c> keys in the file are preserved.
         /// </summary>
-        /// <exception cref="ArgumentException">The settings fail <see cref="DeviceSettingsValidator.Validate"/>.</exception>
+        /// <exception cref="ArgumentException">The edited patch fails <see cref="UserDeviceSettingsPatch.Validate"/>.</exception>
         /// <exception cref="IOException">The file could not be written.</exception>
-        void Save(DeviceSettings settings);
+        void Update(Action<UserDeviceSettingsPatch> edit);
 
-        /// <summary>Raised after a successful <see cref="Save"/>.</summary>
+        /// <summary>Raised after a successful <see cref="Update"/>.</summary>
         event EventHandler? Saved;
     }
 
     /// <inheritdoc cref="ISettingsStore"/>
     public sealed class UserSettingsStore : ISettingsStore
     {
-        private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+        private static readonly JsonSerializerOptions WriteOptions = new()
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        private static readonly JsonDocumentOptions ReadOptions = new()
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        };
+
         private readonly ILogger? _logger;
         private readonly object _gate = new();
 
@@ -59,93 +73,170 @@ namespace ResourceMonitorDaemon
 
         public string FilePath { get; }
 
+        /// <summary>Copy of an unparsable settings file kept before it is replaced.</summary>
+        public string BackupPath => FilePath + ".bak";
+
         public event EventHandler? Saved;
 
-        public DeviceSettings Load()
+        public UserDeviceSettingsPatch Load()
         {
-            var warnings = new List<string>();
-            DeviceSettings settings;
             lock (_gate)
             {
-                if (!File.Exists(FilePath))
-                {
-                    return new DeviceSettings();
-                }
-
-                try
-                {
-                    using var stream = new MemoryStream(File.ReadAllBytes(FilePath));
-                    var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
-                    settings = DeviceSettingsLoader.Load(configuration, warnings);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning("Unable to read user settings '{Path}': {Error}. Using defaults.", FilePath, ex.GetBaseException().Message);
-                    return new DeviceSettings();
-                }
+                return LoadLocked();
             }
-
-            foreach (var warning in warnings)
-            {
-                _logger?.LogWarning("User settings: {Warning}", warning);
-            }
-
-            return settings;
         }
 
-        public void Save(DeviceSettings settings)
+        public void Update(Action<UserDeviceSettingsPatch> edit)
         {
-            ArgumentNullException.ThrowIfNull(settings);
-            var normalized = settings with
-            {
-                Host = settings.Host?.Trim() ?? string.Empty,
-                FallbackAddress = settings.FallbackAddress?.Trim() ?? string.Empty,
-            };
-
-            var errors = DeviceSettingsValidator.Validate(normalized);
-            if (errors.Count > 0)
-            {
-                throw new ArgumentException("Invalid settings: " + string.Join(" ", errors), nameof(settings));
-            }
-
+            ArgumentNullException.ThrowIfNull(edit);
+            UserDeviceSettingsPatch patch;
             lock (_gate)
             {
-                var root = ReadExistingRoot();
-                root[DeviceSettings.SectionName] = JsonSerializer.SerializeToNode(normalized, WriteOptions);
+                patch = LoadLocked();
+                edit(patch);
+                patch.Host = patch.Host?.Trim();
+                patch.FallbackAddress = patch.FallbackAddress?.Trim();
 
-                var directory = Path.GetDirectoryName(FilePath)!;
-                Directory.CreateDirectory(directory);
-                var tempPath = FilePath + ".tmp";
-                try
+                var errors = patch.Validate();
+                if (errors.Count > 0)
                 {
-                    File.WriteAllText(tempPath, root.ToJsonString(WriteOptions));
-                    ReplaceWithRetry(tempPath, FilePath);
+                    throw new ArgumentException("Invalid settings: " + string.Join(" ", errors), nameof(edit));
                 }
-                catch
-                {
-                    TryDelete(tempPath);
-                    throw;
-                }
+
+                WriteLocked(patch);
             }
 
-            _logger?.LogInformation("User settings saved to {Path}: {Settings}", FilePath, normalized.Describe());
+            _logger?.LogInformation("User settings saved to {Path}: {Patch}", FilePath, patch.Describe());
             Saved?.Invoke(this, EventArgs.Empty);
         }
 
-        private JsonObject ReadExistingRoot()
+        private UserDeviceSettingsPatch LoadLocked()
         {
-            try
+            var patch = new UserDeviceSettingsPatch();
+            if (!File.Exists(FilePath))
             {
-                if (File.Exists(FilePath) && JsonNode.Parse(File.ReadAllText(FilePath)) is JsonObject existing)
-                {
-                    return existing;
-                }
-            }
-            catch (Exception ex) when (ex is JsonException or IOException)
-            {
-                _logger?.LogWarning("Existing user settings '{Path}' are unreadable and will be replaced: {Error}", FilePath, ex.Message);
+                return patch;
             }
 
+            IConfigurationSection section;
+            try
+            {
+                // Same parser as the live configuration: tolerates comments and trailing commas,
+                // keys are case-insensitive.
+                using var stream = new MemoryStream(File.ReadAllBytes(FilePath));
+                section = new ConfigurationBuilder().AddJsonStream(stream).Build().GetSection(DeviceSettings.SectionName);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Unable to read user settings '{Path}': {Error}", FilePath, ex.GetBaseException().Message);
+                return patch;
+            }
+
+            patch.Host = section[nameof(DeviceSettings.Host)];
+            patch.FallbackAddress = section[nameof(DeviceSettings.FallbackAddress)];
+            patch.CpuTopic = section[nameof(DeviceSettings.CpuTopic)];
+            patch.MemTopic = section[nameof(DeviceSettings.MemTopic)];
+            patch.Port = ReadInt(section, nameof(DeviceSettings.Port));
+            patch.SampleIntervalMs = ReadInt(section, nameof(DeviceSettings.SampleIntervalMs));
+            patch.ReconnectInitialBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectInitialBackoffMs));
+            patch.ReconnectMaxBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectMaxBackoffMs));
+            patch.ConnectTimeoutMs = ReadInt(section, nameof(DeviceSettings.ConnectTimeoutMs));
+            return patch;
+        }
+
+        private int? ReadInt(IConfigurationSection section, string key)
+        {
+            var text = section[key];
+            if (text == null)
+            {
+                return null;
+            }
+
+            if (int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            {
+                return value;
+            }
+
+            _logger?.LogWarning("User settings: {Key} '{Value}' is not an integer and is ignored.", key, text);
+            return null;
+        }
+
+        private void WriteLocked(UserDeviceSettingsPatch patch)
+        {
+            var root = ReadExistingRootLocked();
+
+            // Merge into the existing Device object: drop every known field (any casing), then
+            // add the set ones. Unknown keys are kept for forward compatibility.
+            var device = root[DeviceSettings.SectionName] as JsonObject ?? new JsonObject();
+            foreach (var key in device.Select(property => property.Key).ToList())
+            {
+                if (UserDeviceSettingsPatch.FieldNames.Contains(key, StringComparer.OrdinalIgnoreCase))
+                {
+                    device.Remove(key);
+                }
+            }
+
+            foreach (var property in JsonSerializer.SerializeToNode(patch, WriteOptions)!.AsObject().ToList())
+            {
+                if (property.Value != null && UserDeviceSettingsPatch.FieldNames.Contains(property.Key))
+                {
+                    device[property.Key] = property.Value.DeepClone();
+                }
+            }
+
+            if (device.Count == 0)
+            {
+                root.Remove(DeviceSettings.SectionName);
+            }
+            else
+            {
+                root[DeviceSettings.SectionName] = device;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            var tempPath = FilePath + ".tmp";
+            try
+            {
+                File.WriteAllText(tempPath, root.ToJsonString(WriteOptions));
+                ReplaceWithRetry(tempPath, FilePath);
+            }
+            catch
+            {
+                TryDelete(tempPath);
+                throw;
+            }
+        }
+
+        private JsonObject ReadExistingRootLocked()
+        {
+            if (!File.Exists(FilePath))
+            {
+                return new JsonObject();
+            }
+
+            var text = File.ReadAllText(FilePath);
+            try
+            {
+                var node = JsonNode.Parse(text, nodeOptions: null, documentOptions: ReadOptions);
+                if (node is JsonObject existing)
+                {
+                    // Detach from the parsed document so it can be re-serialized freely.
+                    return existing.DeepClone().AsObject();
+                }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return new JsonObject();
+                }
+            }
+            catch (JsonException)
+            {
+                // Handled below.
+            }
+
+            // Never silently discard content we cannot parse: keep a copy next to the file.
+            File.Copy(FilePath, BackupPath, overwrite: true);
+            _logger?.LogWarning("User settings '{Path}' are not a valid JSON object; previous content backed up to {Backup}.", FilePath, BackupPath);
             return new JsonObject();
         }
 
