@@ -108,6 +108,12 @@ namespace ResourceMonitorDaemon
                 errors.Add("CpuTopic and MemTopic must be different.");
             }
 
+            Add(ValidateTopic(settings.StatusTopic, nameof(DeviceSettings.StatusTopic)));
+            if (settings.StatusTopic == settings.CpuTopic || settings.StatusTopic == settings.MemTopic)
+            {
+                errors.Add("StatusTopic must differ from CpuTopic and MemTopic.");
+            }
+
             Add(ValidateRange(settings.SampleIntervalMs, MinSampleIntervalMs, MaxSampleIntervalMs, nameof(DeviceSettings.SampleIntervalMs)));
             Add(ValidateRange(settings.ReconnectInitialBackoffMs, MinBackoffMs, MaxBackoffMs, nameof(DeviceSettings.ReconnectInitialBackoffMs)));
             Add(ValidateRange(settings.ReconnectMaxBackoffMs, MinBackoffMs, MaxBackoffMs, nameof(DeviceSettings.ReconnectMaxBackoffMs)));
@@ -167,6 +173,18 @@ namespace ResourceMonitorDaemon
                 warnings.Add("CpuTopic and MemTopic are identical. Using default topics.");
                 result.CpuTopic = DeviceSettings.DefaultCpuTopic;
                 result.MemTopic = DeviceSettings.DefaultMemTopic;
+            }
+
+            if (ValidateTopic(result.StatusTopic, nameof(DeviceSettings.StatusTopic)) is { } statusError)
+            {
+                warnings.Add($"{statusError} Using default '{DeviceSettings.DefaultStatusTopic}'.");
+                result.StatusTopic = DeviceSettings.DefaultStatusTopic;
+            }
+
+            if (result.StatusTopic == result.CpuTopic || result.StatusTopic == result.MemTopic)
+            {
+                warnings.Add($"StatusTopic '{result.StatusTopic}' collides with a metric topic. Using default '{DeviceSettings.DefaultStatusTopic}'.");
+                result.StatusTopic = DeviceSettings.DefaultStatusTopic;
             }
 
             result.SampleIntervalMs = Clamp(result.SampleIntervalMs, MinSampleIntervalMs, MaxSampleIntervalMs, nameof(DeviceSettings.SampleIntervalMs), warnings);

@@ -202,6 +202,7 @@ namespace ResourceMonitorDaemon
                 Port = ReadInt(section, nameof(DeviceSettings.Port), defaults.Port, warnings),
                 CpuTopic = section[nameof(DeviceSettings.CpuTopic)] ?? defaults.CpuTopic,
                 MemTopic = section[nameof(DeviceSettings.MemTopic)] ?? defaults.MemTopic,
+                StatusTopic = section[nameof(DeviceSettings.StatusTopic)] ?? defaults.StatusTopic,
                 SampleIntervalMs = ReadInt(section, nameof(DeviceSettings.SampleIntervalMs), defaults.SampleIntervalMs, warnings),
                 ReconnectInitialBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectInitialBackoffMs), defaults.ReconnectInitialBackoffMs, warnings),
                 ReconnectMaxBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectMaxBackoffMs), defaults.ReconnectMaxBackoffMs, warnings),

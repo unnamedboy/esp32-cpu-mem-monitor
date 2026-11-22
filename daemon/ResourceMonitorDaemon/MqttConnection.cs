@@ -17,6 +17,9 @@ namespace ResourceMonitorDaemon
     /// broker is unreachable, <see cref="PublishAsync"/> returns false without blocking.
     /// A tray notification is raised once per outage, plus one "reconnected" notice.
     /// <see cref="DisposeAsync"/> cancels any in-flight connect immediately.
+    /// After every successful connect (clean session) the attempt also subscribes to
+    /// <see cref="DeviceSettings.StatusTopic"/> (QoS 0); messages on that topic are raised through
+    /// <see cref="StatusMessageReceived"/>. A failed subscription is logged and never affects publishing.
     /// </remarks>
     public sealed class MqttConnection : IAsyncDisposable
     {
@@ -54,6 +57,12 @@ namespace ResourceMonitorDaemon
         /// only marked as notified when a handler was attached and ran.
         /// </summary>
         public Action<string, string, ToolTipIcon>? OnNotification { get; set; }
+
+        /// <summary>
+        /// Raised (from an MQTT client thread) with the raw payload of each message received on
+        /// the current <see cref="DeviceSettings.StatusTopic"/>. Handler exceptions are caught.
+        /// </summary>
+        public event Action<byte[]>? StatusMessageReceived;
 
         /// <summary>True when a connected client is ready for publishing.</summary>
         public bool IsConnected
@@ -127,6 +136,11 @@ namespace ResourceMonitorDaemon
                     _reconnectRequested = true;
                     _backoff.Reset();
                     _logger.LogInformation("MQTT broker endpoint changed to {Endpoint}; reconnecting.", DescribeEndpoint(settings));
+                }
+                else if (previous != null && previous.StatusTopic != settings.StatusTopic && IsConnectedLocked)
+                {
+                    var client = _client!;
+                    _ = Task.Run(() => ResubscribeAsync(client, previous.StatusTopic, settings));
                 }
             }
         }
@@ -296,6 +310,7 @@ namespace ResourceMonitorDaemon
                     }
 
                     var client = _factory.CreateMqttClient();
+                    client.ApplicationMessageReceivedAsync += OnApplicationMessageReceivedAsync;
                     try
                     {
                         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
@@ -319,6 +334,8 @@ namespace ResourceMonitorDaemon
                         continue;
                     }
 
+                    // Clean session: the broker forgets subscriptions, so subscribe after every connect.
+                    await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
                     if (!OnConnected(client, address, settings))
                     {
                         await CloseClientAsync(client, ShutdownDisconnectTimeoutMs, CancellationToken.None).ConfigureAwait(false);
@@ -338,6 +355,76 @@ namespace ResourceMonitorDaemon
             {
                 // Cancelled by shutdown.
             }
+        }
+
+        private async Task SubscribeStatusAsync(IMqttClient client, DeviceSettings settings, CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(settings.ConnectTimeoutMs);
+                var options = new MqttClientSubscribeOptionsBuilder()
+                    .WithTopicFilter(filter => filter.WithTopic(settings.StatusTopic).WithAtMostOnceQoS())
+                    .Build();
+                var result = await client.SubscribeAsync(options, timeout.Token).ConfigureAwait(false);
+                var code = result.Items.FirstOrDefault()?.ResultCode;
+                if (code is MqttClientSubscribeResultCode.GrantedQoS0 or MqttClientSubscribeResultCode.GrantedQoS1 or MqttClientSubscribeResultCode.GrantedQoS2)
+                {
+                    _logger.LogDebug("Subscribed to device status topic {Topic}.", settings.StatusTopic);
+                }
+                else
+                {
+                    _logger.LogWarning("MQTT broker refused the subscription to {Topic} ({Code}); device status is unavailable.", settings.StatusTopic, code);
+                }
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Status is optional: publishing continues without it.
+                _logger.LogWarning("MQTT subscribe to {Topic} failed: {Error}. Device status is unavailable until the next reconnect.", settings.StatusTopic, Describe(ex, settings.ConnectTimeoutMs));
+            }
+        }
+
+        private async Task ResubscribeAsync(IMqttClient client, string previousTopic, DeviceSettings settings)
+        {
+            var shutdown = _shutdown.Token;
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
+                timeout.CancelAfter(settings.ConnectTimeoutMs);
+                await client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(previousTopic).Build(), timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Messages on the old topic are ignored anyway (see OnApplicationMessageReceivedAsync).
+            }
+
+            await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
+        }
+
+        private Task OnApplicationMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs args)
+        {
+            string? statusTopic;
+            lock (_gate)
+            {
+                statusTopic = _disposed ? null : _settings?.StatusTopic;
+            }
+
+            var handler = StatusMessageReceived;
+            if (handler == null || statusTopic == null || args.ApplicationMessage.Topic != statusTopic)
+            {
+                return Task.CompletedTask;
+            }
+
+            try
+            {
+                handler(args.ApplicationMessage.PayloadSegment.ToArray());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Status message handler failed: {Error}", ex.Message);
+            }
+
+            return Task.CompletedTask;
         }
 
         private bool OnConnected(IMqttClient client, string address, DeviceSettings settings)

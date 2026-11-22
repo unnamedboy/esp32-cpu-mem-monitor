@@ -140,6 +140,7 @@ namespace ResourceMonitorDaemon
             patch.FallbackAddress = section[nameof(DeviceSettings.FallbackAddress)];
             patch.CpuTopic = section[nameof(DeviceSettings.CpuTopic)];
             patch.MemTopic = section[nameof(DeviceSettings.MemTopic)];
+            patch.StatusTopic = section[nameof(DeviceSettings.StatusTopic)];
             patch.Port = ReadInt(section, nameof(DeviceSettings.Port));
             patch.SampleIntervalMs = ReadInt(section, nameof(DeviceSettings.SampleIntervalMs));
             patch.ReconnectInitialBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectInitialBackoffMs));
