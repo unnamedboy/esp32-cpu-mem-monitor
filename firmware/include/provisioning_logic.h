@@ -1,0 +1,125 @@
+#ifndef PROVISIONING_LOGIC_H
+#define PROVISIONING_LOGIC_H
+
+// Pure boot/connection decision logic for Wi-Fi provisioning. No Arduino
+// dependencies so it can be unit-tested on the host. See PROVISIONING.md.
+
+#include <stdint.h>
+
+enum class BootAction {
+    // Start BLE provisioning (WiFiProv, Security1 + PoP).
+    EnterProvisioning,
+    // Connect as STA with credentials from the Wi-Fi NVS store (provisioned).
+    ConnectStoredCredentials,
+    // Connect as STA with the compiled secrets.h development fallback.
+    ConnectDevFallback,
+};
+
+enum class BootReason {
+    ProvisioningRequested,   // prov_req flag set by BOOT long-press
+    StoredCredentials,       // Wi-Fi NVS store has an SSID
+    DevFallback,             // compiled WIFI_SSID is non-empty
+    NoCredentials,           // nothing configured at all
+};
+
+struct BootDecision {
+    BootAction action;
+    BootReason reason;
+    // True when the persisted prov_req flag must be cleared before acting.
+    bool clearProvisioningRequest;
+    // True when stored Wi-Fi credentials must be erased before provisioning.
+    bool resetStoredCredentials;
+};
+
+// Device lifecycle (contract order):
+//   prov_req set            -> clear it, provisioning (credentials reset)
+//   stored credentials      -> connect with them
+//   compiled dev fallback   -> connect with it (no BLE)
+//   otherwise               -> provisioning
+inline BootDecision decideBootAction(bool provisioningRequested,
+                                     bool hasStoredCredentials,
+                                     bool hasDevFallbackCredentials) {
+    if (provisioningRequested) {
+        return {BootAction::EnterProvisioning, BootReason::ProvisioningRequested, true, true};
+    }
+    if (hasStoredCredentials) {
+        return {BootAction::ConnectStoredCredentials, BootReason::StoredCredentials, false, false};
+    }
+    if (hasDevFallbackCredentials) {
+        return {BootAction::ConnectDevFallback, BootReason::DevFallback, false, false};
+    }
+    return {BootAction::EnterProvisioning, BootReason::NoCredentials, false, false};
+}
+
+inline const char* bootReasonName(BootReason reason) {
+    switch (reason) {
+        case BootReason::ProvisioningRequested: return "provisioning requested (BOOT long-press)";
+        case BootReason::StoredCredentials: return "stored Wi-Fi credentials";
+        case BootReason::DevFallback: return "compiled secrets.h dev fallback";
+        case BootReason::NoCredentials: return "no Wi-Fi credentials";
+    }
+    return "unknown";
+}
+
+// Runtime network state, also reported by the serial PoP query when the
+// device is not in provisioning mode.
+enum class NetworkState {
+    Starting,       // setup() has not decided yet
+    Provisioning,   // BLE provisioning active; PoP may be served
+    Connecting,     // STA credentials present, not (yet/any more) connected
+    Connected,      // STA has an IP address
+    Error,          // provisioning could not start and nothing else is configured
+};
+
+enum class CredentialSource {
+    None,
+    Stored,         // Wi-Fi NVS store (BLE-provisioned)
+    DevFallback,    // compiled secrets.h
+};
+
+// Value of `state=` in `RESMON-POP unavailable state=<state>`.
+inline const char* popUnavailableStateName(NetworkState state, CredentialSource source) {
+    switch (state) {
+        case NetworkState::Starting: return "starting";
+        case NetworkState::Provisioning: return "provisioning";
+        case NetworkState::Connecting: return "connecting";
+        case NetworkState::Connected:
+            return source == CredentialSource::DevFallback ? "dev-fallback" : "provisioned";
+        case NetworkState::Error: return "error";
+    }
+    return "unknown";
+}
+
+inline const char* networkStateName(NetworkState state) {
+    switch (state) {
+        case NetworkState::Starting: return "starting";
+        case NetworkState::Provisioning: return "provisioning";
+        case NetworkState::Connecting: return "connecting";
+        case NetworkState::Connected: return "connected";
+        case NetworkState::Error: return "error";
+    }
+    return "unknown";
+}
+
+inline const char* credentialSourceName(CredentialSource source) {
+    switch (source) {
+        case CredentialSource::None: return "none";
+        case CredentialSource::Stored: return "stored";
+        case CredentialSource::DevFallback: return "dev-fallback";
+    }
+    return "unknown";
+}
+
+// Bounded exponential reconnect backoff: doubles the delay, clamped to
+// [minMs, maxMs].
+inline uint32_t nextReconnectDelayMs(uint32_t currentMs, uint32_t minMs, uint32_t maxMs) {
+    if (currentMs < minMs) {
+        return minMs;
+    }
+    if (currentMs >= maxMs / 2) {
+        return maxMs;
+    }
+    return currentMs * 2;
+}
+
+#endif
