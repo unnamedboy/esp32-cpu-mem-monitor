@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -367,25 +368,72 @@ namespace ResourceMonitorDaemon
                 return new JsonObject();   // nothing to preserve, no backup needed
             }
 
+            string problem;
             try
             {
-                if (JsonNode.Parse(text, nodeOptions: null, documentOptions: ReadOptions) is JsonObject existing)
+                // The file must be readable by BOTH parsers: the configuration parser used by the
+                // live daemon (case-insensitive keys, rejects case-variant duplicates) and the
+                // JsonNode parser used for rewriting (case-sensitive). Anything either rejects is
+                // ambiguous, so it is backed up instead of being silently rewritten.
+                using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(text)))
                 {
-                    // Detach from the parsed document so it can be re-serialized freely.
-                    return existing.DeepClone().AsObject();
+                    new ConfigurationBuilder().AddJsonStream(stream).Build();
+                }
+
+                if (JsonNode.Parse(text, nodeOptions: null, documentOptions: ReadOptions) is JsonObject parsed)
+                {
+                    // DeepClone materializes every property, surfacing exact duplicate keys.
+                    var existing = parsed.DeepClone().AsObject();
+                    if (FindCaseInsensitiveDuplicate(existing) is not { } duplicate)
+                    {
+                        return existing;
+                    }
+
+                    problem = $"duplicate key '{duplicate}'";
+                }
+                else
+                {
+                    problem = "the root is not a JSON object";
                 }
             }
-            catch (JsonException)
+            catch (Exception ex)
             {
-                // Handled below.
+                problem = ex.GetBaseException().Message;
             }
 
             // Never silently discard content we cannot parse: keep a copy next to the file.
             var backup = CreateUniqueBackupPath();
             File.Copy(FilePath, backup, overwrite: false);
             LastBackupPath = backup;
-            _logger?.LogWarning("User settings '{Path}' are not a valid JSON object; previous content backed up to {Backup}.", FilePath, backup);
+            _logger?.LogWarning("User settings '{Path}' cannot be safely rewritten ({Problem}); previous content backed up to {Backup}.", FilePath, problem, backup);
             return new JsonObject();
+        }
+
+        private static string? FindCaseInsensitiveDuplicate(JsonNode? node)
+        {
+            switch (node)
+            {
+                case JsonObject obj:
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (key, value) in obj)
+                    {
+                        if (!seen.Add(key))
+                        {
+                            return key;
+                        }
+
+                        if (FindCaseInsensitiveDuplicate(value) is { } nested)
+                        {
+                            return nested;
+                        }
+                    }
+
+                    return null;
+                case JsonArray array:
+                    return array.Select(FindCaseInsensitiveDuplicate).FirstOrDefault(found => found != null);
+                default:
+                    return null;
+            }
         }
 
         private string CreateUniqueBackupPath()

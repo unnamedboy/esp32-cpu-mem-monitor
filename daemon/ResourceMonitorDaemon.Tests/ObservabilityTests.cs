@@ -557,7 +557,7 @@ internal static class ObservabilityTests
         ("Device status validation: object with v=1 accepted; v=2, non-object, oversize, malformed rejected", () =>
         {
             static bool Valid(string text) => DeviceStatusValidator.TryValidate(Encoding.UTF8.GetBytes(text), out _, out _);
-            const string sample = "{\"v\":1,\"build\":\"phase4-ble-prov\",\"uptime_s\":1234,\"heap_free\":182344,\"heap_min\":150000,\"rssi\":-61,\"wifi\":\"connected\",\"prov\":\"provisioned\",\"dac\":true}";
+            const string sample = "{\"v\":1,\"build\":\"phase4-ble-prov-status\",\"uptime_s\":1234,\"heap_free\":182344,\"heap_min\":150000,\"rssi\":-61,\"wifi\":\"connected\",\"prov\":\"provisioned\",\"dac\":true}";
             AssertTrue(DeviceStatusValidator.TryValidate(Encoding.UTF8.GetBytes(sample), out var json, out _) && json == sample, "contract sample rejected or altered");
             AssertTrue(Valid("{\"v\":1,\"future_field\":[1,2]}"), "unknown fields must be ignored");
             AssertTrue(!Valid("{\"v\":2,\"build\":\"x\"}"), "v=2 accepted");

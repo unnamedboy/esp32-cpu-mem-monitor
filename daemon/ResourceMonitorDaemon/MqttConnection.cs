@@ -43,6 +43,7 @@ namespace ResourceMonitorDaemon
         private bool _wasConnected;
         private bool _outageNotified;
         private int _outageFailures;
+        private int _connectionGeneration;
         private DateTimeOffset? _outageStartedAt;
         private bool _disposed;
         private string? _subscribedTopic;   // status topic the current client subscribed to (or tried)
@@ -74,6 +75,22 @@ namespace ResourceMonitorDaemon
                 lock (_gate)
                 {
                     return IsConnectedLocked;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Number of connections established so far. It changes with every successful
+        /// (re)connect, so a caller can tell a connection made after some point in time (e.g. after
+        /// provisioning a device) from an older one that is still up.
+        /// </summary>
+        public int ConnectionGeneration
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _connectionGeneration;
                 }
             }
         }
@@ -512,6 +529,7 @@ namespace ResourceMonitorDaemon
                 _connectedAddress = address;
                 _subscribedTopic = settings.StatusTopic;
                 _wasConnected = true;
+                _connectionGeneration++;
                 _backoff!.RecordConnected();
 
                 var via = string.Equals(address, settings.Host, StringComparison.OrdinalIgnoreCase)

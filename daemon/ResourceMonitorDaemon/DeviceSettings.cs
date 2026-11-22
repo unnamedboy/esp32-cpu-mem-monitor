@@ -28,7 +28,7 @@ namespace ResourceMonitorDaemon
 
         /// <summary>
         /// Optional IPv4 address tried when <see cref="Host"/> cannot be resolved or connected.
-        /// Empty means "no fallback". Written by the (future) pairing wizard.
+        /// Empty means "no fallback". Written by the pairing wizard.
         /// </summary>
         public string FallbackAddress { get; set; } = string.Empty;
 
