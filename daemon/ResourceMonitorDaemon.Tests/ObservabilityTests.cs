@@ -780,6 +780,7 @@ internal static class ObservabilityTests
                 await PublishAsync(port, "lab/status", "{\"v\":1,\"build\":\"three\"}");
                 return forwarder.Received >= 3;
             }, "status on the new topic");
+            await Task.Delay(300);   // let a duplicate from the polling publish above arrive first
             var before = forwarder.Received;
             await PublishAsync(port, "resmon/status", "{\"v\":1,\"build\":\"old topic\"}");
             await Task.Delay(300);

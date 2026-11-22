@@ -148,6 +148,12 @@ namespace ResourceMonitorDaemon.Observability
         /// </summary>
         public async Task StopAsync(TimeSpan budget, CancellationToken cancellationToken = default)
         {
+            if (_disposed)
+            {
+                // The host may call StopAsync again after disposal (e.g. Exit, then Main's final stop).
+                return;
+            }
+
             var started = _clock();
             using var budgetSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             budgetSource.CancelAfter(budget);
