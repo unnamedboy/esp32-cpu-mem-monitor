@@ -92,7 +92,9 @@ Pairing lines at Information level name the device as `PROV_RESMON_XXXXXX`, whos
 suffix is the last three bytes of the ESP32's Wi-Fi MAC address. Pairing lines with the
 device's Bluetooth and IP addresses are [Debug-level](daemon.md#logging-and-diagnostics),
 so they are forwarded only if you lower both `MinLevel` and the `Logging` filter to
-Debug. The device status never contains an SSID, password, IP or MAC address. The sink's own messages, such as failed pushes, stay in the local log.
+Debug. The device status never contains an SSID, password, IP or MAC address.
+
+The sink's own messages, such as failed pushes, stay in the local log.
 
 ## Reliability
 

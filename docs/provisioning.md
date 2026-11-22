@@ -54,9 +54,9 @@ daemon running.
 5. **Wi-Fi.** Enter the network name (SSID) and password, or click **Use this PC's
    Wi-Fi** to copy the network this PC is on. Windows 11 may ask once whether apps may
    use your location, because it treats Wi-Fi details as location data; if you
-   decline, type the name. **The ESP32 supports 2.4 GHz only.** The wizard warns you if
-   this PC is connected on 5 or 6 GHz; make sure the router also offers the network on
-   2.4 GHz.
+   decline, type the name. **The ESP32 supports 2.4 GHz only.** If you use **Use this PC's
+   Wi-Fi** and this PC is connected on 5 or 6 GHz, the wizard warns you; either way,
+   make sure the router also offers the network on 2.4 GHz.
 6. **Click Pair.** Progress shows each step: connect, secure session, send
    Wi-Fi settings, wait for Wi-Fi. **Cancel** stops the attempt; closing the wizard
    cancels everything.

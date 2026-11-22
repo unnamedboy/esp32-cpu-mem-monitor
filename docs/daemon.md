@@ -63,8 +63,10 @@ which cancels any in-flight connect and closes the MQTT client within
 `MqttConnection.MaxShutdownDuration` (1 s), then the Loki sink, which gets up to
 `ObservabilityService.ShutdownFlushBudget` (2 s) for a final flush. The host stop budget,
 `Program.ShutdownTimeout`, is the sum of the two plus 1 s, so 4 s at most; a healthy
-Exit takes milliseconds. If the host fails to
-start, the tray icon is removed and the error is logged and shown in a message box.
+Exit takes milliseconds.
+
+If the host fails to start, the tray icon is removed and the error is logged and shown
+in a message box.
 
 ## Sampling and publishing
 

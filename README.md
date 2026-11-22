@@ -32,13 +32,12 @@ This is a working prototype, not a finished product; see [Status](#status-and-li
 ## What you need
 
 - An ESP32-WROOM-32 dev board (the prototype uses a MOC9686 expansion shield), powered
-  over USB.
+  over USB with a data cable (not a charge-only one).
 - For the display: a GP8413-compatible I2C DAC and two analogue panel gauges. The
-  firmware also runs without them. The DAC's full scale is 5 V, so a 0–5 V DC panel
-  voltmeter would map directly (gauge input not yet verified). See
-  [docs/hardware.md](docs/hardware.md) for parts, wiring and **safety notes**: the
-  shield's `DC IN` is labelled 6–9 V (never connect 12 V), and GPIO is 3.3 V.
-- A 2.4 GHz Wi-Fi network shared by the PC and the ESP32.
+  firmware also runs without them. See [docs/hardware.md](docs/hardware.md#parts) for
+  which gauges fit, wiring and **safety notes**: the shield's `DC IN` is labelled
+  6–9 V (never connect 12 V), and GPIO is 3.3 V.
+- A Wi-Fi network that offers 2.4 GHz for the ESP32, on the same LAN as the PC.
 - A Windows 10 (2004 or later) or Windows 11 PC with Bluetooth LE for pairing.
 - [PlatformIO](https://platformio.org/) to build the firmware.
 - The [.NET](https://dotnet.microsoft.com/) 9 SDK to build and run the daemon, or a newer

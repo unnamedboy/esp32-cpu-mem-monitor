@@ -46,8 +46,9 @@ const int STALE_DECAY_INTERVAL_MS = 50;
 const int STALE_DECAY_STEP = 1;
 
 // On-board BOOT button (GPIO0, boot-strapping pin). Input only, read only
-// after boot has finished; the dev board already has a pull-up and the
-// button pulls the pin to GND. No external wiring. Holding it while the
+// after boot has finished. The firmware enables the internal pull-up
+// (INPUT_PULLUP); any on-board pull-up is unverified. The button pulls the
+// pin to GND. No external wiring. Holding it while the
 // board resets enters the ROM serial download mode instead of the firmware.
 // Reset Wi-Fi + reopen provisioning: hold BOOT for MIN..MAX, then RELEASE.
 // Holds longer than MAX are ignored (stuck button, or a serial tool holding

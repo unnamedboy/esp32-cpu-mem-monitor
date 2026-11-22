@@ -22,8 +22,8 @@ test commands are in the [README](../README.md#building-and-testing).
 - Optional hardware must fail safe: the firmware has to boot and run without the DAC
   or any other I2C device, and say so in its diagnostics.
 - Clamp every value that drives an output.
-- Put decision logic in a pure header under `firmware/include` and add a Unity test in
-  `firmware/test`.
+- Put decision logic in a pure header under `firmware/include` and add Unity tests in a
+  `firmware/test/test_<name>/` folder, one folder per suite.
 - Keep the startup diagnostics current: build ID, enabled features, pins, detected I2C
   devices, free heap, Wi-Fi and MQTT state.
 - Respect the ESP32 pin constraints listed in [hardware.md](hardware.md#pins-and-bus).
