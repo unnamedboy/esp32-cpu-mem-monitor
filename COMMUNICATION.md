@@ -18,7 +18,8 @@ The ESP32 validates each payload and ignores malformed or out-of-range values. C
   publish). Only clients subscribed to `resmon/status` receive it.
 - Topic: `resmon/status` (`STATUS_TOPIC` in
   [firmware/src/config.h](firmware/src/config.h); daemon setting
-  `StatusTopic`, default the same).
+  `Device:StatusTopic`, default the same; no wildcards, must differ from the
+  metric topics).
 - QoS 0, not retained. Published every 10 s (`STATUS_INTERVAL_MS`), only
   while Wi-Fi is connected; the first status arrives within
   `STATUS_INTERVAL_MS` after the broker starts.
@@ -77,3 +78,35 @@ about 10 s or longer per publish (`WiFiClient::write` retries, and restarts
 its retry count whenever part of the data is sent). Keep-alive normally
 drops such clients first. The `resmon/cpu` and `resmon/mem` contract above
 is unchanged.
+
+### Daemon side
+
+The daemon subscribes to `Device:StatusTopic` (QoS 0) after every (re)connect,
+because it uses a clean session. A topic change is applied without a reconnect,
+including a change made while a connect attempt is in flight. Older firmware
+that never publishes status is normal, not an error.
+
+Daemon validation: the payload must be valid UTF-8, at most 1 KB, a JSON object, and contain an
+integer `v` between 1 and the supported version (1). Invalid messages are ignored, with one local
+log line per kind of problem. Valid messages are logged locally at Debug level and, only if the
+optional Loki sink is enabled, forwarded to the stream `{app="resmon-device", kind="status"}`:
+
+- Only the schema fields (`v`, `build`, `uptime_s`, `heap_free`, `heap_min`, `rssi`, `wifi`, `prov`,
+  `dac`) are forwarded. They are re-serialized in this order, a field
+  with the wrong type is omitted, `build` is capped at 64 characters and `wifi`/`prov` at 32.
+  Unknown fields are accepted but never forwarded.
+- Forwarding is rate-limited to a burst of 3, then 1 message per 5 s. The broker is
+  unauthenticated, so a flood cannot fill the Loki queue. Excess messages are counted in the local
+  log, at most once per minute.
+
+## Optional daemon → Grafana Loki streams
+
+Disabled by default (`Observability:Loki:Enabled = false`); see the README. When enabled, the daemon
+pushes to the user's own Loki with only these low-cardinality label sets (plus `host="<PC name>"`
+when `IncludeHostLabel` is set):
+
+| Stream labels | Line content |
+| --- | --- |
+| `{app="resmon-daemon", kind="log", level="<trace\|debug\|info\|warn\|error\|critical>"}` | Daemon log line `Category: message` (local-only categories excluded) |
+| `{app="resmon-daemon", kind="metrics"}` | One JSON line per `MetricsIntervalSeconds`: `{"cpu":12.3,"mem":45.6,"mem_used_gb":7.21,"mem_total_gb":15.86,"mqtt":"connected"}` (`mqtt` is `connected`, `disconnected` or `paused`) |
+| `{app="resmon-device", kind="status"}` | The validated `resmon/status` JSON, contract fields only (see above), rate-limited |

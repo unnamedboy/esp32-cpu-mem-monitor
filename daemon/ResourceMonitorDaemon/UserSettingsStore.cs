@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using ResourceMonitorDaemon.Observability;
 
 namespace ResourceMonitorDaemon
 {
@@ -44,18 +45,50 @@ namespace ResourceMonitorDaemon
         /// <exception cref="IOException">The file could not be written.</exception>
         void Update(Action<UserDeviceSettingsPatch> edit);
 
-        /// <summary>Raised after a successful <see cref="Update"/>.</summary>
+        /// <summary>Raised after a successful <see cref="Update"/> (or Loki section update).</summary>
         event EventHandler? Saved;
     }
 
+    /// <summary>
+    /// The <c>Observability:Loki</c> section of the same user settings file, kept separate from
+    /// <see cref="ISettingsStore"/> so that interface stays unchanged. Same rules: only set fields
+    /// are written, other sections and unknown keys are preserved, writes are atomic, and the
+    /// running daemon picks changes up through the configuration file watcher.
+    /// <code>
+    /// store.UpdateLoki(patch => { patch.Enabled = true; patch.SetToken(token, protector); });
+    /// </code>
+    /// </summary>
+    public interface IObservabilitySettingsStore
+    {
+        /// <summary>Absolute path of the user settings file.</summary>
+        string FilePath { get; }
+
+        /// <summary>The Loki fields set in the user file only; never throws.</summary>
+        UserLokiSettingsPatch LoadLoki();
+
+        /// <summary>Loads, edits, validates and atomically writes the Loki section under the store lock.</summary>
+        /// <exception cref="ArgumentException">The edited patch fails <see cref="UserLokiSettingsPatch.Validate"/>.</exception>
+        /// <exception cref="IOException">The file could not be written.</exception>
+        void UpdateLoki(Action<UserLokiSettingsPatch> edit);
+    }
+
     /// <inheritdoc cref="ISettingsStore"/>
-    public sealed class UserSettingsStore : ISettingsStore
+    public sealed class UserSettingsStore : ISettingsStore, IObservabilitySettingsStore
     {
         private static readonly JsonSerializerOptions WriteOptions = new()
         {
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
+
+        private static readonly JsonSerializerOptions LokiWriteOptions = new(WriteOptions)
+        {
+            Converters = { new JsonStringEnumConverter() },
+        };
+
+        private static readonly string[] DeviceSectionPath = { DeviceSettings.SectionName };
+        private static readonly string[] LokiSectionPath = LokiSettings.SectionName.Split(ConfigurationPath.KeyDelimiter);
+        private static readonly string[] LokiOwnedKeys = UserLokiSettingsPatch.FieldNames.Append(LokiSettings.TokenKey).ToArray();
 
         private static readonly JsonDocumentOptions ReadOptions = new()
         {
@@ -115,25 +148,115 @@ namespace ResourceMonitorDaemon
             Saved?.Invoke(this, EventArgs.Empty);
         }
 
-        private UserDeviceSettingsPatch LoadLocked()
+        public UserLokiSettingsPatch LoadLoki()
         {
-            var patch = new UserDeviceSettingsPatch();
-            if (!File.Exists(FilePath))
+            lock (_gate)
+            {
+                return LoadLokiLocked();
+            }
+        }
+
+        public void UpdateLoki(Action<UserLokiSettingsPatch> edit)
+        {
+            ArgumentNullException.ThrowIfNull(edit);
+            UserLokiSettingsPatch patch;
+            lock (_gate)
+            {
+                patch = LoadLokiLocked();
+                edit(patch);
+                patch.Url = patch.Url?.Trim();
+                patch.Username = patch.Username?.Trim();
+                patch.TenantId = patch.TenantId?.Trim();
+
+                var errors = patch.Validate();
+                if (errors.Count > 0)
+                {
+                    throw new ArgumentException("Invalid observability settings: " + string.Join(" ", errors), nameof(edit));
+                }
+
+                // Also owns (and so removes) a hand-written plain "Token" key: tokens are never kept in plain text.
+                WriteSectionLocked(LokiSectionPath, LokiOwnedKeys, JsonSerializer.SerializeToNode(patch, LokiWriteOptions)!.AsObject());
+            }
+
+            // Describe() shows the URL host only and never the token ciphertext.
+            _logger?.LogInformation("Observability settings saved to {Path}: {Patch}", FilePath, patch.Describe());
+            Saved?.Invoke(this, EventArgs.Empty);
+        }
+
+        private UserLokiSettingsPatch LoadLokiLocked()
+        {
+            var patch = new UserLokiSettingsPatch();
+            if (ReadSectionLocked(LokiSettings.SectionName) is not { } section)
             {
                 return patch;
             }
 
-            IConfigurationSection section;
+            var ignored = new List<string>();
+            patch.Enabled = ReadBool(section, nameof(LokiSettings.Enabled), ignored);
+            patch.Url = section[nameof(LokiSettings.Url)];
+            patch.AuthMode = LokiSettingsLoader.TryParseName(section[nameof(LokiSettings.AuthMode)], out LokiAuthMode mode) ? mode : null;
+            patch.Username = section[nameof(LokiSettings.Username)];
+            patch.TokenProtected = section[LokiSettings.TokenProtectedKey];
+            patch.TenantId = section[nameof(LokiSettings.TenantId)];
+            patch.IncludeHostLabel = ReadBool(section, nameof(LokiSettings.IncludeHostLabel), ignored);
+            patch.MetricsIntervalSeconds = ReadInt(section, nameof(LokiSettings.MetricsIntervalSeconds));
+            patch.MinLevel = LokiSettingsLoader.TryParseName(section[nameof(LokiSettings.MinLevel)], out LogLevel level) ? level : null;
+            patch.BatchMaxEntries = ReadInt(section, nameof(LokiSettings.BatchMaxEntries));
+            patch.QueueCapacity = ReadInt(section, nameof(LokiSettings.QueueCapacity));
+            patch.FlushIntervalMs = ReadInt(section, nameof(LokiSettings.FlushIntervalMs));
+            patch.Gzip = ReadBool(section, nameof(LokiSettings.Gzip), ignored);
+            foreach (var warning in ignored)
+            {
+                _logger?.LogWarning("User settings: {Warning}", warning);
+            }
+
+            return patch;
+        }
+
+        private static bool? ReadBool(IConfigurationSection section, string key, ICollection<string> warnings)
+        {
+            var text = section[key];
+            if (text == null)
+            {
+                return null;
+            }
+
+            if (bool.TryParse(text.Trim(), out var value))
+            {
+                return value;
+            }
+
+            warnings.Add($"Observability:Loki:{key} '{text}' is not true/false and is ignored.");
+            return null;
+        }
+
+        /// <summary>The configuration section at <paramref name="path"/> of the user file, or null if missing or unreadable.</summary>
+        private IConfigurationSection? ReadSectionLocked(string path)
+        {
+            if (!File.Exists(FilePath))
+            {
+                return null;
+            }
+
             try
             {
                 // Same parser as the live configuration: tolerates comments and trailing commas,
                 // keys are case-insensitive.
                 using var stream = new MemoryStream(File.ReadAllBytes(FilePath));
-                section = new ConfigurationBuilder().AddJsonStream(stream).Build().GetSection(DeviceSettings.SectionName);
+                return new ConfigurationBuilder().AddJsonStream(stream).Build().GetSection(path);
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning("Unable to read user settings '{Path}': {Error}", FilePath, ex.GetBaseException().Message);
+                return null;
+            }
+        }
+
+        private UserDeviceSettingsPatch LoadLocked()
+        {
+            var patch = new UserDeviceSettingsPatch();
+            if (ReadSectionLocked(DeviceSettings.SectionName) is not { } section)
+            {
                 return patch;
             }
 
@@ -141,6 +264,7 @@ namespace ResourceMonitorDaemon
             patch.FallbackAddress = section[nameof(DeviceSettings.FallbackAddress)];
             patch.CpuTopic = section[nameof(DeviceSettings.CpuTopic)];
             patch.MemTopic = section[nameof(DeviceSettings.MemTopic)];
+            patch.StatusTopic = section[nameof(DeviceSettings.StatusTopic)];
             patch.Port = ReadInt(section, nameof(DeviceSettings.Port));
             patch.SampleIntervalMs = ReadInt(section, nameof(DeviceSettings.SampleIntervalMs));
             patch.ReconnectInitialBackoffMs = ReadInt(section, nameof(DeviceSettings.ReconnectInitialBackoffMs));
@@ -166,36 +290,55 @@ namespace ResourceMonitorDaemon
             return null;
         }
 
-        private void WriteLocked(UserDeviceSettingsPatch patch)
+        private void WriteLocked(UserDeviceSettingsPatch patch) =>
+            WriteSectionLocked(DeviceSectionPath, UserDeviceSettingsPatch.FieldNames, JsonSerializer.SerializeToNode(patch, WriteOptions)!.AsObject());
+
+        private void WriteSectionLocked(IReadOnlyList<string> sectionPath, IReadOnlyList<string> fieldNames, JsonObject values)
         {
             var root = ReadExistingRootLocked();
 
-            // Merge into the existing Device object: drop every known field (any casing), then
+            // Walk (or create) the nested section objects, reusing an existing key in any casing.
+            var chain = new List<(JsonObject Owner, string Key, JsonObject Node)>();
+            var current = root;
+            foreach (var segment in sectionPath)
+            {
+                var key = current.Select(property => property.Key).FirstOrDefault(k => string.Equals(k, segment, StringComparison.OrdinalIgnoreCase)) ?? segment;
+                var child = current[key] as JsonObject ?? new JsonObject();
+                chain.Add((current, key, child));
+                current = child;
+            }
+
+            // Merge into the existing section object: drop every known field (any casing), then
             // add the set ones. Unknown keys are kept for forward compatibility.
-            var device = root[DeviceSettings.SectionName] as JsonObject ?? new JsonObject();
-            foreach (var key in device.Select(property => property.Key).ToList())
+            var section = current;
+            foreach (var key in section.Select(property => property.Key).ToList())
             {
-                if (UserDeviceSettingsPatch.FieldNames.Contains(key, StringComparer.OrdinalIgnoreCase))
+                if (fieldNames.Contains(key, StringComparer.OrdinalIgnoreCase))
                 {
-                    device.Remove(key);
+                    section.Remove(key);
                 }
             }
 
-            foreach (var property in JsonSerializer.SerializeToNode(patch, WriteOptions)!.AsObject().ToList())
+            foreach (var property in values.ToList())
             {
-                if (property.Value != null && UserDeviceSettingsPatch.FieldNames.Contains(property.Key))
+                if (property.Value != null && fieldNames.Contains(property.Key))
                 {
-                    device[property.Key] = property.Value.DeepClone();
+                    section[property.Key] = property.Value.DeepClone();
                 }
             }
 
-            if (device.Count == 0)
+            // Attach non-empty section objects and remove empty ones, innermost first.
+            for (var i = chain.Count - 1; i >= 0; i--)
             {
-                root.Remove(DeviceSettings.SectionName);
-            }
-            else
-            {
-                root[DeviceSettings.SectionName] = device;
+                var (owner, key, node) = chain[i];
+                if (node.Count == 0)
+                {
+                    owner.Remove(key);
+                }
+                else if (!ReferenceEquals(owner[key], node))
+                {
+                    owner[key] = node;
+                }
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);

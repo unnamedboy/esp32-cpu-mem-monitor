@@ -1,0 +1,215 @@
+using System.Text;
+using System.Text.Encodings.Web;
+using Microsoft.Extensions.Logging;
+
+namespace ResourceMonitorDaemon.Observability
+{
+    /// <summary>
+    /// Bounded in-memory queue between the sources (logger, metrics, device status) and the
+    /// Loki sender. Never blocks a producer: when full, the oldest entry is dropped and counted.
+    /// Timestamps are assigned under the queue lock, so queue order equals timestamp order.
+    /// </summary>
+    /// <remarks>
+    /// It has no dependencies so the <see cref="LokiLoggerProvider"/> can be created by the
+    /// logging framework before the rest of the pipeline exists. Until <see cref="LokiSink.Configure"/>
+    /// runs it accepts (and bounds) early start-up entries; a disabled sink stops and clears it.
+    /// Thread-safe.
+    /// </remarks>
+    public sealed class LokiEntryQueue
+    {
+        /// <summary>Longer lines are truncated (Loki's default line limit is far higher; this bounds memory).</summary>
+        public const int MaxLineLength = 16 * 1024;
+
+        private readonly object _gate = new();
+        private readonly Queue<LokiEntry> _entries = new();
+        private readonly MonotonicNanoClock _clock;
+        private int _capacity;
+        private int _batchThreshold = LokiSettings.DefaultBatchMaxEntries;
+        private long _dropped;
+        private long _totalDropped;
+        private volatile bool _accepting = true;
+        private volatile bool _keepHostName;
+        private volatile int _minLogLevel = (int)LogLevel.Information;
+
+        public LokiEntryQueue()
+            : this(LokiSettings.DefaultQueueCapacity)
+        {
+        }
+
+        public LokiEntryQueue(int capacity, MonotonicNanoClock? clock = null)
+        {
+            _capacity = Math.Max(1, capacity);
+            _clock = clock ?? MonotonicNanoClock.Shared;
+        }
+
+        /// <summary>Raised (outside the lock, on the producer's thread) when the count reaches the batch threshold.</summary>
+        public Action? ThresholdReached { get; set; }
+
+        /// <summary>False while the sink is disabled: <see cref="TryEnqueue"/> then does nothing.</summary>
+        public bool Accepting
+        {
+            get => _accepting;
+            set => _accepting = value;
+        }
+
+        /// <summary>
+        /// True when the user opted into the host label, so log lines may keep the PC name
+        /// (see <see cref="LokiLogRedactor"/>).
+        /// </summary>
+        public bool KeepHostName
+        {
+            get => _keepHostName;
+            set => _keepHostName = value;
+        }
+
+        /// <summary>Minimum level of daemon log lines (used by <see cref="LokiLoggerProvider"/>).</summary>
+        public LogLevel MinLogLevel
+        {
+            get => (LogLevel)_minLogLevel;
+            set => _minLogLevel = (int)value;
+        }
+
+        public int Capacity
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _capacity;
+                }
+            }
+        }
+
+        public int Count
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _entries.Count;
+                }
+            }
+        }
+
+        /// <summary>Entries dropped since the queue was created.</summary>
+        public long TotalDropped => Interlocked.Read(ref _totalDropped);
+
+        /// <summary>Count at which <see cref="ThresholdReached"/> fires (the batch size).</summary>
+        public int BatchThreshold
+        {
+            get => Volatile.Read(ref _batchThreshold);
+            set => Volatile.Write(ref _batchThreshold, Math.Max(1, value));
+        }
+
+        /// <summary>Changes the capacity; when shrinking, the oldest entries are dropped and counted.</summary>
+        public void SetCapacity(int capacity)
+        {
+            lock (_gate)
+            {
+                _capacity = Math.Max(1, capacity);
+                while (_entries.Count > _capacity)
+                {
+                    _entries.Dequeue();
+                    CountDropLocked();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Adds a line with the next process-wide timestamp. Returns false when not accepting.
+        /// Drops the oldest entry if full.
+        /// </summary>
+        public bool TryEnqueue(LokiStreamKind kind, string? level, string line)
+        {
+            if (!_accepting)
+            {
+                return false;
+            }
+
+            if (line.Length > MaxLineLength)
+            {
+                // Never cut a surrogate pair in half.
+                var cut = char.IsHighSurrogate(line[MaxLineLength - 1]) ? MaxLineLength - 1 : MaxLineLength;
+                line = line[..cut] + "…(truncated)";
+            }
+
+            bool signal;
+            lock (_gate)
+            {
+                if (_entries.Count >= _capacity)
+                {
+                    _entries.Dequeue();
+                    CountDropLocked();
+                }
+
+                _entries.Enqueue(new LokiEntry(kind, level, _clock.Next(), line));
+                signal = _entries.Count == BatchThreshold;
+            }
+
+            if (signal)
+            {
+                ThresholdReached?.Invoke();
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Removes and returns up to <paramref name="max"/> of the oldest entries whose estimated
+        /// request size stays within <paramref name="maxBytes"/>; at least one entry is returned
+        /// when the queue is not empty.
+        /// </summary>
+        public List<LokiEntry> DequeueBatch(int max, long maxBytes = long.MaxValue)
+        {
+            lock (_gate)
+            {
+                var batch = new List<LokiEntry>(Math.Min(Math.Max(0, max), _entries.Count));
+                long bytes = 0;
+                while (batch.Count < max && _entries.TryPeek(out var next))
+                {
+                    var size = EstimateBytes(next);
+                    if (batch.Count > 0 && bytes + size > maxBytes)
+                    {
+                        break;
+                    }
+
+                    batch.Add(_entries.Dequeue());
+                    bytes += size;
+                }
+
+                return batch;
+            }
+        }
+
+        /// <summary>
+        /// Uncompressed JSON size of one value as <see cref="LokiPushPayload"/> writes it: the line
+        /// escaped by the same encoder (<see cref="JavaScriptEncoder.UnsafeRelaxedJsonEscaping"/>) in
+        /// UTF-8, plus timestamp and punctuation. This counts everything the encoder still escapes:
+        /// quotes, backslashes, control characters, characters outside the BMP such as emoji (12
+        /// bytes as a surrogate pair), U+2028/U+2029, private-use and unassigned characters.
+        /// </summary>
+        public static long EstimateBytes(in LokiEntry entry)
+        {
+            // Encode returns the same instance when nothing needs escaping (plain ASCII / CJK).
+            var escaped = JavaScriptEncoder.UnsafeRelaxedJsonEscaping.Encode(entry.Line);
+            return Encoding.UTF8.GetByteCount(escaped) + 32;
+        }
+
+        /// <summary>Returns the drops since the previous call and resets that counter.</summary>
+        public long TakeDroppedCount() => Interlocked.Exchange(ref _dropped, 0);
+
+        public void Clear()
+        {
+            lock (_gate)
+            {
+                _entries.Clear();
+            }
+        }
+
+        private void CountDropLocked()
+        {
+            Interlocked.Increment(ref _dropped);
+            Interlocked.Increment(ref _totalDropped);
+        }
+    }
+}

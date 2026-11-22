@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ResourceMonitorDaemon.Observability;
 using ResourceMonitorDaemon.Pairing;
 using System;
 using System.Diagnostics;
@@ -17,11 +18,13 @@ namespace ResourceMonitorDaemon
         private readonly MonitorService _monitorService;
         private readonly ISettingsStore _settingsStore;
         private readonly IOptionsMonitor<DeviceSettings> _settingsMonitor;
+        private readonly IServiceProvider _services;   // dialog dependencies only; the host is owned by Program.Main
         private readonly ILoggerFactory _loggerFactory;
         private readonly SynchronizationContext? _uiContext;
         private readonly System.Windows.Forms.Timer _updateTimer;
         private ToolStripMenuItem? _pauseResumeItem;
         private SettingsForm? _settingsForm;
+        private ObservabilityForm? _observabilityForm;
         private PairingWizardForm? _pairingWizard;
         private readonly FirstRunPairingPrompt _firstRunPrompt;
         private bool _pairingBalloonShown;
@@ -33,6 +36,7 @@ namespace ResourceMonitorDaemon
             _monitorService = monitorService;
             _settingsStore = settingsStore;
             _settingsMonitor = host.Services.GetRequiredService<IOptionsMonitor<DeviceSettings>>();
+            _services = host.Services;
             _loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
             _firstRunPrompt = FirstRunPairingPrompt.CreateDefault(_loggerFactory.CreateLogger<FirstRunPairingPrompt>());
 
@@ -53,6 +57,7 @@ namespace ResourceMonitorDaemon
             contextMenu.Items.Add("⚙ 设置 (Settings)…", null, OnSettingsClick);
             contextMenu.Items.Add(PairingText.TrayMenuItem, null, (_, _) => OpenPairingWizard());
             contextMenu.Items.Add("查看日志 (Log)", null, OnViewLog);
+            contextMenu.Items.Add(ObservabilityText.TrayMenuItem, null, OnObservabilityClick);
             contextMenu.Items.Add("-");
             contextMenu.Items.Add("退出 (Exit)", null, OnExit);
 
@@ -216,6 +221,37 @@ namespace ResourceMonitorDaemon
             _settingsForm.Activate();
         }
 
+        private void OnObservabilityClick(object? sender, EventArgs e)
+        {
+            if (_observabilityForm is { IsDisposed: false })
+            {
+                _observabilityForm.Activate();
+                return;
+            }
+
+            var services = _services;
+            var store = services.GetRequiredService<IObservabilitySettingsStore>();
+            _observabilityForm = new ObservabilityForm(
+                services.GetRequiredService<IOptionsMonitor<LokiSettings>>().CurrentValue,
+                DaemonConfiguration.LoadLowerLokiLayers(AppContext.BaseDirectory),
+                store.LoadLoki(),
+                store,
+                services.GetRequiredService<ISecretProtector>(),
+                DaemonConfiguration.GetEnvironmentOverriddenLokiFields());
+            _observabilityForm.FormClosed += (_, _) =>
+            {
+                if (_observabilityForm?.DialogResult == DialogResult.OK)
+                {
+                    ShowBalloon(3000, ObservabilityText.SavedBalloonTitle, ObservabilityText.SavedBalloonText, ToolTipIcon.Info);
+                }
+
+                _observabilityForm?.Dispose();
+                _observabilityForm = null;
+            };
+            _observabilityForm.Show();
+            _observabilityForm.Activate();
+        }
+
         private void OnViewLog(object? sender, EventArgs e)
         {
             if (File.Exists(_logFilePath))
@@ -237,6 +273,7 @@ namespace ResourceMonitorDaemon
             _updateTimer.Stop();
             _updateTimer.Dispose();
             _settingsForm?.Close();
+            _observabilityForm?.Close();
             _pairingWizard?.Close();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
@@ -260,6 +297,7 @@ namespace ResourceMonitorDaemon
 
             _notifyIcon.Visible = false;
             _settingsForm?.Close();
+            _observabilityForm?.Close();
             _pairingWizard?.Close();
             Application.ExitThread();
         }

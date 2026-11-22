@@ -41,6 +41,7 @@ it has no Wi-Fi credential fields.
 | `Port` | `1883` | 1..65535; invalid → default |
 | `CpuTopic` | `resmon/cpu` | non-empty, ≤128 chars, no `#`/`+`; invalid → default |
 | `MemTopic` | `resmon/mem` | as above, must differ from `CpuTopic` |
+| `StatusTopic` | `resmon/status` | as above, must differ from both metric topics (subscribed, see below) |
 | `SampleIntervalMs` | `1000` | clamped to 250..60000 |
 | `ReconnectInitialBackoffMs` | `1000` | clamped to 250..600000 |
 | `ReconnectMaxBackoffMs` | `30000` | clamped to 250..600000, ≥ initial |
@@ -129,6 +130,154 @@ schedule, and never blocks the sampling loop:
   is logged as a Warning, later failures at Debug with an Information summary
   every 20 attempts.
 
+### Device status topic
+
+- `MqttConnection` subscribes to `Device:StatusTopic` (default `resmon/status`, QoS 0)
+  inside every connect attempt. The client uses a clean session, so every reconnect, including
+  one after a broker restart, subscribes again. If only the topic changes, the client unsubscribes
+  and subscribes in the background without reconnecting. A topic change made while a connect
+  attempt is in flight (the attempt subscribes to its own snapshot) is caught on the next sampling
+  tick. If shutdown cancels the subscription, the just-connected client is closed. If the
+  subscription is refused or fails,
+  the daemon logs a warning and keeps publishing cpu/mem.
+- Messages on the current status topic are raised through `MqttConnection.StatusMessageReceived`.
+  The cpu/mem wire format, QoS 0 and non-retained publishing are unchanged.
+- `DeviceStatusValidator` accepts a UTF-8 JSON object of at most 1 KB with an integer `v` from 1
+  to 1 (supported version). It re-serializes only the contract fields, in contract order, with
+  type checks; `build` is capped at 64 characters and `wifi`/`prov` at 32. Unknown fields are
+  accepted but never forwarded, so nothing extra can be smuggled into Loki.
+- `DeviceStatusForwarder` logs valid messages at Debug and logs one Information line per kind of
+  rejection. It forwards valid messages to Loki only when the sink is enabled, through a token
+  bucket: a burst of 3, then 1 per 5 s; the contract interval is 10 s. The broker is
+  unauthenticated, so a flood cannot evict queued daemon logs or burn Loki ingestion. Excess
+  messages are counted and reported locally at most once per minute.
+- Older firmware never publishes status, and that is not an error.
+
+### Optional Grafana Loki observability
+
+Disabled by default. Everything user-specific (URL, user, tenant, token) comes from the user's
+settings or environment; the repository and `appsettings.json` hold none of it.
+
+```
+ sources (never block)                         queue                                sender
+ LokiLoggerProvider ───┐
+ LokiMetricsForwarder ─┼─► LokiEntryQueue (bounded, drop-oldest, ─► LokiSink loop ─► LokiPushClient ─► POST {Url}/loki/api/v1/push
+ DeviceStatusForwarder ┘   strictly increasing ns timestamps)      (batch, backoff)   (HttpClient, gzip, auth, 10 s timeout)
+```
+
+- **Settings** (`LokiSettings`, section `Observability:Loki`): `Enabled`, `Url`, `AuthMode`
+  (None/Basic/Bearer), `Username`, `TenantId` (`X-Scope-OrgID`), `IncludeHostLabel`,
+  `MetricsIntervalSeconds` (10, 0 = off), `MinLevel` (Information), `BatchMaxEntries` (500),
+  `QueueCapacity` (5000), `FlushIntervalMs` (2000), `Gzip` (true). `LokiSettingsLoader` reads
+  these leniently and `LokiSettingsValidator.Sanitize` replaces bad values with a warning, the
+  same pattern as `Device`. `IOptionsMonitor<LokiSettings>` reloads them live: the hosted
+  `ObservabilityService` calls `LokiSink.Configure` on every change, so enabling, disabling or
+  changing the URL needs no restart.
+- **Token**: the effective token is resolved in this order:
+  1. `RESMON_Observability__Loki__Token`. It is plain text, never persisted and shown read-only
+     in the dialog.
+  2. `TokenProtected` in the user settings file. This is base64 DPAPI ciphertext, scope
+     CurrentUser (`DpapiSecretProtector`). Its constant entropy is namespacing only: the code is
+     open source, so DPAPI CurrentUser is the protection boundary, and any program running as the
+     same Windows user could decrypt the value. The
+     `System.Security.Cryptography.ProtectedData` assembly ships with the WindowsForms shared
+     framework, so no package was added.
+
+  A plain `Token` key in a JSON file is ignored with a warning. `LokiSettings.ToString()` and
+  `Describe()` never print the token. `LokiRedactor` removes the token, the Basic credential and
+  the URL path from any HTTP error text before it is logged or shown. Credentials embedded in
+  the Url are stripped with a warning.
+- **Persistence**: `UserSettingsStore` also implements `IObservabilitySettingsStore`
+  (`LoadLoki` / `UpdateLoki(Action<UserLokiSettingsPatch>)`). `ISettingsStore` is unchanged. The
+  rules match the device patch: the file stores only fields that were explicitly set, other
+  sections and unknown keys are preserved, writes are atomic, and empty sections are removed.
+  `UserLokiSettingsPatch` has no plain-token property, only `TokenProtected` and
+  `SetToken(token, protector)`.
+- **Streams** (constant, low-cardinality labels; `host="<PC name>"` only when
+  `IncludeHostLabel` is set):
+  - `{app="resmon-daemon",kind="log",level=...}`: `LokiLoggerProvider`, entries at or above
+    `MinLevel`, formatted as `Category: message` with the exception appended.
+  - `{app="resmon-daemon",kind="metrics"}`: `LokiMetricsForwarder`. `MonitorService` passes each
+    existing sample through the small `IMetricsObserver` hook, so no extra counter is added.
+  - `{app="resmon-device",kind="status"}`: the normalized, rate-limited status JSON.
+- **No recursion**: the logger provider returns a no-op logger for the
+  `ResourceMonitorDaemon.Observability.*` and `System.Net.Http.*` categories. All messages from
+  the sink, settings warnings, the dialog and status handling therefore go to the local log only,
+  and an HTTP failure can never feed back into the queue.
+- **Sender** (`LokiSink`): a batch is sent when it reaches `BatchMaxEntries` or after
+  `FlushIntervalMs`. Entries are grouped per stream and sorted by timestamp, and the queue assigns
+  process-wide strictly increasing nanosecond timestamps.
+  - 429, 5xx, timeouts and network errors keep the batch and retry the same batch with
+    exponential backoff (`ReconnectBackoff`, 1 s doubling to 60 s). `Retry-After` is honoured up
+    to 60 s.
+  - Network errors, timeouts and 5xx are retried with no attempt or age limit, so an outage of
+    any length loses only what the bounded drop-oldest queue drops. Only one batch, plus its split
+    halves, is held outside the queue. Loki rejects entries older than its
+    `reject_old_samples_max_age` with a 400, and that drops the batch.
+  - After 3 throttled attempts (any 429, with or without Retry-After), a batch is split in half;
+    splitting is lossless. A single entry throttled 3 times without Retry-After is given up: it is
+    counted in `DroppedByServer` and logged as a Warning once until a push succeeds. With
+    Retry-After it is retried for as long as the server asks.
+  - Batches are capped at 1 MiB of uncompressed body. The body is written as raw UTF-8
+    (`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`), so CJK text is not doubled by `\uXXXX`.
+    The size estimate escapes each line with that same encoder, so whatever it still escapes
+    counts at its real size: quotes, backslashes, control characters, emoji and other non-BMP
+    characters (12 bytes), U+2028/U+2029, and private-use or unassigned characters. Single lines
+    are truncated at 16 KB with a marker, never inside a surrogate pair.
+  - 413 splits the batch in half and retries at once; a single entry that is still too large is
+    dropped.
+  - Other 4xx and 3xx responses drop the batch. This is logged as a Warning once per status code
+    until a push succeeds; redirects are not followed.
+  - When the response body says `total ignored: N out of M` (Loki stores the valid entries of a
+    partly rejected batch), only N count as dropped and the log says "rejected N of M entries".
+    Otherwise the whole batch counts, which is an upper bound, and the log says Loki may have
+    accepted some entries.
+  - 401/403/404 and request errors also back off, so a wrong URL or credentials are not retried
+    every flush interval.
+  - When the queue is full, the oldest entries are dropped, and the number of drops is logged at
+    most once per minute.
+- **Lifecycle**: `ObservabilityService` (an `IHostedLifecycleService`) is registered before
+  `MonitorService`, so it starts first and stops last; the shutdown messages of the other services
+  are still flushed. On stop it flushes within a 2 s budget, which is also bounded by the host
+  stop token, then disposes the sink. `Program.Main` is the single shutdown owner and stops the host
+  once (3 s budget), so `MonitorService` stops first and the sink flushes in the remaining time. A sink failure never affects sampling or MQTT.
+- **Diagnostics**: one startup line, logged after all services have started:
+  `Observability: Loki enabled|disabled; url host=<host[:port]>, auth=<mode>, token configured=yes|no.`
+  Settings changes are logged with the same host-only description.
+- **UI**: the tray item "可观测性 (Observability)…" opens `ObservabilityForm`; see Tray Controls.
+  All user-visible texts of the dialog and its tray entry are in `ObservabilityText`, ready to move
+  to resources.
+
+Privacy notes:
+
+- Nothing is sent unless the user enables the sink and enters a URL.
+- Data is sent only to the URL the user configured.
+- Forwarded log lines pass through `LokiLogRedactor` first:
+  - `%LOCALAPPDATA%`, `%APPDATA%` and `%USERPROFILE%` prefixes replace the real folders;
+  - the 8.3 short forms of those folders are replaced too;
+  - the profile folder in any other absolute path (`X:\Users\<name>` or `\\server\Users\<name>`,
+    either slash, any case, spaces allowed) becomes `<user>`. The name ends at a separator,
+    `' ( ) , ;`, a character that is invalid in file names, or the end of the line, so a name
+    containing one of those is only partly replaced. `Public`,
+    `Default`, `Default User` and `All Users` are kept, and relative paths and URLs such as
+    `https://host/Users/123` are not touched;
+  - cheap substring checks run before each regex, so a typical line costs about 0.3 µs;
+  - the Windows user name becomes `<user>` (whole word, case-insensitive, names of at least
+    3 characters; shorter names, such as two-character CJK account names, are left alone in free
+    text, but paths that contain them are still covered by the folder rules). If the account name
+    is a common word such as `admin`, that word is also replaced in ordinary text. This is accepted
+    in favour of privacy.
+  - the PC name becomes `<host>`, unless `IncludeHostLabel` is on.
+
+  Otherwise they are the same text as `daemon.log`, so they can contain the broker host name or
+  IP address.
+- Device status is forwarded as contract fields only.
+- Credentials configured for a plain `http://` Url produce a settings warning, and the dialog asks
+  before it saves them or uses them for a Test push.
+- The device status contract excludes SSID, passwords, PoP, IP and MAC addresses.
+- The host label is opt-in.
+- Tokens are never stored in plain text and never logged.
+
 ### Logging and Diagnostics
 
 - Log file: `%LocalAppData%\ResourceMonitorDaemon\daemon.log`, rolled to
@@ -161,6 +310,16 @@ schedule, and never blocks the sampling loop:
 - Pause/resume confirmations use the same balloon helper, so clicking them never
   opens the wizard.
 - "查看日志 (Log)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
+- "可观测性 (Observability)…" opens `ObservabilityForm` for the optional Loki sink.
+  - Fields: Enabled, Url, AuthMode, Username, Token, TenantId, IncludeHostLabel and
+    MetricsIntervalSeconds.
+  - It uses the same only-changed-fields and env read-only rules as the settings dialog.
+  - The token box is masked and never shows a stored token. An empty box keeps the saved token,
+    with the placeholder "已保存 (saved)". Typing replaces the token, which is stored
+    DPAPI-encrypted. "清除 (Clear)" removes it.
+  - "测试连接 (Test)" pushes one line using the values in the dialog and shows the HTTP result.
+  - Before saving or testing credentials for a plain-`http` URL, the dialog asks for confirmation.
+  - The dialog is modeless; Cancel closes it without saving, and Exit closes it.
 - Exit hides the icon and disables the menu immediately (re-entry guarded) and ends
   the message loop; `Program.Main` is the single owner of shutdown and stops the
   host once (3 s budget) before disposing it. `MonitorService.StopAsync` is also
@@ -183,6 +342,15 @@ schedule, and never blocks the sampling loop:
 - `MetricPayloadFormatter.cs`: formats and clamps percentage payloads for MQTT.
 - `NativeMemory.cs`: wraps Windows memory status.
 - `DaemonLogger.cs`: rotating file logger provider.
+- `IMetricsObserver.cs`: per-sample hook used by the metrics stream.
+- `Observability/`: optional Loki sink.
+  - `LokiSettings`, `LokiSettingsLoader` (with the validator), `LokiUrl`: settings and URL rules.
+  - `UserLokiSettingsPatch`, `SecretProtector` (DPAPI): persistence and token protection.
+  - `LokiEntry` (labels, monotonic clock), `LokiEntryQueue`, `LokiPushClient` (payload, HTTP,
+    redaction), `LokiSink`: the push pipeline.
+  - `LokiLoggerProvider`, `LokiForwarders` (metrics and device status): the sources.
+  - `ObservabilityService`: hosted service and DI registration.
+  - `ObservabilityForm`: the dialog.
 - `SettingsForm.cs`, `TrayContext.cs`: Windows tray menu and settings dialog.
 - `Provisioning/`: BLE Wi-Fi provisioning client library (see "Provisioning client" below).
 - `Pairing/`: pairing wizard form, `PairingOutcomePresenter` (pure decisions and messages),
@@ -480,6 +648,24 @@ The C# test runner covers:
 - log rotation under concurrent writers;
 - `ReconnectBackoff` doubling, cap, reset, flapping broker, stable-connection reset,
   30 s stability cap and state preserved across `Reconfigure`;
+- `StatusTopic` default, validation and collision handling.
+- Loki sink:
+  - push payload shape, labels and ns timestamps strictly increasing per stream, also across
+    threads;
+  - URL path joining and user-info stripping;
+  - auth headers per mode, tenant header and gzip;
+  - the token never appearing in `ToString`, results or logs (capturing logger);
+  - drop-oldest queue and its counter, batching by size and interval with a fake clock;
+  - 429/5xx retry with backoff and Retry-After, and 4xx drop logged once;
+  - the recursion guard;
+  - settings parse/sanitize, file tokens ignored, env token precedence, DPAPI round-trip and
+    no env or plain token persisted;
+  - live reload through the file watcher;
+  - status payload validation;
+  - an end-to-end run against a loopback `HttpListener` fake Loki (gzip-decoded logs, metrics,
+    status, the Test push and the shutdown flush), the 2 s budget against a Loki that never
+    answers, and `resmon/status` over the in-process broker, including resubscribing after a
+    broker restart and following a topic change.
 - `MqttConnection` against an in-process loopback MQTTnet broker: non-blocking ticks,
   one notification per outage, reconnect notice, fallback address, and unchanged
   topic/payload/QoS/retain on the wire; dispose with unreachable host + fallback
@@ -541,3 +727,8 @@ dotnet .tmpbuild\ResourceMonitorDaemon.Tests.dll
   environment variables, not the settings dialog.
 - Retry granularity is one sample tick, so the effective minimum retry delay is
   `SampleIntervalMs`.
+- Loki: entries queued in memory are lost if the process is killed, and entries still queued
+  after the 2 s shutdown budget are dropped; there is no disk buffer. The status stream depends
+  on firmware that publishes `resmon/status`. `MinLevel` below the `Logging` filter level has no
+  effect until that filter is lowered too. Batching, queue and gzip settings are editable only
+  in JSON or environment variables, not in the dialog.

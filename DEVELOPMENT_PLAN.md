@@ -24,6 +24,11 @@ Completed implementation summary:
 - CPU and memory use `resmon/cpu` and `resmon/mem`.
 - Each payload is an ASCII decimal percentage in the range `0..100`.
 - The ESP32 rejects invalid values and fades each stale metric independently.
+- Optional observability: the firmware publishes the device status topic
+  `resmon/status`. The daemon subscribes to it and can push its log, a metrics
+  line and the device status to the user's own Grafana Loki. Loki is disabled
+  by default, and the token is stored DPAPI-encrypted. Contract and streams:
+  COMMUNICATION.md; see Observability below.
 - Firmware Wi-Fi credentials are no longer tracked. Local development uses
   ignored `firmware/src/secrets.h`, copied from
   `firmware/src/secrets.example.h`.
@@ -317,7 +322,7 @@ gauges are known and documented.
 
 ## Observability
 
-Status: Firmware side implemented (2026-11-22); not yet validated on hardware
+Status: Firmware and daemon sides implemented (2026-11-22); not yet validated on hardware
 
 - Firmware: `resmon/status` (QoS 0, not retained, every 10 s while Wi-Fi is
   connected, the first one 10 s after the broker starts) carries schema version,
@@ -325,9 +330,11 @@ Status: Firmware side implemented (2026-11-22); not yet validated on hardware
   DAC presence. Contract: [COMMUNICATION.md](COMMUNICATION.md). Formatting is
   a pure, unit-tested header (`firmware/include/status_payload.h`); feature
   flag `ENABLE_STATUS_TOPIC` in `firmware/src/config.h`.
-- Daemon: subscribe to `resmon/status`, treat a missing topic as normal (older
-  firmware), and optionally forward daemon logs, metrics and the device status
-  to Grafana Loki (separate daemon change).
+- Daemon: subscribes to `Device:StatusTopic` (default `resmon/status`) after
+  every reconnect and treats a missing topic as normal (older firmware). It
+  can optionally forward its logs, a metrics line and the validated,
+  rate-limited device status to the user's own Grafana Loki (README
+  "Optional: Grafana Loki"; disabled by default).
 - Remaining: confirm on hardware that a subscribed client (e.g.
   `mosquitto_sub -h resmon.local -t resmon/status -v`) receives one message
   every 10 s and that the CPU/MEM display is unaffected. Also check that a

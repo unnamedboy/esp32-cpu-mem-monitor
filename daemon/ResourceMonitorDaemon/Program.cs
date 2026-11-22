@@ -2,6 +2,7 @@ using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ResourceMonitorDaemon.Observability;
 
 namespace ResourceMonitorDaemon
 {
@@ -34,6 +35,7 @@ namespace ResourceMonitorDaemon
                     services.AddSingleton<ISettingsStore>(provider =>
                         new UserSettingsStore(DaemonPaths.UserSettingsPath, provider.GetRequiredService<ILogger<UserSettingsStore>>()));
                     services.AddSingleton(provider => new MqttConnection(provider.GetRequiredService<ILogger<MqttConnection>>()));
+                    services.AddObservability();   // optional Loki sink; before MonitorService so it stops last
                     services.AddSingleton<MonitorService>();
                     services.AddHostedService(provider => provider.GetRequiredService<MonitorService>());
                 })
@@ -42,6 +44,7 @@ namespace ResourceMonitorDaemon
                     logging.ClearProviders();
                     logging.AddConsole();
                     logging.AddProvider(new DaemonLoggerProvider(_logFilePath));
+                    logging.AddLokiForwarding();
                 });
 
             using var host = builder.Build();

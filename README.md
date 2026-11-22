@@ -18,7 +18,9 @@ The .NET app in [daemon/ResourceMonitorDaemon](daemon/ResourceMonitorDaemon) cur
 - reconnects in the background with bounded exponential backoff, without stalling sampling, and can try a fallback IPv4 address;
 - includes a tray UI with pause/resume, a settings dialog, a log viewer and once-per-outage MQTT notifications;
 - includes a pairing wizard that sets up the ESP32's Wi-Fi over Bluetooth LE and remembers the device's IP address (not yet tested on real hardware);
-- clamps values to the valid `0.0..100.0` range before publishing.
+- clamps values to the valid `0.0..100.0` range before publishing;
+- subscribes to the optional device status topic `resmon/status` (see [COMMUNICATION.md](COMMUNICATION.md#device-status-resmonstatus));
+- can optionally forward its log, a metrics line and the device status to your own Grafana Loki (off by default; see [Optional: Grafana Loki](#optional-grafana-loki)).
 
 ### ESP32 firmware
 
@@ -55,7 +57,7 @@ The firmware in [firmware/src/main.cpp](firmware/src/main.cpp) currently does th
 - CPU topic: `resmon/cpu` (default, configurable)
 - memory topic: `resmon/mem` (default, configurable)
 - payload: plain ASCII percentage, for example `42.5`
-- device status topic (ESP32 → subscribers): `resmon/status`, compact JSON, see [COMMUNICATION.md](COMMUNICATION.md)
+- device status topic (ESP32 → subscribers such as the daemon): `resmon/status`, compact JSON, optional, see [COMMUNICATION.md](COMMUNICATION.md#device-status-resmonstatus)
 - transport: MQTT only
 - QoS: 0 (at-most-once)
 
@@ -68,7 +70,7 @@ The ESP32 treats each metric independently and expires stale values after a five
 - [firmware/include](firmware/include) — pure, unit-tested firmware helpers (metric conversion, provisioning boot decision, pairing code, serial command parsing, BOOT button hold-and-release window, `resmon/status` payload formatting)
 - [firmware/test](firmware/test) — Unity tests for the helpers in `firmware/include`
 - [daemon/ResourceMonitorDaemon](daemon/ResourceMonitorDaemon) — Windows daemon app
-- [daemon/ResourceMonitorDaemon.Tests](daemon/ResourceMonitorDaemon.Tests) — zero-dependency tests for payload formatting, settings, backoff, MQTT connection handling, the provisioning client and the pairing wizard's decisions
+- [daemon/ResourceMonitorDaemon.Tests](daemon/ResourceMonitorDaemon.Tests) — zero-dependency tests for payload formatting, settings, backoff, MQTT connection handling, the provisioning client, the pairing wizard's decisions and the optional Loki sink
 - [assets/SQ52_CPU_MEM_1to1.svg](assets/SQ52_CPU_MEM_1to1.svg) — front-panel sticker asset for a CPU/MEM gauge face, intended as a replacement for a generic voltmeter face
 
 ## Local setup
@@ -180,6 +182,76 @@ The Wi-Fi password is used only for that attempt. The password box is cleared af
 | Lost the Bluetooth link | The wizard first tries the configured `Host:Port` (default `resmon.local:1883`) for 15 s. If the device is unreachable, rescan; if it no longer appears, hold BOOT for 5–15 s and release, then pair again. |
 | The device did not accept another attempt | Hold BOOT for 5–15 s and release, then rescan and pair. Don't just power-cycle it: it would restart with the earlier Wi-Fi settings and without Bluetooth pairing. |
 | The device is already connected to another network | It joined a different Wi-Fi in an earlier attempt and was not changed. To switch networks, hold BOOT for 5–15 s, release, and pair again. |
+
+### Optional: Grafana Loki
+
+The daemon can push its own log, a metrics line and the ESP32 status (`resmon/status`) to **your own** Grafana Loki. This is off by default. The repository holds no URL, tenant or token: you enter them yourself.
+
+1. Get a Loki push endpoint:
+   - **Grafana Cloud**: in your stack's Loki details, use the URL (for example `https://logs-prod-xxx.grafana.net`), the numeric **user/instance ID** as Username, and an access-policy token with the `logs:write` scope. Use AuthMode `Basic`.
+   - **Self-hosted Loki**: for example `http://loki:3100`, usually AuthMode `None`. Set TenantId only if multi-tenancy is enabled (sent as `X-Scope-OrgID`). If you use credentials, use `https`; the dialog warns before it saves credentials for a plain-`http` URL.
+2. Open the tray menu **可观测性 (Observability)…**, tick **Enabled**, and fill in Url, Auth mode, Username and Token. Then click **测试连接 (Test)**. It pushes one test line and shows the HTTP result, for example `HTTP 204 No Content`.
+3. Click **保存 (Save)**. The change takes effect immediately, without a restart. Disabling the sink stops collection and discards anything still queued.
+
+`/loki/api/v1/push` is appended to the Url only when it has no path, so a full push URL or a reverse-proxy path also works.
+
+The token is saved only as Windows DPAPI ciphertext (`TokenProtected`). Only the same Windows user on the same PC can decrypt it, and so can any program running as that user. It is stored in `%LocalAppData%\ResourceMonitorDaemon\settings.json`. Leaving the token box empty keeps the saved token, and **清除 (Clear)** removes it. For automation, set `RESMON_Observability__Loki__Token`. That variable takes precedence and is never written to disk. A plain `Token` key in a JSON file is ignored with a warning. The daemon never logs the token, the `Authorization` header or the URL path. Its startup line shows only whether Loki is enabled, the URL host, the auth mode and whether a token is configured.
+
+Settings (section `Observability:Loki`; environment form `RESMON_Observability__Loki__<Name>`):
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Enabled` | `false` | Master switch |
+| `Url` | empty | Loki base URL or full push URL (no user info) |
+| `AuthMode` | `None` | `None`, `Basic` (Username + token) or `Bearer` (token) |
+| `Username` | empty | Basic-auth user, for example the Grafana Cloud instance ID |
+| `TenantId` | empty | Optional `X-Scope-OrgID` |
+| `IncludeHostLabel` | `false` | Adds `host="<PC name>"` to every stream |
+| `MetricsIntervalSeconds` | `10` | One metrics line per interval; `0` turns it off |
+| `MinLevel` | `Information` | Minimum daemon log level forwarded (the normal `Logging` filter applies first) |
+| `BatchMaxEntries` / `QueueCapacity` / `FlushIntervalMs` | `500` / `5000` / `2000` | Batching. The queue is bounded: when it is full, the oldest entries are dropped and the drops are reported in the local log. |
+| `Gzip` | `true` | Sends the request body with `Content-Encoding: gzip` |
+
+Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-daemon--grafana-loki-streams). What is sent:
+
+- daemon log lines at or above `MinLevel`, redacted before they are sent:
+  - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`, including their short 8.3 forms such as `C:\Users\ABCDEF~1`;
+  - the profile folder in any other absolute path (`C:\Users\<name>\…` or `\\server\Users\<name>\…`, either slash, spaces allowed) becomes `<user>`. The name ends at the next separator, a quote, a bracket, a comma, a semicolon, a character that is invalid in file names, or the end of the line, so a folder name that itself contains `' ( ) , ;` is only partly replaced. The shared folders `Public`, `Default`, `Default User` and `All Users` are kept, and relative paths and URLs are not touched;
+  - the Windows user name becomes `<user>`. This is a whole-word match, so if your account name is a common word (for example `admin`), that word is replaced in ordinary text too, e.g. "Run as <user>". Privacy wins over readability here. Names shorter than 3 characters (for example a two-character Chinese account name) are not replaced in free text, because that would mangle ordinary words; paths that contain them are still redacted by the folder rules above;
+  - the PC name becomes `<host>`, unless you enabled `IncludeHostLabel`.
+
+  Apart from this, the lines are the same text as `daemon.log` and can contain the broker host or IP address you configured.
+- CPU and memory percentages, memory used/total in GB, and the MQTT state.
+- the device status, with only the documented fields and at most one message every 5 s. It contains no SSID, password, IP or MAC address.
+
+Messages from the sink itself, for example failed pushes, stay in the local log only. The sink never blocks or slows sampling or MQTT publishing. Failed pushes are retried with backoff up to 60 s, and on Exit the daemon spends at most 2 s flushing.
+During an outage (network errors, timeouts, 5xx) the daemon keeps retrying indefinitely. Nothing is given up; entries are lost only if the bounded queue (`QueueCapacity`) overflows, which drops the oldest entries and reports it in the local log. Entries older than Loki's own limit (`reject_old_samples_max_age`, about a week by default) are rejected by Loki with a 400, which drops that batch. For a rejected batch, Loki usually stores the valid entries and reports `total ignored: N out of M`; the daemon then counts only those N as dropped. If Loki does not say, the local log says the batch was rejected and that Loki may have accepted some entries.
+
+A batch is at most 1 MiB, measured as the JSON actually sent: raw UTF-8, with the characters that must still be escaped (such as emoji, U+2028 and private-use characters) counted at their escaped size. A batch that is too large (413), or that is throttled (429) three times, is split in half; splitting never loses data. A single entry that still gets 413, or still gets 429 without Retry-After three times, is dropped and counted in the local log.
+
+Example LogQL queries (Grafana Explore):
+
+```logql
+# Average CPU % over 5 minutes
+avg_over_time({app="resmon-daemon",kind="metrics"} | json | unwrap cpu [5m])
+
+# Peak memory %
+max_over_time({app="resmon-daemon",kind="metrics"} | json | unwrap mem [5m])
+
+# Fraction of metrics samples (one per MetricsIntervalSeconds) in the last hour with the ESP32 broker unreachable
+sum(count_over_time({app="resmon-daemon",kind="metrics"} | json | mqtt="disconnected" [1h]))
+  / sum(count_over_time({app="resmon-daemon",kind="metrics"} [1h]))
+
+# Daemon warnings and errors
+{app="resmon-daemon",kind="log",level=~"warn|error|critical"}
+
+# Device free heap (lowest in 15 minutes) and Wi-Fi signal
+min_over_time({app="resmon-device",kind="status"} | json | unwrap heap_free [15m])
+avg_over_time({app="resmon-device",kind="status"} | json | unwrap rssi [5m])
+
+# Device restarts (uptime reset) with firmware build
+{app="resmon-device",kind="status"} | json | uptime_s < 60 | line_format "{{.build}} heap={{.heap_free}}"
+```
 
 ### Build and test
 
