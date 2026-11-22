@@ -92,18 +92,26 @@ namespace ResourceMonitorDaemon
                     var delay = nextTick - clock.Elapsed;
                     if (delay > TimeSpan.Zero && await _settingsChanged.WaitAsync(delay, stoppingToken))
                     {
-                        // Woken by a settings change: apply it now, then keep waiting.
-                        if (ApplyPendingSettings(out var intervalChanged))
+                        // Woken by a settings change: apply it now, then keep waiting. Like a
+                        // sample, a failure here is logged and the loop keeps running.
+                        try
                         {
-                            if (intervalChanged)
+                            if (ApplyPendingSettings(out var intervalChanged))
                             {
-                                nextTick = clock.Elapsed + SampleInterval;
-                            }
+                                if (intervalChanged)
+                                {
+                                    nextTick = clock.Elapsed + SampleInterval;
+                                }
 
-                            if (!_isPaused)
-                            {
-                                _connection.MaintainConnection(); // reconnects at once on endpoint change
+                                if (!_isPaused)
+                                {
+                                    _connection.MaintainConnection(); // reconnects at once on endpoint change
+                                }
                             }
+                        }
+                        catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                        {
+                            _logger.LogError(ex, "An error occurred while applying changed settings.");
                         }
 
                         continue;
@@ -167,11 +175,10 @@ namespace ResourceMonitorDaemon
         private void OnSettingsChanged(DeviceSettings updated)
         {
             Volatile.Write(ref _pendingSettings, updated);
-            if (updated == Volatile.Read(ref _settings))
-            {
-                return; // duplicate reload (file watcher fires several times per save)
-            }
 
+            // Always wake, even if the value equals the current settings: an A→B→A revert can
+            // race with the loop applying B. The semaphore's cap of 1 prevents spinning, and the
+            // loop ignores values equal to what is already in effect.
             try
             {
                 _settingsChanged.Release();
