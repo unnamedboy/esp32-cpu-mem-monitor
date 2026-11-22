@@ -1,21 +1,7 @@
 # Roadmap
 
-## Done
-
-- MQTT metrics from the Windows daemon to a broker on the ESP32, with payload validation,
-  clamped DAC output and stale-value decay on the device.
-- Non-blocking Wi-Fi on the firmware with bounded reconnect backoff; no credentials in
-  source control (optional ignored `secrets.h` for development).
-- Layered daemon settings (defaults, `appsettings.json`, per-user file, `RESMON_`
-  environment variables) applied live, with a tray settings dialog.
-- Non-blocking daemon reconnects with backoff and a fallback IPv4 address.
-- BLE Wi-Fi provisioning (Security1 with a pairing code) in the firmware, and a pairing
-  wizard in the daemon that reads the code over USB and saves the device's IP address.
-- `resmon/status` device health topic, and optional forwarding of logs, metrics and
-  status to the user's own Grafana Loki.
-- English and Simplified Chinese UI.
-- Pinned, reproducible firmware builds; unit tests for the firmware's pure logic and for
-  the daemon.
+What already works is listed under [Features](../README.md#features) and
+[Status and limitations](../README.md#status-and-limitations) in the README.
 
 ## Next
 

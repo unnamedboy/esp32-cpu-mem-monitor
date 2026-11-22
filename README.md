@@ -42,10 +42,20 @@ This is a working prototype, not a finished product; see [Status](#status-and-li
 
 ## Quick start
 
+### 0. Wiring (optional)
+
+There is no verified wiring guide for the DAC and gauges yet. What is fixed: the DAC is
+a GP8413-compatible module (DFRobot GP8XXX library) at I2C address `0x59`, on the I2C
+bus at GPIO21 (SDA) and GPIO22 (SCL). The firmware runs fine with nothing attached, so
+you can start with just the board on USB. Before wiring anything, read the
+[connection table](docs/hardware.md#connections) and the
+[safety notes](docs/hardware.md#electrical-safety).
+
 ### 1. Flash the firmware
 
 From the repository root, with the board on USB (`pio` is the PlatformIO CLI; in VS Code,
-use a PlatformIO terminal):
+use a PlatformIO terminal). If no COM port appears for the board, install the driver
+for its USB-serial chip (usually CP210x or CH340):
 
 ```sh
 pio run -e esp32dev -t upload
@@ -75,7 +85,7 @@ Windows, put a shortcut to the exe in your Startup folder.
 
 ### 3. Pair the device
 
-Right-click the tray icon, choose **Pair device…** (配对设备…), pick the
+Right-click the tray icon, choose **Pair device…**, pick the
 `PROV_RESMON_…` device, check the pairing code, enter your Wi-Fi name and password, and
 click **Pair**. When the device has joined Wi-Fi, the wizard saves its IP address and
 the daemon connects; the gauges start moving.
@@ -86,7 +96,7 @@ is running, then release it. Details and troubleshooting:
 
 ## Configuration
 
-Most people only need the tray's **⚙ Settings…** (设置…) dialog. Settings come from
+Most people only need the tray's **⚙ Settings…** dialog. Settings come from
 these layers, lowest to highest priority:
 
 1. built-in defaults;
@@ -118,23 +128,26 @@ The firmware's pins, topics and timings are compile-time settings in
 [`firmware/src/config.h`](firmware/src/config.h).
 
 The log is `%LocalAppData%\ResourceMonitorDaemon\daemon.log` (rolled at 5 MB); open it
-with **View log** (查看日志) in the tray menu.
+with **View log** in the tray menu.
 
 ### Optional: Grafana Loki
 
 The daemon can push its log, a metrics line every 10 s and the device's health messages
 to your own Loki (Grafana Cloud or self-hosted). It is off by default; enable it under
-**Observability…** (可观测性…) in the tray menu. Setup, privacy and example queries:
+**Observability…** in the tray menu. Setup, privacy and example queries:
 [docs/loki.md](docs/loki.md).
 
 ### Language
 
 The tray menu, notifications and dialogs are available in English and Simplified
-Chinese. With `auto` the daemon follows the Windows display language (Simplified
-Chinese for `zh-Hans`, `zh-CN` and `zh-SG`, English otherwise, including Traditional
-Chinese). Change it with **Language** in the settings dialog, or force it with
+Chinese. With `auto` the daemon follows the Windows display language: Simplified
+Chinese display languages get the Chinese UI, everything else (including Traditional
+Chinese) gets English. Change it with **Language** in the settings dialog, or force it with
 `RESMON_Ui__Language`. The menu switches immediately; dialogs that are already open keep
 their language. The log is always English.
+
+The documentation uses the English labels; the Chinese UI has the same layout and menu
+order.
 
 ## Troubleshooting
 
@@ -143,10 +156,10 @@ their language. The log is always English.
 | "MQTT connection failed" notification | Is the ESP32 powered and on the same network? Does `resmon.local` resolve on this PC? Pairing saves the device's IP as a fallback; you can also set **Host** to the IP. The daemon keeps retrying in the background. |
 | Gauges sink to zero | No valid data for 5 s: sending is paused (tray menu), the daemon is not running, or the connection dropped. |
 | Device doesn't show up in the wizard | It is not in pairing mode: use the BOOT gesture (hold 5–15 s, release) and **Rescan**. Check that Bluetooth is on. |
-| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Or type the code from the serial log. |
+| Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read only works with common ESP32 USB-serial chips (CP210x, CH340/CH343/CH9102, FTDI, Espressif native USB). Otherwise type the code from the serial log. |
 | Pairing fails | See the [message table](docs/provisioning.md#if-pairing-fails). Remember the ESP32 needs 2.4 GHz. |
 | Serial log says `DAC not found at 0x59` | Check the DAC wiring and address; the firmware runs on without outputs. |
-| Firmware build stops with `CORE_DEBUG_LEVEL >= 3 is refused` | Keep `-DCORE_DEBUG_LEVEL=1`: higher levels log the Wi-Fi password or flood the pairing serial port. |
+| Firmware build stops with `CORE_DEBUG_LEVEL >= 3 is refused` | Use level 1 (the default in `platformio.ini`) or 2. The build refuses 3 and higher on purpose; see [why](docs/firmware.md#toolchain). |
 
 For anything else, open the log from the tray menu, and set
 `RESMON_Logging__LogLevel__Default=Debug` for more detail.
