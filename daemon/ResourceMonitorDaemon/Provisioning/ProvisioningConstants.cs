@@ -20,8 +20,9 @@ namespace ResourceMonitorDaemon.Provisioning
         public const string ScanEndpoint = "prov-scan";
 
         /// <summary>
-        /// User-facing re-provisioning instruction (pairing contract: hold BOOT 5–15 s, then release;
-        /// holds longer than 15 s are ignored by the firmware).
+        /// Re-provisioning instruction in English, for exception messages and logs (pairing contract:
+        /// hold BOOT 5–15 s, then release; holds longer than 15 s are ignored by the firmware). The UI
+        /// shows <c>Strings.Pairing_ReprovisionInstruction</c> in the UI language instead.
         /// </summary>
         public const string ReprovisionInstruction = "hold its BOOT button for 5–15 seconds, then release it";
 

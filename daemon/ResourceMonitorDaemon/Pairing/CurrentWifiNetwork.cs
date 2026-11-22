@@ -34,8 +34,8 @@ namespace ResourceMonitorDaemon.Pairing
     {
         private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(3);
 
-        private static readonly string[] BandLabels = { "Band", "波段", "频带", "頻帶", "频段", "頻段" };
-        private static readonly string[] ChannelLabels = { "Channel", "信道", "通道", "频道", "頻道" };
+        private static readonly string[] BandLabels = { "Band", "波段", "频带", "頻帶", "频段", "頻段" };   // i18n-allow: netsh output labels, not UI text
+        private static readonly string[] ChannelLabels = { "Channel", "信道", "通道", "频道", "頻道" };   // i18n-allow: netsh output labels, not UI text
         private static readonly Regex HighBand = new(@"(?<![\d.])[56](\.\d+)?\s*GHz", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public static async Task<CurrentWifiInfo?> TryGetAsync(CancellationToken cancellationToken)

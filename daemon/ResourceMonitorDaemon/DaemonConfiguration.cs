@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ResourceMonitorDaemon.Localization;
 using ResourceMonitorDaemon.Observability;
 
 namespace ResourceMonitorDaemon
@@ -74,6 +75,13 @@ namespace ResourceMonitorDaemon
         public static LokiSettings LoadLowerLokiLayers(string appSettingsDirectory) =>
             LokiSettingsLoader.Load(BuildLowerLayers(appSettingsDirectory), new List<string>(), protector: null);
 
+        /// <summary>
+        /// <c>Ui:Language</c> (normalized) from defaults + <c>appsettings.json</c>. The settings dialog
+        /// removes the user value instead of storing a copy of this.
+        /// </summary>
+        public static string LoadLowerUiLanguage(string appSettingsDirectory) =>
+            UiLanguage.Normalize(BuildLowerLayers(appSettingsDirectory)[UiLanguage.ConfigurationKey], out _);
+
         private static IConfiguration BuildLowerLayers(string appSettingsDirectory) =>
             new ConfigurationBuilder()
                 .AddJsonFile(source =>
@@ -93,6 +101,10 @@ namespace ResourceMonitorDaemon
         /// </summary>
         public static IReadOnlySet<string> GetEnvironmentOverriddenLokiFields() =>
             GetEnvironmentOverriddenFields(LokiSettings.SectionName, UserLokiSettingsPatch.FieldNames.Append(LokiSettings.TokenKey).ToList());
+
+        /// <summary>True when <c>RESMON_Ui__Language</c> is set (it wins over the user settings file).</summary>
+        public static bool IsUiLanguageOverriddenByEnvironment() =>
+            GetEnvironmentOverriddenFields(UiLanguage.SectionName, new[] { UiLanguage.LanguageKey }).Count > 0;
 
         private static IReadOnlySet<string> GetEnvironmentOverriddenFields(string sectionPath, IReadOnlyList<string> fieldNames)
         {

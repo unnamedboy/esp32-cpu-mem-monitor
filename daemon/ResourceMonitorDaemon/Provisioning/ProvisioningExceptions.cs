@@ -1,8 +1,11 @@
 namespace ResourceMonitorDaemon.Provisioning
 {
     /// <summary>
-    /// Base type for provisioning failures. Messages are user-presentable and must never contain the
-    /// Wi-Fi passphrase or the pairing code.
+    /// Base type for provisioning failures. Messages are English, end up in the log and must never
+    /// contain the Wi-Fi passphrase or the pairing code. The wizard does not show them: it maps the
+    /// exception type and code (<see cref="ProvisioningTransportError"/>,
+    /// <see cref="PairingCodeRejectionReason"/>, ...) to a localized text
+    /// (<c>Pairing.PairingOutcomePresenter</c>).
     /// </summary>
     public class ProvisioningException : Exception
     {

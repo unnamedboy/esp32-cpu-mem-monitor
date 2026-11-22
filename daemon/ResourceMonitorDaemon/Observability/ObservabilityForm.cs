@@ -1,24 +1,34 @@
+using System.Globalization;
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
+using ResourceMonitorDaemon.Localization;
 
 namespace ResourceMonitorDaemon.Observability
 {
     /// <summary>
-    /// Small dialog for the optional Grafana Loki sink (tray "可观测性 (Observability)…").
+    /// Small dialog for the optional Grafana Loki sink (tray "Observability…").
     /// </summary>
     /// <remarks>
     /// Same rules as <see cref="SettingsForm"/>: shows the effective values, fields overridden by
     /// <c>RESMON_Observability__Loki__*</c> are read-only and never saved, and Save touches only
     /// fields the user changed (<see cref="UserLokiSettingsPatch.ApplyDialogEdit"/>). The token box
     /// is masked and never shows a stored token: an empty box keeps the saved token, typing replaces
-    /// it (stored DPAPI-encrypted), and "清除 (Clear)" removes it. "测试连接 (Test)" pushes one line
-    /// with the values currently in the dialog and shows the HTTP result.
+    /// it (stored DPAPI-encrypted), and "Clear" removes it. "Test" pushes one line with the values
+    /// currently in the dialog and shows the HTTP result. Every text comes from the
+    /// <see cref="StringSet"/> taken when the dialog is created, so it keeps its language while open;
+    /// validation messages are shown in that language and logged in English.
     /// </remarks>
     public sealed class ObservabilityForm : Form
     {
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(12);
 
+        /// <summary>Example endpoints; the same in every language.</summary>
+        private const string UrlPlaceholder = "https://logs-prod-xxx.grafana.net  /  http://loki:3100";
+
+        private readonly StringSet _text = Strings.Current;   // the dialog's language, fixed when it opens
         private readonly IObservabilitySettingsStore _store;
         private readonly ISecretProtector _protector;
+        private readonly ILogger _logger;
         private readonly LokiSettings _effective;
         private readonly LokiSettings _lowerLayers;
         private readonly LokiSettings _displayed;
@@ -45,10 +55,12 @@ namespace ResourceMonitorDaemon.Observability
             UserLokiSettingsPatch saved,
             IObservabilitySettingsStore store,
             ISecretProtector protector,
-            IReadOnlySet<string> environmentOverriddenFields)
+            IReadOnlySet<string> environmentOverriddenFields,
+            ILogger logger)
         {
             _store = store;
             _protector = protector;
+            _logger = logger;
             _effective = effective;
             _lowerLayers = lowerLayers;
             _environmentFields = environmentOverriddenFields;
@@ -58,7 +70,7 @@ namespace ResourceMonitorDaemon.Observability
                 .Where(environmentOverriddenFields.Contains)
                 .ToList();
 
-            Text = ObservabilityText.WindowTitle;
+            Text = _text.Observability_WindowTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -78,8 +90,8 @@ namespace ResourceMonitorDaemon.Observability
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            _enabled = new CheckBox { Text = ObservabilityText.EnabledCheckBox, Checked = effective.Enabled, AutoSize = true };
-            _url = new TextBox { Text = effective.Url, Width = 340, PlaceholderText = ObservabilityText.UrlPlaceholder };
+            _enabled = new CheckBox { Text = _text.Observability_EnabledCheckBox, Checked = effective.Enabled, AutoSize = true };
+            _url = new TextBox { Text = effective.Url, Width = 340, PlaceholderText = UrlPlaceholder };
             _authMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
             _authMode.Items.AddRange(Enum.GetNames<LokiAuthMode>());
             _authMode.SelectedItem = effective.AuthMode.ToString();
@@ -88,12 +100,12 @@ namespace ResourceMonitorDaemon.Observability
             {
                 Width = 240,
                 UseSystemPasswordChar = true,
-                PlaceholderText = _tokenFromEnvironment ? ObservabilityText.TokenFromEnvironmentPlaceholder : _hasSavedToken ? ObservabilityText.TokenSavedPlaceholder : ObservabilityText.TokenNotSetPlaceholder,
+                PlaceholderText = _tokenFromEnvironment ? _text.Observability_TokenFromEnvironment : _hasSavedToken ? _text.Observability_TokenSaved : _text.Observability_TokenNotSet,
             };
-            _clearToken = new Button { Text = ObservabilityText.ClearTokenButton, AutoSize = true, Enabled = _hasSavedToken && !_tokenFromEnvironment };
+            _clearToken = new Button { Text = _text.Observability_ClearToken, AutoSize = true, Enabled = _hasSavedToken && !_tokenFromEnvironment };
             _clearToken.Click += OnClearToken;
-            _tenant = new TextBox { Text = effective.TenantId, Width = 200, PlaceholderText = ObservabilityText.TenantPlaceholder };
-            _hostLabel = new CheckBox { Text = ObservabilityText.HostLabelCheckBox, Checked = effective.IncludeHostLabel, AutoSize = true };
+            _tenant = new TextBox { Text = effective.TenantId, Width = 200, PlaceholderText = _text.Observability_TenantPlaceholder };
+            _hostLabel = new CheckBox { Text = _text.Observability_HostLabelCheckBox, Checked = effective.IncludeHostLabel, AutoSize = true };
             _metricsInterval = new NumericUpDown
             {
                 Minimum = LokiSettingsValidator.MinMetricsIntervalSeconds,
@@ -102,10 +114,10 @@ namespace ResourceMonitorDaemon.Observability
                 Width = 100,
             };
 
-            AddField(layout, ObservabilityText.EnabledLabel, nameof(LokiSettings.Enabled), _enabled);
-            AddField(layout, ObservabilityText.UrlLabel, nameof(LokiSettings.Url), _url);
-            AddField(layout, ObservabilityText.AuthModeLabel, nameof(LokiSettings.AuthMode), _authMode);
-            AddField(layout, ObservabilityText.UsernameLabel, nameof(LokiSettings.Username), _username);
+            AddField(layout, _text.Observability_Enabled, nameof(LokiSettings.Enabled), _enabled);
+            AddField(layout, _text.Observability_Url, nameof(LokiSettings.Url), _url);
+            AddField(layout, _text.Observability_AuthMode, nameof(LokiSettings.AuthMode), _authMode);
+            AddField(layout, _text.Observability_Username, nameof(LokiSettings.Username), _username);
             var tokenRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             tokenRow.Controls.Add(_token);
             tokenRow.Controls.Add(_clearToken);
@@ -114,12 +126,12 @@ namespace ResourceMonitorDaemon.Observability
                 _token.ReadOnly = true;
             }
 
-            AddRow(layout, (_tokenFromEnvironment ? ObservabilityText.TokenLabel + ObservabilityText.EnvironmentSuffix : ObservabilityText.TokenLabel) + ":", tokenRow);
-            AddField(layout, ObservabilityText.TenantLabel, nameof(LokiSettings.TenantId), _tenant);
-            AddField(layout, ObservabilityText.HostLabelLabel, nameof(LokiSettings.IncludeHostLabel), _hostLabel);
-            AddField(layout, ObservabilityText.MetricsIntervalLabel, nameof(LokiSettings.MetricsIntervalSeconds), _metricsInterval);
+            AddRow(layout, _tokenFromEnvironment ? _text.Common_EnvFieldLabel(_text.Observability_Token) : _text.Common_FieldLabel(_text.Observability_Token), tokenRow);
+            AddField(layout, _text.Observability_Tenant, nameof(LokiSettings.TenantId), _tenant);
+            AddField(layout, _text.Observability_HostLabel, nameof(LokiSettings.IncludeHostLabel), _hostLabel);
+            AddField(layout, _text.Observability_MetricsInterval, nameof(LokiSettings.MetricsIntervalSeconds), _metricsInterval);
 
-            _test = new Button { Text = ObservabilityText.TestButton, AutoSize = true };
+            _test = new Button { Text = _text.Observability_Test, AutoSize = true };
             _test.Click += OnTest;
             _testResult = new Label { AutoSize = true, MaximumSize = new Size(360, 0), Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) };
             var testRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
@@ -127,15 +139,15 @@ namespace ResourceMonitorDaemon.Observability
             testRow.Controls.Add(_testResult);
             AddRow(layout, string.Empty, testRow);
 
-            AddNote(layout, ObservabilityText.TokenNote, SystemColors.GrayText);
-            AddNote(layout, ObservabilityText.SavedToNote(store.FilePath), SystemColors.GrayText);
+            AddNote(layout, _text.Observability_TokenNote, SystemColors.GrayText);
+            AddNote(layout, _text.Common_SavedTo(store.FilePath), SystemColors.GrayText);
             if (EnvironmentOverriddenFields.Count > 0)
             {
-                AddNote(layout, ObservabilityText.EnvironmentFieldsNote(EnvironmentOverriddenFields), Color.DarkOrange);
+                AddNote(layout, _text.Common_EnvironmentFieldsNote(string.Join(", ", EnvironmentOverriddenFields)), Color.DarkOrange);
             }
 
-            var save = new Button { Text = ObservabilityText.SaveButton, AutoSize = true };
-            var cancel = new Button { Text = ObservabilityText.CancelButton, AutoSize = true, DialogResult = DialogResult.Cancel };
+            var save = new Button { Text = _text.Common_Save, AutoSize = true };
+            var cancel = new Button { Text = _text.Common_Cancel, AutoSize = true, DialogResult = DialogResult.Cancel };
             save.Click += OnSave;
 
             // The form is shown modeless, where a button's DialogResult does not close it.
@@ -179,7 +191,7 @@ namespace ResourceMonitorDaemon.Observability
                 }
             }
 
-            AddRow(layout, (fromEnvironment ? label + ObservabilityText.EnvironmentSuffix : label) + ":", control);
+            AddRow(layout, fromEnvironment ? _text.Common_EnvFieldLabel(label) : _text.Common_FieldLabel(label), control);
         }
 
         private static void AddRow(TableLayoutPanel layout, string label, Control control)
@@ -224,38 +236,38 @@ namespace ResourceMonitorDaemon.Observability
         {
             _clearRequested = true;
             _token.Text = string.Empty;
-            _token.PlaceholderText = ObservabilityText.TokenWillBeClearedPlaceholder;
+            _token.PlaceholderText = _text.Observability_TokenWillBeCleared;
             _clearToken.Enabled = false;
         }
 
         private async void OnTest(object? sender, EventArgs e)
         {
             var candidate = ReadControls() with { Token = CandidateToken() };
-            if (LokiSettingsValidator.ValidateToken(candidate.Token) is { } tokenError)
+            if (LokiSettingsValidator.TokenProblem(candidate.Token) is { } tokenError)
             {
-                ShowTestResult(false, tokenError);
+                ShowTestResult(false, tokenError.Format(_text.Culture));
                 return;
             }
 
             if (LokiUrl.SendsCredentialsInsecurely(candidate)
-                && MessageBox.Show(this, ObservabilityText.InsecureTestQuestion, ObservabilityText.MessageBoxCaption, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                && MessageBox.Show(this, _text.Observability_InsecureTestQuestion, _text.Observability_MessageBoxCaption, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
-                ShowTestResult(null, ObservabilityText.TestNotSent);
+                ShowTestResult(null, _text.Observability_TestNotSent);
                 return;
             }
 
             _test.Enabled = false;
-            ShowTestResult(null, ObservabilityText.Testing);
+            ShowTestResult(null, _text.Observability_Testing);
             _testCancellation?.Dispose();
             _testCancellation = new CancellationTokenSource(TestTimeout);
             try
             {
                 var result = await LokiPushClient.TestAsync(candidate, _testCancellation.Token);
-                ShowTestResult(result.Outcome == LokiPushOutcome.Success, result.ToString());
+                ShowTestResult(result.Outcome == LokiPushOutcome.Success, DescribeTestResult(result, _text.Culture));
             }
             catch (OperationCanceledException)
             {
-                ShowTestResult(false, ObservabilityText.TestCancelled);
+                ShowTestResult(false, _text.Observability_TestCancelled);
             }
             catch (Exception ex)
             {
@@ -269,6 +281,13 @@ namespace ResourceMonitorDaemon.Observability
                 }
             }
         }
+
+        /// <summary>
+        /// The Test result detail: the HTTP status and the server's reason/body as received, or the
+        /// daemon's own description (timeout, invalid URL) in the UI language.
+        /// </summary>
+        internal static string DescribeTestResult(LokiPushResult result, CultureInfo culture) =>
+            result.StatusCode is null && result.LocalizedDetail is { } detail ? detail.Format(culture) : result.ToString();
 
         private void ShowTestResult(bool? success, string text)
         {
@@ -285,8 +304,8 @@ namespace ResourceMonitorDaemon.Observability
             };
             _testResult.Text = success switch
             {
-                true => ObservabilityText.TestSucceeded(text),
-                false => ObservabilityText.TestFailed(text),
+                true => _text.Observability_TestSucceeded(text),
+                false => _text.Observability_TestFailed(text),
                 null => text,
             };
         }
@@ -296,10 +315,10 @@ namespace ResourceMonitorDaemon.Observability
             var edited = ReadControls();
             var typedToken = _tokenFromEnvironment ? string.Empty : _token.Text.Trim();
 
-            var errors = LokiSettingsValidator.Validate(edited with { Token = typedToken }).ToList();
+            var errors = LokiSettingsValidator.Problems(edited with { Token = typedToken }).Select(problem => problem.Format(_text.Culture)).ToList();
             if (errors.Count > 0)
             {
-                MessageBox.Show(this, string.Join(Environment.NewLine, errors), ObservabilityText.InvalidSettingsCaption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, string.Join(Environment.NewLine, errors), _text.Common_InvalidSettingsCaption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -307,8 +326,8 @@ namespace ResourceMonitorDaemon.Observability
                 && LokiUrl.SendsCredentialsInsecurely(edited with { Token = CandidateToken() })
                 && MessageBox.Show(
                     this,
-                    ObservabilityText.InsecureSaveQuestion,
-                    ObservabilityText.MessageBoxCaption,
+                    _text.Observability_InsecureSaveQuestion,
+                    _text.Observability_MessageBoxCaption,
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning) != DialogResult.Yes)
             {
@@ -337,7 +356,9 @@ namespace ResourceMonitorDaemon.Observability
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.Cryptography.CryptographicException)
             {
-                MessageBox.Show(this, ObservabilityText.SaveFailed(ex.Message), ObservabilityText.MessageBoxCaption, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // ex.Message never contains the token (validators and DPAPI errors do not repeat it).
+                _logger.LogWarning("Observability dialog: could not save to {Path}: {Error}", _store.FilePath, ex.Message);
+                MessageBox.Show(this, SettingsSaveFailure.Describe(ex, _store.FilePath, _text), _text.Observability_MessageBoxCaption, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 

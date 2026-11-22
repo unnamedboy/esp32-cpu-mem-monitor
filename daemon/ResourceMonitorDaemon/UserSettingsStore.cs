@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using ResourceMonitorDaemon.Localization;
 using ResourceMonitorDaemon.Observability;
 
 namespace ResourceMonitorDaemon
@@ -45,7 +46,7 @@ namespace ResourceMonitorDaemon
         /// <exception cref="IOException">The file could not be written.</exception>
         void Update(Action<UserDeviceSettingsPatch> edit);
 
-        /// <summary>Raised after a successful <see cref="Update"/> (or Loki section update).</summary>
+        /// <summary>Raised after a successful <see cref="Update"/> (or Loki / UI section update).</summary>
         event EventHandler? Saved;
     }
 
@@ -72,8 +73,30 @@ namespace ResourceMonitorDaemon
         void UpdateLoki(Action<UserLokiSettingsPatch> edit);
     }
 
+    /// <summary>
+    /// The <c>Ui</c> section of the same user settings file (currently only <c>Ui:Language</c>), kept
+    /// separate from <see cref="ISettingsStore"/> like <see cref="IObservabilitySettingsStore"/>. Same
+    /// rules: only an explicitly chosen value is written, other sections and unknown keys are kept,
+    /// writes are atomic, and the running daemon picks the change up through the file watcher.
+    /// </summary>
+    public interface IUiSettingsStore
+    {
+        /// <summary>Absolute path of the user settings file.</summary>
+        string FilePath { get; }
+
+        /// <summary>The <c>Ui:Language</c> value set in the user file only (as written), or null; never throws.</summary>
+        string? LoadUiLanguage();
+
+        /// <summary>
+        /// Writes <c>Ui:Language</c>; null removes it from the user file (lower layers decide again).
+        /// </summary>
+        /// <exception cref="ArgumentException"><paramref name="language"/> is not one of <see cref="UiLanguage.Values"/>.</exception>
+        /// <exception cref="IOException">The file could not be written.</exception>
+        void UpdateUiLanguage(string? language);
+    }
+
     /// <inheritdoc cref="ISettingsStore"/>
-    public sealed class UserSettingsStore : ISettingsStore, IObservabilitySettingsStore
+    public sealed class UserSettingsStore : ISettingsStore, IObservabilitySettingsStore, IUiSettingsStore
     {
         private static readonly JsonSerializerOptions WriteOptions = new()
         {
@@ -89,6 +112,8 @@ namespace ResourceMonitorDaemon
         private static readonly string[] DeviceSectionPath = { DeviceSettings.SectionName };
         private static readonly string[] LokiSectionPath = LokiSettings.SectionName.Split(ConfigurationPath.KeyDelimiter);
         private static readonly string[] LokiOwnedKeys = UserLokiSettingsPatch.FieldNames.Append(LokiSettings.TokenKey).ToArray();
+        private static readonly string[] UiSectionPath = { UiLanguage.SectionName };
+        private static readonly string[] UiOwnedKeys = { UiLanguage.LanguageKey };
 
         private static readonly JsonDocumentOptions ReadOptions = new()
         {
@@ -180,6 +205,31 @@ namespace ResourceMonitorDaemon
 
             // Describe() shows the URL host only and never the token ciphertext.
             _logger?.LogInformation("Observability settings saved to {Path}: {Patch}", FilePath, patch.Describe());
+            Saved?.Invoke(this, EventArgs.Empty);
+        }
+
+        public string? LoadUiLanguage()
+        {
+            lock (_gate)
+            {
+                return ReadSectionLocked(UiLanguage.SectionName)?[UiLanguage.LanguageKey];
+            }
+        }
+
+        public void UpdateUiLanguage(string? language)
+        {
+            if (language != null && !UiLanguage.IsCanonical(language))
+            {
+                throw new ArgumentException(
+                    $"Invalid UI language '{language}'; expected one of {string.Join(", ", UiLanguage.Values)}.", nameof(language));
+            }
+
+            lock (_gate)
+            {
+                WriteSectionLocked(UiSectionPath, UiOwnedKeys, new JsonObject { [UiLanguage.LanguageKey] = language });
+            }
+
+            _logger?.LogInformation("UI settings saved to {Path}: Language={Language}", FilePath, language ?? "(not set)");
             Saved?.Invoke(this, EventArgs.Empty);
         }
 

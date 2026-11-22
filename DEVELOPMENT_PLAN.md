@@ -47,10 +47,12 @@ Completed implementation summary:
   `%LocalAppData%\ResourceMonitorDaemon\settings.json` < `RESMON_*`
   environment variables, applies changes live, and reconnects in the
   background without blocking sampling.
-- The tray's "配对设备 (Pair device)…" wizard provisions Wi-Fi over BLE
+- The tray's "Pair device…" wizard provisions Wi-Fi over BLE
   (Security1 with an 8-character pairing code) and saves the reported IPv4
   address as `FallbackAddress`. It does not store the Wi-Fi password. It has
   not been tested against a physical ESP32 yet.
+- The tray UI is available in English and Simplified Chinese (`Ui:Language`
+  = `auto` | `en` | `zh-Hans`); logs stay English.
 
 See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
 See [PROVISIONING.md](PROVISIONING.md) for the BLE pairing contract.
@@ -136,8 +138,8 @@ setup wizard without making the real-time sampling path more complex.
    (`RESMON_` prefix, e.g. `RESMON_Device__Host`).
 3. Done: Replace hard-coded daemon constants with `DeviceSettings`
    (validated, sanitized to defaults, applied live via `IOptionsMonitor`).
-4. Done: tray-menu entry "⚙ 设置 (Settings)…" edits and saves settings
-   through `UserSettingsStore`. Done: the "配对设备 (Pair device)…" wizard
+4. Done: tray-menu entry "⚙ Settings…" edits and saves settings
+   through `UserSettingsStore`. Done: the "Pair device…" wizard
    (`Pairing/PairingWizardForm`), opened from the tray or once from a
    first-run "click to pair" balloon. After a successful pairing it writes only
    `FallbackAddress` with `ISettingsStore.Update(p => p.FallbackAddress = ip)`.
@@ -223,7 +225,7 @@ The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
    mDNS, and starts the MQTT broker.
 8. The client forgets the Wi-Fi password by default and switches into normal
    metric publishing mode. (Client: done. It saves the reported IPv4 as
-   `FallbackAddress`, reconnects live and shows "已连接，正在发送数据".)
+   `FallbackAddress`, reconnects live and shows "Connected, publishing.".)
 
 ### Client-to-ESP32 Configuration Payload
 

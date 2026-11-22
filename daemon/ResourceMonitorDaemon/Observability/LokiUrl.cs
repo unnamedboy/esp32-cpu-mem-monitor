@@ -1,3 +1,5 @@
+using ResourceMonitorDaemon.Localization;
+
 namespace ResourceMonitorDaemon.Observability
 {
     /// <summary>URL rules for the Loki push endpoint. Nothing here ever returns credentials.</summary>
@@ -7,36 +9,39 @@ namespace ResourceMonitorDaemon.Observability
 
         /// <summary>
         /// Returns null when <paramref name="url"/> is an absolute http(s) URL without user info
-        /// or fragment; otherwise a message that does not repeat the URL.
+        /// or fragment; otherwise an English message that does not repeat the URL.
         /// </summary>
-        public static string? Validate(string? url)
+        public static string? Validate(string? url) => Problem(url)?.English;
+
+        /// <summary>Same rule as <see cref="Validate"/>, as a message the dialog can show localized.</summary>
+        public static UiMessage? Problem(string? url)
         {
             if (string.IsNullOrWhiteSpace(url))
             {
-                return "Url must not be empty.";
+                return UiMessage.Observability_ErrorUrlEmpty(LokiSettingsFields.Url);
             }
 
             var trimmed = url.Trim();
             if (trimmed.Length > MaxLength)
             {
-                return $"Url is longer than {MaxLength} characters.";
+                return UiMessage.Observability_ErrorUrlTooLong(LokiSettingsFields.Url, MaxLength);
             }
 
             if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
                 || string.IsNullOrEmpty(uri.Host))
             {
-                return "Url must be an absolute http:// or https:// URL.";
+                return UiMessage.Observability_ErrorUrlNotHttp(LokiSettingsFields.Url);
             }
 
             if (uri.UserInfo.Length > 0)
             {
-                return "Url must not contain a user name or password; use AuthMode, Username and the token instead.";
+                return UiMessage.Observability_ErrorUrlUserInfo(LokiSettingsFields.Url, LokiSettingsFields.AuthMode, LokiSettingsFields.Username);
             }
 
             if (uri.Fragment.Length > 0)
             {
-                return "Url must not contain a fragment (#...).";
+                return UiMessage.Observability_ErrorUrlFragment(LokiSettingsFields.Url);
             }
 
             return null;

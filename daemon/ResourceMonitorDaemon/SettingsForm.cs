@@ -1,42 +1,88 @@
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
+using ResourceMonitorDaemon.Localization;
 
 namespace ResourceMonitorDaemon
 {
     /// <summary>
-    /// Small dialog for editing the user-facing connection settings.
+    /// What the settings dialog needs for <c>Ui:Language</c>: the effective value (normalized), the
+    /// value of the lower layers (defaults + <c>appsettings.json</c>) and whether
+    /// <c>RESMON_Ui__Language</c> overrides it.
+    /// </summary>
+    public sealed record UiLanguageSetting(string Effective, string LowerLayers, bool FromEnvironment);
+
+    /// <summary>
+    /// The user-facing text for a failed settings save. The exception text (English, or Windows'
+    /// own language for I/O errors) only goes to the log.
+    /// </summary>
+    public static class SettingsSaveFailure
+    {
+        /// <param name="exception">What <see cref="ISettingsStore.Update"/> (or a sibling store method) threw.</param>
+        /// <param name="filePath">The user settings file.</param>
+        /// <param name="text">The dialog's texts (its language); null for the current UI language.</param>
+        public static string Describe(Exception exception, string filePath, StringSet? text = null)
+        {
+            text ??= Strings.Current;
+            return exception is ArgumentException
+                ? text.Common_SaveFailedInvalidFile(filePath)   // validation of the whole patch, e.g. a bad hand-edited value
+                : text.Common_SaveFailed(filePath);
+        }
+    }
+
+    /// <summary>
+    /// Small dialog for editing the user-facing connection settings and the UI language.
     /// </summary>
     /// <remarks>
-    /// Shows the effective values. Fields overridden by <c>RESMON_Device__*</c> environment
-    /// variables are read-only and never saved. On Save, only fields the user changed are
-    /// touched, and a changed value equal to what <c>appsettings.json</c> + defaults resolve to
-    /// is removed from the user settings file instead of being copied into it
-    /// (see <see cref="UserDeviceSettingsPatch.ApplyDialogEdit"/>); unchanged fields and fields
-    /// the dialog does not show, such as FallbackAddress, are left untouched.
+    /// Shows the effective values. Fields overridden by <c>RESMON_Device__*</c> (or
+    /// <c>RESMON_Ui__Language</c>) environment variables are read-only and never saved. On Save,
+    /// only fields the user changed are touched, and a changed value equal to what
+    /// <c>appsettings.json</c> + defaults resolve to is removed from the user settings file instead
+    /// of being copied into it (see <see cref="UserDeviceSettingsPatch.ApplyDialogEdit"/> and
+    /// <see cref="UiLanguage.ValueToStore"/>); unchanged fields and fields the dialog does not show,
+    /// such as FallbackAddress, are left untouched. Texts come from <see cref="Strings"/>; the dialog
+    /// keeps the language it was opened in.
     /// </remarks>
     public sealed class SettingsForm : Form
     {
+        private readonly StringSet _text = Strings.Current;   // the dialog's language, fixed when it opens
         private readonly ISettingsStore _store;
+        private readonly IUiSettingsStore _uiStore;
         private readonly DeviceSettings _effective;
         private readonly DeviceSettings _displayed;
         private readonly DeviceSettings _lowerLayers;
         private readonly IReadOnlySet<string> _environmentFields;
+        private readonly UiLanguageSetting _language;
+        private readonly ILogger _logger;
+        private string _savedLanguage;
         private readonly TextBox _host;
         private readonly NumericUpDown _port;
         private readonly TextBox _cpuTopic;
         private readonly TextBox _memTopic;
         private readonly NumericUpDown _interval;
+        private readonly ComboBox _languageBox;
 
-        public SettingsForm(DeviceSettings effective, DeviceSettings lowerLayers, ISettingsStore store, IReadOnlySet<string> environmentOverriddenFields)
+        public SettingsForm(
+            DeviceSettings effective,
+            DeviceSettings lowerLayers,
+            ISettingsStore store,
+            IReadOnlySet<string> environmentOverriddenFields,
+            UiLanguageSetting language,
+            IUiSettingsStore uiStore,
+            ILogger logger)
         {
             _store = store;
+            _uiStore = uiStore;
             _effective = effective;
             _lowerLayers = lowerLayers;
             _environmentFields = environmentOverriddenFields;
+            _language = language;
+            _logger = logger;
+            _savedLanguage = language.Effective;
             EnvironmentOverriddenFields = UserDeviceSettingsPatch.DialogFieldNames
                 .Where(environmentOverriddenFields.Contains)
                 .ToList();
 
-            Text = "设置 (Settings) - Resource Monitor";
+            Text = _text.Settings_WindowTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -69,30 +115,46 @@ namespace ResourceMonitorDaemon
                 Width = 100,
             };
 
-            AddField(layout, "主机 (Host)", nameof(DeviceSettings.Host), _host);
-            AddField(layout, "端口 (Port)", nameof(DeviceSettings.Port), _port);
-            AddField(layout, "CPU 主题 (CPU topic)", nameof(DeviceSettings.CpuTopic), _cpuTopic);
-            AddField(layout, "内存主题 (Memory topic)", nameof(DeviceSettings.MemTopic), _memTopic);
-            AddField(layout, "采样间隔 ms (Interval)", nameof(DeviceSettings.SampleIntervalMs), _interval);
-            AddRow(layout, "备用地址 (Fallback):", new Label
+            // Each language is listed in its own language; "automatic" in the current UI language.
+            _languageBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180 };
+            _languageBox.Items.AddRange(new object[]
             {
-                Text = string.IsNullOrEmpty(effective.FallbackAddress) ? "(none)" : effective.FallbackAddress,
+                new LanguageOption(UiLanguage.Auto, _text.Settings_LanguageAutomatic),
+                new LanguageOption(UiLanguage.English, _text.Settings_LanguageEnglish),
+                new LanguageOption(UiLanguage.ChineseSimplified, _text.Settings_LanguageChineseSimplified),
+            });
+            _languageBox.SelectedItem = _languageBox.Items.Cast<LanguageOption>().First(option => option.Value == language.Effective);
+            _languageBox.Enabled = !language.FromEnvironment;
+
+            AddField(layout, _text.Settings_Host, nameof(DeviceSettings.Host), _host);
+            AddField(layout, _text.Settings_Port, nameof(DeviceSettings.Port), _port);
+            AddField(layout, _text.Settings_CpuTopic, nameof(DeviceSettings.CpuTopic), _cpuTopic);
+            AddField(layout, _text.Settings_MemTopic, nameof(DeviceSettings.MemTopic), _memTopic);
+            AddField(layout, _text.Settings_SampleInterval, nameof(DeviceSettings.SampleIntervalMs), _interval);
+            AddRow(layout, _text.Common_FieldLabel(_text.Settings_FallbackAddress), new Label
+            {
+                Text = string.IsNullOrEmpty(effective.FallbackAddress) ? _text.Common_None : effective.FallbackAddress,
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
+                Margin = new Padding(3, 6, 3, 3),
             });
+            AddRow(
+                layout,
+                language.FromEnvironment ? _text.Common_EnvFieldLabel(_text.Settings_Language) : _text.Common_FieldLabel(_text.Settings_Language),
+                _languageBox);
+            AddNote(layout, _text.Settings_LanguageNote, SystemColors.GrayText);
 
-            AddNote(layout, $"保存到 (Saved to): {store.FilePath}", SystemColors.GrayText);
-            if (EnvironmentOverriddenFields.Count > 0)
+            AddNote(layout, _text.Common_SavedTo(store.FilePath), SystemColors.GrayText);
+            var environmentFields = language.FromEnvironment
+                ? EnvironmentOverriddenFields.Append(UiLanguage.ConfigurationKey).ToList()
+                : EnvironmentOverriddenFields;
+            if (environmentFields.Count > 0)
             {
-                AddNote(
-                    layout,
-                    "标记 (env) 的字段由环境变量决定，只读且不会保存 (fields marked (env) come from RESMON_ environment variables; read-only, not saved): "
-                        + string.Join(", ", EnvironmentOverriddenFields),
-                    Color.DarkOrange);
+                AddNote(layout, _text.Common_EnvironmentFieldsNote(string.Join(", ", environmentFields)), Color.DarkOrange);
             }
 
-            var save = new Button { Text = "保存 (Save)", AutoSize = true };
-            var cancel = new Button { Text = "取消 (Cancel)", AutoSize = true, DialogResult = DialogResult.Cancel };
+            var save = new Button { Text = _text.Common_Save, AutoSize = true };
+            var cancel = new Button { Text = _text.Common_Cancel, AutoSize = true, DialogResult = DialogResult.Cancel };
             save.Click += OnSave;
 
             // The dialog is modeless (Show), so DialogResult alone does not close it; Esc
@@ -121,6 +183,14 @@ namespace ResourceMonitorDaemon
         /// <summary>Dialog fields whose effective value comes from an environment variable.</summary>
         public IReadOnlyList<string> EnvironmentOverriddenFields { get; }
 
+        /// <summary>
+        /// The <c>Ui:Language</c> value saved because the user changed the drop-down, so the tray can
+        /// switch at once instead of waiting for the configuration file watcher; null when the language
+        /// was not changed (or is set by <c>RESMON_Ui__Language</c>). A value shown when the dialog
+        /// opened may be stale, so it is never re-applied.
+        /// </summary>
+        public string? ChangedLanguageSetting { get; private set; }
+
         private void AddField(TableLayoutPanel layout, string label, string field, Control control)
         {
             var fromEnvironment = _environmentFields.Contains(field);
@@ -136,7 +206,7 @@ namespace ResourceMonitorDaemon
                 }
             }
 
-            AddRow(layout, fromEnvironment ? $"{label} (env):" : $"{label}:", control);
+            AddRow(layout, fromEnvironment ? _text.Common_EnvFieldLabel(label) : _text.Common_FieldLabel(label), control);
         }
 
         private static void AddRow(TableLayoutPanel layout, string label, Control control)
@@ -163,29 +233,56 @@ namespace ResourceMonitorDaemon
             SampleIntervalMs = (int)_interval.Value,
         };
 
+        private string SelectedLanguage => (_languageBox.SelectedItem as LanguageOption)?.Value ?? _language.Effective;
+
         private void OnSave(object? sender, EventArgs e)
         {
             var edited = ReadControls();
 
-            var errors = DeviceSettingsValidator.Validate(edited);
+            var errors = DeviceSettingsValidator.Problems(edited);
             if (errors.Count > 0)
             {
-                MessageBox.Show(this, string.Join(Environment.NewLine, errors), "设置无效 (Invalid settings)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(
+                    this,
+                    string.Join(Environment.NewLine, errors.Select(error => error.Format(_text.Culture))),
+                    _text.Common_InvalidSettingsCaption,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
                 return;
             }
 
+            // The language is saved on its own and first: a problem with the Device section (for
+            // example an invalid hand-edited value in the user file) must not lose the choice.
+            var selectedLanguage = SelectedLanguage;
             try
             {
-                _store.Update(patch => patch.ApplyDialogEdit(_lowerLayers, _displayed, edited, _environmentFields));
+                if (!_language.FromEnvironment && selectedLanguage != _savedLanguage)
+                {
+                    _uiStore.UpdateUiLanguage(UiLanguage.ValueToStore(selectedLanguage, _language.LowerLayers));
+                    _savedLanguage = selectedLanguage;
+                }
+
+                // Nothing to write when no device field changed (ApplyDialogEdit would be a no-op).
+                if (edited != _displayed)
+                {
+                    _store.Update(patch => patch.ApplyDialogEdit(_lowerLayers, _displayed, edited, _environmentFields));
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                MessageBox.Show(this, $"无法保存设置 (Unable to save settings):{Environment.NewLine}{ex.Message}", "Daemon", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _logger.LogWarning("Settings dialog: could not save to {Path}: {Error}", _store.FilePath, ex.Message);
+                MessageBox.Show(this, SettingsSaveFailure.Describe(ex, _store.FilePath, _text), _text.Common_ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
+            ChangedLanguageSetting = !_language.FromEnvironment && selectedLanguage != _language.Effective ? selectedLanguage : null;
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        private sealed record LanguageOption(string Value, string Display)
+        {
+            public override string ToString() => Display;
         }
     }
 }

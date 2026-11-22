@@ -1,3 +1,5 @@
+using ResourceMonitorDaemon.Localization;
+
 namespace ResourceMonitorDaemon
 {
     /// <summary>
@@ -139,7 +141,7 @@ namespace ResourceMonitorDaemon
 
             if (CpuTopic != null && CpuTopic == MemTopic)
             {
-                errors.Add("CpuTopic and MemTopic must be different.");
+                errors.Add(UiMessage.Settings_ErrorTopicsEqual(DeviceSettingsFields.CpuTopic, DeviceSettingsFields.MemTopic).English);
             }
 
             if (StatusTopic != null)
@@ -147,7 +149,7 @@ namespace ResourceMonitorDaemon
                 Add(DeviceSettingsValidator.ValidateTopic(StatusTopic, nameof(StatusTopic)));
                 if (StatusTopic == CpuTopic || StatusTopic == MemTopic)
                 {
-                    errors.Add("StatusTopic must differ from CpuTopic and MemTopic.");
+                    errors.Add(DeviceSettingsFields.StatusTopicCollides.English);
                 }
             }
 
@@ -168,7 +170,7 @@ namespace ResourceMonitorDaemon
 
             if (ReconnectInitialBackoffMs is { } i && ReconnectMaxBackoffMs is { } m && m < i)
             {
-                errors.Add("ReconnectMaxBackoffMs must not be smaller than ReconnectInitialBackoffMs.");
+                errors.Add(DeviceSettingsFields.BackoffOrder.English);
             }
 
             if (ConnectTimeoutMs is { } timeout)
