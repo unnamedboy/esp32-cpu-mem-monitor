@@ -19,8 +19,12 @@ namespace ResourceMonitorDaemon.Provisioning
     {
         private readonly IProvisioningTransport _transport;
         private readonly AesCtrStream _cipher;
+        // Never disposed: it has no wait handle to release, and disposing it would make an in-flight
+        // SendEncryptedAsync throw ObjectDisposedException from Release().
         private readonly SemaphoreSlim _gate = new(1, 1);
+        private readonly object _stateLock = new();
         private bool _broken;
+        private bool _busy;
         private bool _disposed;
 
         private Security1Session(IProvisioningTransport transport, AesCtrStream cipher)
@@ -107,6 +111,14 @@ namespace ResourceMonitorDaemon.Provisioning
                 }
 
                 var response1 = Sec1Messages.DecodeResponse(response1Bytes);
+                if (response1.MsgType == Sec1MsgType.SessionResponse0)
+                {
+                    // The device failed Command1 and closed the link, but the write was acknowledged (the
+                    // prepared-write path in protocomm_ble.c responds OK even on failure), so the read
+                    // returned the stale Response0 still stored in the attribute.
+                    throw new PairingCodeRejectedException(PairingCodeRejectionReason.DeviceClosedConnection);
+                }
+
                 EnsureSecurity1(response1, Sec1MsgType.SessionResponse1);
                 if (response1.Status == ProtocommStatus.CryptoError)
                 {
@@ -150,6 +162,12 @@ namespace ResourceMonitorDaemon.Provisioning
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                lock (_stateLock)
+                {
+                    ObjectDisposedException.ThrowIf(_disposed, this);
+                    _busy = true;
+                }
+
                 if (_broken)
                 {
                     throw new ProvisioningException("The secure session with the device was interrupted. Reconnect and try again.");
@@ -174,20 +192,39 @@ namespace ResourceMonitorDaemon.Provisioning
             }
             finally
             {
+                lock (_stateLock)
+                {
+                    _busy = false;
+                    if (_disposed)
+                    {
+                        // Dispose() ran while this exchange was in flight and left the key to us.
+                        _cipher.Dispose();
+                    }
+                }
+
                 _gate.Release();
             }
         }
 
+        /// <summary>
+        /// Releases the session key. Safe to call while an exchange is in flight: the key is then wiped
+        /// when that exchange finishes, and later calls throw <see cref="ObjectDisposedException"/>.
+        /// </summary>
         public void Dispose()
         {
-            if (_disposed)
+            lock (_stateLock)
             {
-                return;
-            }
+                if (_disposed)
+                {
+                    return;
+                }
 
-            _disposed = true;
-            _cipher.Dispose();
-            _gate.Dispose();
+                _disposed = true;
+                if (!_busy)
+                {
+                    _cipher.Dispose();
+                }
+            }
         }
 
         private static void EnsureSecurity1(SessionResponse response, Sec1MsgType expected)

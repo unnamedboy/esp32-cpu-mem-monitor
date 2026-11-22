@@ -155,7 +155,8 @@ namespace ResourceMonitorDaemon.Provisioning
                     _operationTimeout, $"reading the response from '{endpoint}'", cancellationToken).ConfigureAwait(false);
                 EnsureSuccess(read.Status, read.ProtocolError, $"reading the response from '{endpoint}'");
 
-                ThrowIfLinkLost();
+                // No link check here: a completed read is valid data even if the device drops the link
+                // right afterwards, which it does on purpose after reporting Connected.
                 return read.Value is null ? Array.Empty<byte>() : read.Value.ToArray();
             }
             finally
@@ -169,11 +170,13 @@ namespace ResourceMonitorDaemon.Provisioning
             if (!_disposed)
             {
                 _disposed = true;
-                _device.ConnectionStatusChanged -= OnConnectionStatusChanged;
-                _service.Dispose();
-                _gattSession?.Dispose();
-                _device.Dispose();
-                _gate.Dispose();
+                // The device may already be gone (it stops BLE after a successful provisioning); releasing
+                // the WinRT objects must never turn a finished provisioning run into an error.
+                TryRelease(() => _device.ConnectionStatusChanged -= OnConnectionStatusChanged);
+                TryRelease(_service.Dispose);
+                TryRelease(() => _gattSession?.Dispose());
+                TryRelease(_device.Dispose);
+                // _gate is intentionally not disposed: an in-flight SendAsync still releases it.
             }
 
             return ValueTask.CompletedTask;
@@ -220,6 +223,18 @@ namespace ResourceMonitorDaemon.Provisioning
         /// <summary>0x2901 text -> endpoint key: UTF-8, trailing NULs/whitespace removed, lower case (as ble_cli.py).</summary>
         internal static string ParseUserDescription(byte[] raw) =>
             Encoding.UTF8.GetString(raw).TrimEnd('\0').Trim().ToLowerInvariant();
+
+        private static void TryRelease(Action release)
+        {
+            try
+            {
+                release();
+            }
+            catch (Exception)
+            {
+                // Best effort cleanup of WinRT objects whose device has disconnected.
+            }
+        }
 
         private void OnConnectionStatusChanged(BluetoothLEDevice sender, object args)
         {

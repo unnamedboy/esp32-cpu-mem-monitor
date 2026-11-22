@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -22,6 +21,14 @@ namespace ResourceMonitorDaemon.Provisioning
 
         /// <summary>The device did not report a final state in time.</summary>
         public sealed record Timeout(WifiStationState LastState) : WifiProvisioningResult;
+
+        /// <summary>
+        /// The Bluetooth link dropped while waiting for the result, after the device had accepted and
+        /// applied the settings. The device may well have joined Wi-Fi (it stops BLE once it reports
+        /// Connected), so the caller should check the normal connection (e.g. MQTT to resmon.local)
+        /// before declaring failure. <paramref name="Reason"/> is a user-presentable description.
+        /// </summary>
+        public sealed record ConnectionLost(WifiStationState LastState, string Reason) : WifiProvisioningResult;
     }
 
     /// <summary>A single decoded GetStatus answer.</summary>
@@ -37,6 +44,7 @@ namespace ResourceMonitorDaemon.Provisioning
         private readonly Security1Session _session;
         private readonly TimeSpan _pollInterval;
         private readonly TimeSpan _connectTimeout;
+        private bool _previousAttemptFailed;
 
         /// <summary>Uses the contract limits: one poll per second, at most 30 s.</summary>
         public WifiConfigClient(Security1Session session)
@@ -54,7 +62,8 @@ namespace ResourceMonitorDaemon.Provisioning
 
         /// <summary>
         /// Sends SetConfig, ApplyConfig and waits for the device to join the network.
-        /// The passphrase is only held in buffers that are zeroed after encryption.
+        /// The byte copies made from the passphrase are zeroed after encryption; the caller's string
+        /// itself cannot be wiped, so drop references to it promptly.
         /// </summary>
         public async Task<WifiProvisioningResult> ConfigureAsync(string ssid, string passphrase, CancellationToken cancellationToken)
         {
@@ -76,11 +85,7 @@ namespace ResourceMonitorDaemon.Provisioning
                 ValidateLengths(ssidBytes.Length, passphraseBytes.Length);
                 plaintext = WifiConfigMessages.EncodeSetConfig(ssidBytes, passphraseBytes);
                 var response = await SendAsync(plaintext, WifiConfigMsgType.RespSetConfig, cancellationToken).ConfigureAwait(false);
-                if (response.Status != ProtocommStatus.Success)
-                {
-                    throw new ProvisioningProtocolException(
-                        $"The device rejected the Wi-Fi settings (status {response.Status}).");
-                }
+                EnsureAccepted(response.Status, "rejected the Wi-Fi settings");
             }
             finally
             {
@@ -96,10 +101,7 @@ namespace ResourceMonitorDaemon.Provisioning
         {
             var response = await SendAsync(WifiConfigMessages.EncodeApplyConfig(), WifiConfigMsgType.RespApplyConfig, cancellationToken)
                 .ConfigureAwait(false);
-            if (response.Status != ProtocommStatus.Success)
-            {
-                throw new ProvisioningProtocolException($"The device could not apply the Wi-Fi settings (status {response.Status}).");
-            }
+            EnsureAccepted(response.Status, "could not apply the Wi-Fi settings");
         }
 
         public async Task<WifiStatus> GetStatusAsync(CancellationToken cancellationToken)
@@ -109,6 +111,11 @@ namespace ResourceMonitorDaemon.Provisioning
             if (response.Status != ProtocommStatus.Success)
             {
                 throw new ProvisioningProtocolException($"The device could not report its Wi-Fi status (status {response.Status}).");
+            }
+
+            if (response.StaState == WifiStationState.ConnectionFailed)
+            {
+                _previousAttemptFailed = true;
             }
 
             return response.StaState switch
@@ -122,30 +129,43 @@ namespace ResourceMonitorDaemon.Provisioning
         /// <summary>
         /// Polls GetStatus at most once per poll interval until Connected, ConnectionFailed or the timeout.
         /// Connecting and Disconnected are treated as transient (esp_prov retries on them too).
+        /// The whole wait, including an in-flight GetStatus exchange, is bounded by the timeout.
+        /// A dropped link is reported as <see cref="WifiProvisioningResult.ConnectionLost"/>, because the
+        /// device tears BLE down shortly after it reports Connected and may have joined Wi-Fi.
         /// </summary>
         public async Task<WifiProvisioningResult> WaitForConnectionAsync(CancellationToken cancellationToken)
         {
-            var stopwatch = Stopwatch.StartNew();
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(_connectTimeout);
             var lastState = WifiStationState.Connecting;
-            while (true)
+            try
             {
-                var remaining = _connectTimeout - stopwatch.Elapsed;
-                if (remaining <= TimeSpan.Zero)
+                while (true)
                 {
-                    return new WifiProvisioningResult.Timeout(lastState);
-                }
+                    await Task.Delay(_pollInterval, budget.Token).ConfigureAwait(false);
 
-                await Task.Delay(remaining < _pollInterval ? remaining : _pollInterval, cancellationToken).ConfigureAwait(false);
-
-                var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
-                lastState = status.State;
-                switch (status.State)
-                {
-                    case WifiStationState.Connected:
-                        return new WifiProvisioningResult.Connected(NormalizeIp4(status.Ip4Address));
-                    case WifiStationState.ConnectionFailed:
-                        return new WifiProvisioningResult.Failed(status.FailReason ?? WifiConnectFailedReason.AuthError);
+                    var status = await GetStatusAsync(budget.Token).ConfigureAwait(false);
+                    lastState = status.State;
+                    switch (status.State)
+                    {
+                        case WifiStationState.Connected:
+                            return new WifiProvisioningResult.Connected(NormalizeIp4(status.Ip4Address));
+                        case WifiStationState.ConnectionFailed:
+                            return new WifiProvisioningResult.Failed(status.FailReason ?? WifiConnectFailedReason.AuthError);
+                    }
                 }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return new WifiProvisioningResult.Timeout(lastState);
+            }
+            catch (ProvisioningTransportException ex) when (ex.Error is not ProvisioningTransportError.BluetoothOff
+                                                                and not ProvisioningTransportError.BluetoothUnavailable)
+            {
+                return new WifiProvisioningResult.ConnectionLost(
+                    lastState,
+                    "The device disconnected before reporting the result. It may have joined Wi-Fi; " +
+                    "check the device or try connecting to it normally.");
             }
         }
 
@@ -189,6 +209,23 @@ namespace ResourceMonitorDaemon.Provisioning
                    && address.AddressFamily == AddressFamily.InterNetwork
                 ? address.ToString()
                 : null;
+        }
+
+        private void EnsureAccepted(ProtocommStatus status, string action)
+        {
+            if (status == ProtocommStatus.Success)
+            {
+                return;
+            }
+
+            if (status == ProtocommStatus.InternalError && _previousAttemptFailed)
+            {
+                // wifi_prov_mgr refuses new credentials after a failure unless the firmware calls
+                // wifi_prov_mgr_reset_sm_state_on_failure() (required by the pairing contract).
+                throw new ProvisioningRetryRejectedException();
+            }
+
+            throw new ProvisioningProtocolException($"The device {action} (status {status}).");
         }
 
         private async Task<WifiConfigResponse> SendAsync(byte[] plaintext, WifiConfigMsgType expectedResponse, CancellationToken cancellationToken)

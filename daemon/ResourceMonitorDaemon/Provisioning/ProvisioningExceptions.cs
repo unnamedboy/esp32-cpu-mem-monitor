@@ -17,6 +17,19 @@ namespace ResourceMonitorDaemon.Provisioning
         public ProvisioningProtocolException(string message, Exception? innerException) : base(message, innerException) { }
     }
 
+    /// <summary>
+    /// After a failed Wi-Fi attempt the device answered a new SetConfig/ApplyConfig with InternalError:
+    /// its provisioning state machine is stuck in the failed state and needs a restart.
+    /// </summary>
+    public sealed class ProvisioningRetryRejectedException : ProvisioningProtocolException
+    {
+        public ProvisioningRetryRejectedException()
+            : base("The device did not accept another attempt after the previous one failed. " +
+                   "Power-cycle the device or hold its BOOT button for 5 seconds to restart provisioning, then try again.")
+        {
+        }
+    }
+
     public enum PairingCodeRejectionReason
     {
         /// <summary>

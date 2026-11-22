@@ -97,9 +97,12 @@ namespace ResourceMonitorDaemon.Provisioning
         /// <summary>
         /// Connects to <paramref name="device"/>, establishes the Security1 session with
         /// <paramref name="pop"/>, sends the Wi-Fi credentials and waits (up to 30 s) for the device to
-        /// join. Returns Connected(ip4) / Failed(reason) / Timeout.
+        /// join. Returns Connected(ip4) / Failed(reason) / Timeout, or ConnectionLost when the link
+        /// dropped after the settings were applied (the device may have joined Wi-Fi: check the normal
+        /// MQTT connection to resmon.local before reporting failure).
         /// Throws <see cref="ArgumentException"/> for an invalid pairing code format or credential length,
         /// <see cref="PairingCodeRejectedException"/> when the device rejects the code,
+        /// <see cref="ProvisioningRetryRejectedException"/> when the device refuses a retry after a failure,
         /// <see cref="ProvisioningTransportException"/> for Bluetooth failures and
         /// <see cref="ProvisioningProtocolException"/> for unexpected device answers.
         /// </summary>
@@ -147,6 +150,10 @@ namespace ResourceMonitorDaemon.Provisioning
                         break;
                     case WifiProvisioningResult.Failed failed:
                         _logger.LogWarning("Provisioning {Device}: Wi-Fi connection failed ({Reason}).", device.Name, failed.Reason);
+                        break;
+                    case WifiProvisioningResult.ConnectionLost lost:
+                        _logger.LogWarning("Provisioning {Device}: link lost while waiting for Wi-Fi (last state {State}); " +
+                            "the device may have joined Wi-Fi.", device.Name, lost.LastState);
                         break;
                     case WifiProvisioningResult.Timeout timeout:
                         _logger.LogWarning("Provisioning {Device}: no Wi-Fi result within {Seconds} s (last state {State}).",

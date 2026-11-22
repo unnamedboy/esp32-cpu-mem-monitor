@@ -34,7 +34,17 @@ namespace ResourceMonitorDaemon.Provisioning
             }
 
             _aes = Aes.Create();
-            _aes.Key = key.ToArray();
+            // The Key setter clones its argument, so zero our temporary copy straight away. The clone Aes
+            // keeps internally is released by _aes.Dispose(). (Aes.SetKey(span) is not available on net9.0.)
+            var keyCopy = key.ToArray();
+            try
+            {
+                _aes.Key = keyCopy;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(keyCopy);
+            }
             initialCounter.CopyTo(_counter);
         }
 

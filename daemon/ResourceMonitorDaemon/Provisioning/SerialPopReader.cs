@@ -187,9 +187,15 @@ namespace ResourceMonitorDaemon.Provisioning
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             budget.CancelAfter(ProvisioningConstants.SerialPortProbeBudget);
 
-            // Serial I/O is synchronous; SerialPort.Open can block (e.g. Bluetooth virtual COM ports), so
-            // the probe runs on the thread pool and is abandoned if it overruns its budget.
-            var probe = Task.Run(() => ProbePort(portName, budget.Token));
+            // Serial I/O is synchronous and SerialPort.Open can block (e.g. Bluetooth virtual COM ports).
+            // Each probe gets a dedicated thread (LongRunning) so that probes of many ports do not queue
+            // behind each other on the thread pool and eat into their own budget before they start.
+            // A probe that overruns its budget is abandoned.
+            var probe = Task.Factory.StartNew(
+                () => ProbePort(portName, budget.Token),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
             var overrun = Task.Delay(Timeout.Infinite, budget.Token);
             var winner = await Task.WhenAny(probe, overrun).ConfigureAwait(false);
             if (winner != probe)
