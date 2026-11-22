@@ -1,394 +1,296 @@
-# Wi-Fi Provisioning and Pairing Contract
+# Wi-Fi provisioning and pairing
 
-This document is the contract between the ESP32 firmware and the Windows
-(.NET) pairing client, plus a description of what the firmware actually
-implements. Both sides must follow it exactly.
+The firmware contains no Wi-Fi credentials. A new device starts in pairing mode and
+receives your network name and password from the Windows app over an encrypted
+Bluetooth LE session. This page covers pairing from the user's side, the security
+model, and the protocol details that the firmware and the Windows client share.
 
-> **Validation status:** the firmware side builds, its pure logic is
-> unit-tested, and the link-time BT fix was checked in the built ELF, but BLE
-> provisioning has **not yet been tested on physical hardware** or against the
-> Windows client. Treat every behaviour below as implemented-but-unverified
-> until a bench test is recorded here.
+> **Not yet tested on hardware.** The firmware side and the Windows client are
+> implemented and unit-tested, but pairing has not yet been run against a physical
+> ESP32. Please report what you find.
 
-## Transport and security
+## How the device chooses its Wi-Fi
 
-- Transport: BLE, using the ESP-IDF `wifi_provisioning` manager BLE scheme
-  (the same manager Arduino-ESP32's `WiFiProv` wraps; the firmware calls the
-  manager directly, see below).
-- Security: protocomm **Security1** (X25519 key exchange + AES-256-CTR)
-  **with Proof of Possession (PoP)**. No custom crypto protocol. The .NET
-  client reimplements the client side of the official protocol (reference:
-  ESP-IDF `tools/esp_prov/security/security1.py`, `esp_prov/prov/wifi_prov.py`,
-  `components/protocomm/proto/*.proto`, `components/wifi_provisioning/proto/*.proto`).
-- BLE service UUID: `021a9004-0382-4aea-bff4-6b3f1c5adfb4` (Arduino WiFiProv
-  default; the firmware sets it explicitly from `PROV_BLE_SERVICE_UUID` in
-  [firmware/src/config.h](../firmware/src/config.h)).
-- BLE advertised device name / service name: `PROV_RESMON_XXXXXX`, where
-  `XXXXXX` is the last 3 bytes of the Wi-Fi STA MAC in uppercase hex. The
-  client discovers devices whose name starts with `PROV_RESMON_`.
-  - Depending on the ESP-IDF BLE transport, the name may be carried in the
-    scan response rather than the primary advertisement, so the client
-    should scan actively. (Unverified on hardware.)
-- GATT endpoints are identified by their Characteristic User Description
-  descriptor (0x2901) text: `prov-session`, `prov-config`, `proto-ver`,
-  `prov-scan` (optional for us). The client must look them up by descriptor
-  text, not by hard-coded characteristic UUIDs.
-- Security1 session (a single AES-CTR keystream is shared by every encrypt
-  **and** decrypt after the session is set up, exactly as esp_prov
-  `security1.py` does):
-  1. client → `SessionData{sec_ver=SecScheme1, sec1=Sec1Payload{msg=Session_Command0, sc0=SessionCmd0{client_pubkey}}}`
-  2. device → `SessionResp0{status, device_pubkey, device_random(16 bytes)}`
-  3. shared = X25519(client_priv, device_pubkey); key = shared XOR SHA256(pop); iv = device_random
-  4. client → `Session_Command1 { client_verify_data = AES-CTR(device_pubkey) }`
-  5. device → `SessionResp1 { status, device_verify_data }`; client checks
-     AES-CTR-decrypt(device_verify_data) == client_pubkey. Mismatch → wrong
-     PoP; abort with a clear "pairing code rejected" error.
-- Wi-Fi config (endpoint `prov-config`, payloads encrypted with the session keystream):
-  `WiFiConfigPayload{msg=TypeCmdSetConfig, cmd_set_config=CmdSetConfig{ssid, passphrase}}` →
-  `TypeCmdApplyConfig` → poll `TypeCmdGetStatus` (≤ 1 poll/s, ≤ 30 s total) until
-  `sta_state == Connected` (read `connected.ip4_addr`) or `ConnectionFailed`
-  (read `fail_reason`: AuthError / NetworkNotFound).
-  - Firmware behaviour on `ConnectionFailed`: the firmware calls
-    `wifi_prov_mgr_reset_sm_state_on_failure()`, which clears the rejected
-    credentials and lets the client send a new `SetConfig` + `ApplyConfig` in
-    the same or a new session (without it, ApplyConfig would return
-    InternalError). The status poll keeps reporting the failure until new
-    credentials are applied.
+At every boot the firmware takes the first matching option
+(`decideBootAction()` in [`provisioning_logic.h`](../firmware/include/provisioning_logic.h)):
 
-### Clarifications (ESP-IDF v4.4.7 behaviour, agreed with the client)
+1. **Re-pairing was requested** with the BOOT button: clear the flag, erase the stored
+   credentials, start pairing mode.
+2. **Stored credentials exist** (from an earlier pairing): connect with them.
+3. **A development fallback is compiled in** (`firmware/src/secrets.h` with a non-empty
+   `WIFI_SSID`): connect with it, without Bluetooth.
+4. Otherwise: start pairing mode.
 
-- **Wrong PoP:** the device closes the GATT connection on `Session_Command1`
-  instead of replying. The client maps a link failure during Command1 to
-  "pairing code rejected" (device closed connection). A device that fails
-  Command1 may also leave the stale `SessionResp0` in the attribute; the client
-  treats a Response0-typed reply to Command1 as a rejection too. BLE
-  advertising resumes after the disconnect, so the user can retry.
-- **BLE lifetime after success:** in IDF 4.4.7 the GetStatus handler calls
-  `wifi_prov_mgr_done()` as soon as it reports Connected; with the default
-  auto-stop that tears BLE down after ~1 s. The firmware therefore calls
-  `wifi_prov_mgr_disable_auto_stop(PROV_BLE_CLEANUP_DELAY_MS = 5000)` between
-  `wifi_prov_mgr_init()` and `wifi_prov_mgr_start_provisioning()`, and itself
-  calls `wifi_prov_mgr_stop_provisioning()` `PROV_STOP_AFTER_SUCCESS_MS`
-  (30 s) after `WIFI_PROV_CRED_SUCCESS`. The manager keeps BLE up for the
-  5 s cleanup delay after that, then emits `WIFI_PROV_END`; the core calls
-  `wifi_prov_mgr_deinit()` and the `FREE_BTDM` handler frees BT memory. So
-  BLE stays up for about 35 s after credentials succeed. Nothing is stopped or
-  deinitialised on `CRED_SUCCESS` itself. mDNS and the MQTT broker start as
-  soon as the IP is obtained, while BLE is still up.
-- **Strict formats:** the name suffix is exactly 6 uppercase hex digits
-  (`PROV_RESMON_A1B2C3`, `%02X` formatting). The PoP is exactly 8 uppercase
-  characters from `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`; Security1 hashes it
-  case-sensitively.
-- **Credential limits:** SSID ≤ 32 bytes, passphrase ≤ 63 bytes (WPA
-  passphrase; a 64-hex-digit raw PSK is not supported by this contract).
-- **Failure reporting:** only `AuthError` and `NetworkNotFound` surface as
-  `ConnectionFailed`. Any other Wi-Fi failure makes ESP-IDF 4.4 keep retrying,
-  so the client sees its 30 s timeout. The firmware never reboots or leaves
-  provisioning mode because of a failed attempt.
-  - After `ConnectionFailed` (AuthError / NetworkNotFound) the firmware resets
-    the manager state, so the user **can** retry from the wizard.
-  - After a **Timeout** (any other failure) the manager is still in its
-    "credentials received" state: IDF 4.4.7 rejects a new `ApplyConfig`
-    (`InternalError`), so a retry from the wizard does not work. The
-    credentials were also already written to NVS, so **power-cycling does not
-    reopen provisioning**: the device boots with the stored (bad) credentials
-    and keeps trying to connect. Recovery is the BOOT gesture (hold 5–15 s,
-    then release), then pair again.
-- **IP address:** `connected.ip4_addr` may be missing or invalid; the client
-  must not save `FallbackAddress` in that case.
-- **Serial reply:** exactly `RESMON-POP name=PROV_RESMON_XXXXXX pop=ABCDEFGH`
-  with single spaces, terminated by `\r\n` (`Serial.println`).
-- **BOOT re-provisioning trigger:** hold BOOT for 5–15 seconds, then
-  release. Holds longer than 15 s are ignored (protects against a serial tool
-  holding DTR asserted, which pulls GPIO0 low via the auto-program circuit).
+In pairing mode the device advertises over BLE as `PROV_RESMON_XXXXXX` (the last three
+bytes of its Wi-Fi MAC address) and prints its pairing code to the USB serial log
+(115200 baud) once on entry and then every 30 s:
 
-### Firmware implementation (Arduino-ESP32 core 2.0.17)
-
-The firmware is pinned to PlatformIO `espressif32 @ 7.0.1`
-(`framework-arduinoespressif32` 3.20017 = Arduino-ESP32 2.0.17, ESP-IDF 4.4.7)
-and uses the IDF 4.4 `wifi_provisioning` API directly instead of
-`WiFiProv.beginProvision()`, because `beginProvision()` does init and start in
-one call and auto-stop can only be disabled in between. Sequence
-(`startProvisioning()` in [firmware/src/main.cpp](../firmware/src/main.cpp)):
-
-```cpp
-wifiLowLevelInit(true);                        // Wi-Fi driver + Arduino event task
-wifi_prov_mgr_init({ .scheme = wifi_prov_scheme_ble,
-                     .scheme_event_handler = WIFI_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BTDM });
-wifi_prov_mgr_reset_provisioning();            // only after a BOOT request
-wifi_prov_mgr_disable_auto_stop(5000);         // PROV_BLE_CLEANUP_DELAY_MS
-wifi_prov_scheme_ble_set_service_uuid(PROV_BLE_SERVICE_UUID);
-wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_1, pop, "PROV_RESMON_XXXXXX", NULL);
+```text
+Provisioning: name=PROV_RESMON_A1B2C3 pop=ABCDEFGH
 ```
 
-Other calls and events:
+## Pairing a device
 
-- The Arduino core registers its handler for `WIFI_PROV_EVENT` when the Wi-Fi
-  driver is initialised, so `ARDUINO_EVENT_PROV_START`, `_CRED_RECV`,
-  `_CRED_FAIL`, `_CRED_SUCCESS` and `_END` arrive through `WiFi.onEvent()`
-  exactly as with `WiFiProv`. On `PROV_END` the core calls
-  `wifi_prov_mgr_deinit()`.
-- `wifi_prov_mgr_reset_sm_state_on_failure()` after `PROV_CRED_FAIL`, but
-  only **before** provisioning has succeeded (`decideCredentialFailureAction()`
-  in `provisioning_logic.h`). The manager's Wi-Fi handler stays registered
-  until provisioning stops and reports a post-success drop (for example the AP
-  rebooting during the BLE grace period) as `CRED_FAIL` too. Resetting then
-  would write an empty STA config to flash and unpair the device, so after
-  success the firmware keeps the credentials, logs `Wi-Fi lost during BLE
-  grace period ...; credentials kept`, and calls
-  `wifi_prov_mgr_stop_provisioning()` immediately so only the firmware's
-  reconnect policy runs.
-- When that reset succeeds, the firmware calls `esp_wifi_disconnect()` to
-  cancel the Arduino core's single automatic retry, which would otherwise still
-  use the rejected credentials. (When the reset fails, the manager may already
-  be in SUCCESS because that retry worked, so the STA is left connected.)
-- If the STA gets an IP while provisioning and no credentials have been
-  accepted, the firmware stays in provisioning mode (BLE up, PoP served)
-  instead of reporting `source=stored` (`decideConnectedTransition()`), and
-  re-evaluates on every `loop()` until provisioning succeeds. This deferral
-  happens briefly on **every** normal pairing, because `GOT_IP` reaches the
-  firmware just before `CRED_SUCCESS` (the manager posts `CRED_SUCCESS` from its
-  own `GOT_IP` handler), so it is silent at first. Only if it lasts
-  `PROV_DEFERRED_CONNECT_WARN_MS` (5 s) does the firmware log, once,
-  `Wi-Fi: got an IP while provisioning, but no credentials were accepted after
-  5 s; staying in provisioning mode` (`shouldWarnDeferredConnect()`).
-- `wifi_prov_mgr_stop_provisioning()` 30 s after `PROV_CRED_SUCCESS`.
-- `wifi_prov_mgr_reset_provisioning()` (= `esp_wifi_restore()`) when the BOOT
-  gesture requests re-provisioning.
-- The "already provisioned" check reads the STA config with
-  `esp_wifi_get_config(WIFI_IF_STA)` and tests for a non-empty SSID, the same
-  check `wifi_prov_mgr_is_provisioned()` performs.
-- **BT memory at startup:** Arduino's `initArduino()` releases the BT
-  controller memory before `setup()` unless `btInUse()` returns true. The
-  strong `btInUse()` (returning true) lives in `esp32-hal-bt.c` and is only
-  linked if something from that file is referenced; the firmware references
-  `btStarted()` in its startup diagnostics for that reason. Without it BLE
-  could never start (verified in the linker map and disassembly of the build).
-- On boots that do not provision, the firmware releases BT controller/host
-  memory with `esp_bt_mem_release(ESP_BT_MODE_BTDM)`. BLE cannot be restarted
-  without a reboot (the BOOT gesture reboots).
-- **Provisioning start failure:** if `wifi_prov_mgr_init()` or
-  `wifi_prov_mgr_start_provisioning()` fails, the PoP is unavailable, or no
-  `PROV_START` event arrives within 5 s, the firmware logs an error and
-  restarts into provisioning after 3 s (the `prov_req` flag is set again). It
-  does this at most `PROV_START_MAX_ATTEMPTS` (3) consecutive times; the count
-  is kept in RTC memory across software resets and cleared on power-on, on a
-  successful start, and on the BOOT gesture. After that it connects with the
-  `secrets.h` dev fallback if one exists, otherwise it stays up and logs a
-  rate-limited error ("power-cycle to retry").
+You need a Windows 10 (2004 or later) or Windows 11 PC with Bluetooth LE, and the
+daemon running.
 
-## Proof of Possession (pairing code)
+1. **Put the device in pairing mode.** A device without Wi-Fi settings does this by
+   itself at startup. For a device that is already configured, or one built with
+   `secrets.h`, use the [BOOT gesture](#re-pairing-and-changing-networks).
+2. **Open the wizard.** Right-click the tray icon and choose **Pair device…**
+   (配对设备…). On the very first run of the daemon, the first "MQTT connection failed"
+   notification instead says *No device found — click to pair*; clicking it opens the
+   wizard (see [when the prompt appears](daemon.md#first-run-pairing-prompt)).
+3. **Select the device.** The wizard scans for 5 s and lists `PROV_RESMON_…` devices
+   with their signal strength. A single device is selected automatically. Click
+   **Rescan** if the device was not in pairing mode yet. If Bluetooth is off, turn it
+   on in Windows Settings and rescan.
+4. **Pairing code.** If the device is connected to this PC by USB, the wizard reads
+   the code over the serial port and shows *Read automatically over USB*. Close any
+   serial monitor first: a COM port can only be open in one program. Otherwise type
+   the 8-character code from the serial log. Codes use the letters A–Z without I and
+   O and the digits 2–9; case, spaces and dashes are ignored.
+5. **Wi-Fi.** Enter the network name (SSID) and password, or click **Use this PC's
+   Wi-Fi** to copy the network this PC is on. Windows 11 may ask once whether apps may
+   use your location, because it treats Wi-Fi details as location data; if you
+   decline, type the name. **The ESP32 supports 2.4 GHz only.** The wizard warns you if
+   this PC is connected on 5 or 6 GHz; make sure the router also offers the network on
+   2.4 GHz.
+6. **Click Pair** (开始配对). Progress shows each step: connect, secure session, send
+   Wi-Fi settings, wait for Wi-Fi. **Cancel** stops the attempt; closing the wizard
+   cancels everything.
+7. **Done.** When the device reports its IP address, the wizard saves it as
+   `FallbackAddress` in the user settings file and changes nothing else. The daemon
+   reconnects without a restart, and the wizard waits up to 45 s for that connection.
+   It ends with *Connected, publishing.*, *Sending is paused* (resume it from the tray
+   menu), or *The daemon keeps retrying … in the background*.
 
-- Generated once by the firmware on first boot with the hardware RNG
-  (`esp_random()`, with `bootloader_random_enable()` providing entropy because
-  the radio is not running yet), stored in NVS namespace `resmon`, key `pop`.
-  8 characters from alphabet `23456789ABCDEFGHJKLMNPQRSTUVWXYZ` (no 0/O/1/I).
-- Survives provisioning reset (`esp_wifi_restore()` only touches the Wi-Fi NVS
-  data). Only a full NVS erase regenerates it. The firmware also regenerates it
-  if the stored value is missing or not a valid 8-character code.
-- Never sent over Wi-Fi/MQTT. Never logged by the .NET daemon.
-- The firmware prints it on serial only as described below.
-- Log level: `platformio.ini` pins `-DCORE_DEBUG_LEVEL=1` (errors only), and
-  `firmware/src/config.h` fails the build at level ≥ 3. The real leak is at
-  level 5: the Arduino core's `PROV_CRED_RECV` verbose log prints the received
-  SSID and Wi-Fi password. Levels 3–4 leak no secrets (`WiFiProv` is not
-  linked, and the precompiled ESP-IDF libraries are built with
-  `CONFIG_LOG_MAXIMUM_LEVEL=1`), but they flood UART0, which also carries the
-  pairing query, so they are refused as a margin.
+The Wi-Fi password is used only for that attempt. The password box is cleared
+afterwards, and the password is never written to disk or to the log.
 
-### USB serial PoP query (auto-read)
+### If pairing fails
 
-- Serial: UART0, 115200 8N1, line terminated by `\n` (`\r\n` accepted).
-- Host sends exactly: `RESMON?POP\n`
-- Device answers **only while in provisioning mode**, with one line:
-  `RESMON-POP name=PROV_RESMON_XXXXXX pop=ABCDEFGH`
-- Outside provisioning mode the device answers:
-  `RESMON-POP unavailable state=<state>` where `<state>` is one of:
+| Message | What to do |
+| --- | --- |
+| Wrong Wi-Fi password | Re-enter the password and try again. |
+| Wi-Fi network not found | Check the SSID and that the router offers 2.4 GHz. |
+| Wrong pairing code | Check the code in the serial log and try again. |
+| No Wi-Fi result within 30 s | Check the SSID, password and 2.4 GHz, then try again. A retry also detects a device that joined Wi-Fi late. |
+| Lost the Bluetooth link | The wizard first tries the configured `Host:Port` (default `resmon.local:1883`) for up to 15 s. If the device is still unreachable, rescan; if it no longer appears, use the BOOT gesture and pair again. |
+| The device did not accept another attempt | Use the BOOT gesture, then rescan and pair. Don't power-cycle instead: the device has already stored the earlier settings and would restart with them and without Bluetooth. |
+| The device is already connected to network "…" | It joined a different network in an earlier attempt. To switch, use the BOOT gesture and pair again. |
+| No device in pairing mode found | Check power and pairing mode, then **Rescan**. |
+| Bluetooth is off / no usable BLE adapter | Turn Bluetooth on, or use a PC with a BLE adapter. |
 
-  | `state` | Meaning |
-  | --- | --- |
-  | `connecting` | STA credentials present, Wi-Fi not (yet / any more) connected |
-  | `provisioned` | Connected with stored (BLE-provisioned) credentials |
-  | `dev-fallback` | Connected with the compiled `secrets.h` development credentials |
-  | `error` | Provisioning could not start (retry restart pending, or given up) |
-  | `starting` | Setup not finished (not normally observable) |
+Reopening the wizard right after closing it can miss the USB pairing code, because an
+abandoned serial probe may still hold the COM port for a moment. Wait briefly and
+select the device again, or type the code.
 
-  Clients must treat any `unavailable` answer as "not pairable now".
-- The firmware reads serial non-blockingly (at most 64 bytes per `loop()`)
-  with a bounded line buffer: lines longer than 32 characters are discarded
-  up to the next `\n`. Unknown lines are ignored silently.
-- While in provisioning mode, the firmware also prints a rate-limited
-  (once at entry, then every 30 s) human-readable hint line:
-  `Provisioning: name=PROV_RESMON_XXXXXX pop=ABCDEFGH` (physical USB access is
-  treated as trusted).
-- Other diagnostic lines are interleaved on the same port (for example
-  `DAC values: ...` when the outputs change, at most every 10 s, and a status
-  line every 60 s); the client must ignore lines that do not start with
-  `RESMON-POP `.
-- The .NET client must open the COM port with `DtrEnable=false,
-  RtsEnable=false` to avoid resetting the board (and to avoid pulling GPIO0
-  low through the auto-program circuit, see [hardware.md](hardware.md)), try
-  each available COM port with a short timeout (≤ 1.5 s per port), and match
-  the returned `name=` against the BLE device it is pairing with. If no port
-  answers, the wizard asks the user to type the code.
+## Re-pairing and changing networks
 
-## Device lifecycle
+While the firmware is running, **hold the BOOT button for 5–15 s, then release it**.
+The serial log shows `BOOT pressed: hold 5-15 s, then release …` and, after 5 s,
+`BOOT held 5 s: release now …`. On release the device erases its stored Wi-Fi
+credentials and restarts straight into pairing mode.
 
-- Boot (pure decision function `decideBootAction()` in
-  [firmware/include/provisioning_logic.h](../firmware/include/provisioning_logic.h)):
-  1. if the `prov_req` flag is set in NVS (`resmon/prov_req`, from the BOOT
-     gesture or a provisioning-start retry) → clear it, reset stored Wi-Fi
-     credentials, enter provisioning mode;
-  2. else if stored Wi-Fi credentials exist (Wi-Fi NVS store has an SSID) →
-     connect as STA;
-  3. else if the compiled dev fallback `WIFI_SSID` (from ignored `secrets.h`)
-     is non-empty → connect with it (no BLE);
-  4. else → provisioning mode.
-- Dev fallback credentials are applied with `WIFI_STORAGE_RAM`, so they are
-  never written to the Wi-Fi NVS store and never mistaken for provisioned
-  credentials on a later boot.
-- Provisioning mode: BLE advertising as above. When the client's credentials
-  work, the device joins Wi-Fi and immediately starts mDNS `resmon.local` and
-  the MQTT broker; BLE stays up for about 35 s more (see Clarifications) and
-  is then stopped and its memory freed.
-- Wi-Fi connection is non-blocking and the firmware owns the reconnect
-  policy: the core's auto-reconnect is disabled, and `loop()` calls
-  `esp_wifi_connect()` only when no attempt is in flight (after a disconnect
-  event, or 30 s without a result), with bounded exponential backoff
-  (5 s → 60 s, reset on connect). DAC stale-decay and the BOOT button keep
-  running while Wi-Fi is down; "connecting" is logged at most every 10 s with
-  the last real disconnect reason. mDNS and the MQTT broker are started once,
-  on the first successful connection, and keep running across reconnects.
-- IP, SSID and RSSI for diagnostics come from the `GOT_IP` event and
-  `esp_wifi_sta_get_ap_info()`, because the Arduino `WiFi` accessors report
-  nothing after the provisioning manager has started Wi-Fi itself. The DHCP
-  hostname is set to `resmon` on the STA interface on every path.
-- Re-open provisioning on a configured device: while the firmware is running,
-  hold the on-board BOOT button (GPIO0) for 5–15 s, then release → the
-  firmware sets `prov_req`, resets the stored Wi-Fi credentials, and restarts.
-  Releasing earlier does nothing; holding longer than 15 s is logged
-  (`BOOT held too long ..., ignored`) and does nothing.
-- MQTT contract (`resmon/cpu`, `resmon/mem`, port 1883) is unchanged; see
-  [protocol.md](protocol.md).
+- Releasing before 5 s does nothing.
+- Holding longer than 15 s is ignored. This protects against a serial tool that holds
+  the board's DTR line, which pulls GPIO0 low (see
+  [hardware.md](hardware.md#boot-button-gpio0)).
+- Do not hold BOOT while pressing EN/RESET or plugging in power: that starts the ESP32's
+  ROM download mode instead of the firmware.
+- If the device is power-cycled before pairing completes, the request has already been
+  used up: it boots with the `secrets.h` fallback if there is one, otherwise into
+  pairing mode again (the credentials are already erased).
 
-## Daemon-side result
+### Upgrading a board that ran older firmware
 
-On success the client receives `ip4_addr`. The daemon saves:
+Firmware from before BLE provisioning connected with `WiFi.begin(SSID, PASSWORD)`,
+which also saves the network in the ESP32's Wi-Fi storage. The new firmware treats that
+as a paired network: it connects with it, skips pairing mode, ignores later `secrets.h`
+changes, and answers the serial query with `state=provisioned`. To start fresh, use the
+BOOT gesture once, or erase the flash and upload again (this also generates a new
+pairing code):
 
-- `Host` = `resmon.local` (unchanged default; mDNS name)
-- `FallbackAddress` = the received IPv4 address (used when `Host` fails to
-  resolve/connect; not saved if `ip4_addr` is missing or invalid)
-
-The Wi-Fi password is held in memory only for the provisioning attempt and
-never persisted or logged.
-
-## User flows
-
-### First boot (no credentials)
-
-> **Boards that ran earlier firmware are not "no credentials".** The previous
-> firmware called `WiFi.begin(SSID, PASS)` with Arduino's default
-> `persistent=true`, so the `secrets.h` network is already in the Wi-Fi NVS
-> store. After upgrading, the device boots with `source=stored`, skips BLE,
-> ignores `secrets.h` changes, and answers
-> `RESMON-POP unavailable state=provisioned`. Before first-boot testing, either
-> use the BOOT gesture once (hold 5–15 s, then release), or erase the whole
-> flash and re-upload (`pio run -e esp32dev -t erase`, then
-> `pio run -e esp32dev -t upload`; the erase also generates a new pairing code).
-
-1. Flash the firmware without `firmware/src/secrets.h` (or with an empty
-   `WIFI_SSID`).
-2. The serial log shows
-   `Wi-Fi: no stored credentials and no secrets.h fallback; entering BLE provisioning`
-   and `Provisioning: name=PROV_RESMON_XXXXXX pop=ABCDEFGH`.
-3. With the USB cable connected, start pairing in the Windows app. It finds
-   `PROV_RESMON_XXXXXX` over BLE, reads the pairing code over USB serial
-   (`RESMON?POP`), or asks you to type the 8-character code from the serial log.
-4. Enter the Wi-Fi SSID and password in the app. The device joins Wi-Fi and
-   the broker becomes reachable at `resmon.local:1883` (fallback: the reported
-   IP address) right away; the app reads the result over BLE, and BLE shuts
-   down about 35 s later.
-
-### Re-pair / change Wi-Fi network
-
-1. While the firmware is running (not during reset), press and hold the
-   **BOOT** button. The serial log shows `BOOT pressed: hold 5-15 s, then
-   release ...`, and after 5 s `BOOT held 5 s: release now ...`.
-2. Release it before 15 s have passed. The board clears its Wi-Fi
-   credentials and restarts directly into provisioning mode; pair again as
-   above.
-3. If the board is power-cycled before pairing completes, the request flag
-   has already been consumed: the device boots with the dev fallback if one
-   is compiled in, otherwise straight back into provisioning.
-
-Do **not** hold BOOT while pressing EN/RESET or plugging in power: that
-enters the ROM serial download mode instead of running the firmware.
+```sh
+pio run -e esp32dev -t erase
+pio run -e esp32dev -t upload
+```
 
 ### Development fallback (`secrets.h`)
 
-- Copy `firmware/src/secrets.example.h` to `firmware/src/secrets.h` (ignored by
-  git) and set `WIFI_SSID` / `WIFI_PASSWORD`.
-- The fallback is used only when no BLE-provisioned credentials are stored
-  and no provisioning was requested. Stored credentials always win; to go
-  back to the fallback, use the BOOT gesture and then power-cycle without
-  pairing.
+For development without the pairing app, copy
+[`firmware/src/secrets.example.h`](../firmware/src/secrets.example.h) to
+`firmware/src/secrets.h` (ignored by git) and set `WIFI_SSID` and `WIFI_PASSWORD`. The
+fallback is used only when no paired credentials are stored, and it is kept in RAM
+only, so it is never mistaken for paired credentials later. Stored credentials always
+win; to go back to the fallback, use the BOOT gesture and then power-cycle without
+pairing.
 
-## Bench-test checklist (not yet run)
+## Security model
 
-Record the date, board, and result of each item here once tested. On a board
-that ran earlier firmware, first clear the old Wi-Fi NVS entry (BOOT gesture or
-full erase, see "First boot") or item 1 fails by design.
+- **Transport.** BLE using the ESP-IDF `wifi_provisioning` manager and protocomm
+  **Security1**: an X25519 key exchange, AES-256-CTR encryption, and a proof of
+  possession (the pairing code). No custom cryptography. The Windows client is an
+  independent implementation of the client side of the official protocol (the
+  reference client is ESP-IDF's `esp_prov` tool).
+- **Pairing code.** Generated once with the hardware random number generator, stored
+  in NVS (namespace `resmon`, key `pop`), and kept across re-pairing; only a full flash
+  erase, or a missing or invalid stored value, produces a new one. 8 characters from a
+  32-symbol alphabet give 40 bits. It is never sent over Wi-Fi or MQTT.
+- **USB is trusted.** Anyone with physical USB access can read the code from the serial
+  log or with the [serial query](#serial-pairing-code-query) while the device is in
+  pairing mode. The code is not printed outside pairing mode.
+- **Pairing window.** Pairing mode only runs on a device without credentials or after
+  the BOOT gesture. Bluetooth is turned off about 35 s after a successful pairing, and
+  on boots that don't pair the Bluetooth memory is released entirely.
+- **Credentials on the device** are stored in the ESP32's standard Wi-Fi NVS storage,
+  **without** flash or NVS encryption. Someone with the board can read them out. See the
+  [roadmap](roadmap.md) for the open decision on encryption.
+- **Credentials on the PC.** The daemon never stores the Wi-Fi password. Only the
+  device's IP address is saved.
+- **Logs.** `platformio.ini` sets `CORE_DEBUG_LEVEL=1` (errors only) and
+  `config.h` refuses to build at level 3 or higher, because at level 5 the Arduino core
+  logs the received Wi-Fi password. The daemon never logs the password, the pairing
+  code or the SSID.
 
-- [ ] First boot without credentials: advertising name, hint line, `RESMON?POP` reply.
-- [ ] Pairing from the Windows client; `ip4_addr` received; MQTT reachable via
-      `resmon.local` and the IP.
-- [ ] BLE stays up ~35 s after success, then `Provisioning: ended`; free heap
-      rises after the BT memory release.
-- [ ] Wrong PoP: client reports "pairing code rejected"; a retry with the right
-      code works.
-- [ ] Wrong password / unknown SSID: `ConnectionFailed` with AuthError /
-      NetworkNotFound; retry with correct credentials in the same session and in
-      a new session.
-- [ ] Transient auth failure on the first attempt (e.g. a handshake timeout with
-      the correct password): the core's single automatic retry may then succeed
-      after the firmware already reset the provisioning state. The firmware now
-      cancels that retry (`esp_wifi_disconnect()` after the reset), and if the
-      device still gets an IP before any credentials were accepted it stays in
-      provisioning mode, not `source=stored`, and after 5 s logs
-      `Wi-Fi: got an IP while provisioning, but no credentials were accepted
-      after 5 s ...`. A normal successful pairing must **not** print that
-      line. Confirm the client reports the failure and that a retry from the
-      wizard re-provisions it.
-- [ ] Timeout (failure other than AuthError / NetworkNotFound, e.g. AP refuses
-      association): the client times out after 30 s; a wizard retry gets
-      `InternalError`; a power cycle boots with the stored credentials (no BLE);
-      the BOOT gesture reopens provisioning.
-- [ ] **AP lost during the BLE grace period:** pair successfully, then power-cycle
-      the AP within 30 s. Expect `Wi-Fi lost during BLE grace period ...;
-      credentials kept`, BLE stopping, reconnection once the AP is back, and the
-      credentials still present after a device power cycle.
-- [ ] Reconnect after AP loss in normal operation (backoff 5 s → 60 s, last
-      reason logged).
-- [ ] BOOT gesture: release after < 5 s (nothing), 5–15 s (re-provisioning),
-      > 15 s (ignored); with a serial monitor attached.
-- [ ] Dev fallback via `secrets.h`; stored credentials take priority.
-- [ ] Provisioning start failure path (if it can be provoked): 3 restarts, then
-      fallback or a rate-limited error.
+## Protocol reference
+
+### BLE
+
+| Item | Value |
+| --- | --- |
+| Device name | `PROV_RESMON_` + 6 uppercase hex digits, e.g. `PROV_RESMON_A1B2C3`. The name may be in the scan response, so scan actively. |
+| GATT service UUID | `021a9004-0382-4aea-bff4-6b3f1c5adfb4` |
+| Endpoints | Identified by the text of their Characteristic User Description (0x2901): `prov-session`, `prov-config`, `proto-ver`, `prov-scan`. Look them up by that text, not by characteristic UUID. |
+| Security | Security1 with the pairing code as proof of possession |
+| Credential limits | SSID up to 32 bytes, WPA passphrase up to 63 bytes (a raw 64-hex-digit PSK is not supported) |
+
+### Session (Security1)
+
+1. Client → `SessionCmd0 { client_pubkey }`.
+2. Device → `SessionResp0 { device_pubkey, device_random (16 bytes) }`.
+3. Both sides compute `key = X25519(shared) XOR SHA-256(pairing code)`; the IV is
+   `device_random`. One AES-256-CTR keystream covers every message in both directions
+   for the rest of the session.
+4. Client → `SessionCmd1 { client_verify_data = encrypt(device_pubkey) }`.
+5. Device → `SessionResp1 { device_verify_data }`; the client checks that it decrypts to
+   its own public key.
+
+With a wrong pairing code, ESP-IDF 4.4 does not reply to step 4: it closes the BLE
+connection. The client treats a dropped link during step 4 (or a stale step-2 reply
+read back from the characteristic) as "wrong pairing code". The device keeps
+advertising, so the user can retry.
+
+If an exchange fails half-way, the two keystreams can no longer be aligned; the client
+discards the session and reconnects.
+
+### Sending Wi-Fi settings
+
+On `prov-config`, encrypted with the session keystream:
+
+1. `GetStatus` first. If the device already reports *Connected* (it joined Wi-Fi after
+   an earlier attempt that timed out or lost the link), the client sends nothing and
+   reports success, or "already on a different network" if the joined SSID differs.
+2. `SetConfig { ssid, passphrase }`, then `ApplyConfig`.
+3. Poll `GetStatus` at most once per second, for up to 30 s, until the state is
+   *Connected* (read `connected.ip4_addr`) or *ConnectionFailed* (`AuthError` or
+   `NetworkNotFound`).
+
+The outcome rules follow ESP-IDF 4.4.7 behaviour:
+
+- **ConnectionFailed** (`AuthError`, `NetworkNotFound`): the firmware resets the
+  provisioning state, so the client can send new settings in the same or a new session.
+- **Any other Wi-Fi failure** makes ESP-IDF keep retrying, so the client sees its 30 s
+  timeout. The device has then already stored the credentials and rejects another
+  `ApplyConfig` (`InternalError`); a power cycle would boot with the stored (bad)
+  credentials and no Bluetooth. Recovery is the BOOT gesture.
+- **IP address.** `ip4_addr` may be missing or unusable. The client saves
+  `FallbackAddress` only for a usable unicast IPv4 address.
+- **Bluetooth after success.** The firmware keeps BLE up for 30 s after success
+  (`PROV_STOP_AFTER_SUCCESS_MS`) plus a 5 s cleanup delay (`PROV_BLE_CLEANUP_DELAY_MS`),
+  so the client can read the result. The MQTT broker starts as soon as the device has
+  an IP address, while BLE is still up. The client does not rely on this window: a link
+  lost after a *Connected* reply still counts as success, and a link lost while waiting
+  makes the wizard check whether the broker is reachable.
+
+### Serial pairing-code query
+
+The Windows client reads the pairing code over USB so the user doesn't have to type
+it.
+
+- UART0, 115200 8N1. Lines end with `\n` (`\r\n` is accepted). Lines longer than
+  32 characters and unknown lines are ignored.
+- Send `RESMON?POP`.
+- In pairing mode the device answers `RESMON-POP name=PROV_RESMON_XXXXXX pop=ABCDEFGH`.
+- Otherwise it answers `RESMON-POP unavailable state=<state>`:
+
+  | `state` | Meaning |
+  | --- | --- |
+  | `connecting` | Has credentials, not connected (yet) |
+  | `provisioned` | Connected with paired credentials |
+  | `dev-fallback` | Connected with `secrets.h` credentials |
+  | `provisioning` | In pairing mode, but the code could not be loaded from NVS |
+  | `error` | Pairing mode could not start |
+  | `starting` | Setup not finished (not normally seen) |
+
+- Other log lines are interleaved on the same port; ignore lines that don't start with
+  `RESMON-POP `.
+- Open the port with DTR and RTS both off. That avoids resetting the board and avoids
+  pulling GPIO0 low through the auto-program circuit. The Windows client does this,
+  tries each COM port for at most 1.5 s, and only accepts a reply whose `name=` matches
+  the selected BLE device.
+
+## Firmware behaviour worth knowing
+
+The firmware drives the ESP-IDF provisioning manager directly rather than through
+Arduino's `WiFiProv.beginProvision()`, because auto-stop has to be disabled between
+initialising and starting the manager (otherwise BLE goes down about 1 s after success,
+before the client can read the result). Implementation notes:
+
+- **Provisioning fails to start** (manager error, no pairing code, or no start event
+  within 5 s): the firmware restarts into pairing mode after 3 s and tries again. After
+  3 failed starts in a row it connects with the `secrets.h` fallback if there is one,
+  or stays up and logs `Power-cycle to retry` every 30 s. The count survives software
+  restarts and is cleared at power-on, on a successful start and by the BOOT gesture.
+- **Wi-Fi drops during the 35 s after success** (for example the router reboots): the
+  provisioning manager reports this as a credential failure, but the firmware keeps the
+  credentials, stops BLE early, and lets its normal reconnect policy take over.
+- **An IP address before the credentials are accepted.** On every pairing the device
+  gets its IP address a moment before the manager confirms success, so the firmware
+  waits for that confirmation. It logs a warning only if the wait lasts 5 s.
+- **Bluetooth memory.** Arduino releases the Bluetooth memory before `setup()` unless
+  the Bluetooth support code is linked in; `platformio.ini` forces that with
+  `-Wl,-u,btStarted`. Without it BLE provisioning could never start.
+- **Partition table.** The BLE image is about 1.6 MB, so the build uses
+  `min_spiffs.csv` (two 1.875 MB app slots, 128 KB SPIFFS). The NVS location is
+  unchanged, so stored credentials and the pairing code survive the switch.
 
 ## Limitations
 
-- Not yet tested on physical hardware or against the Windows client.
-- Credentials are stored in the standard ESP-IDF Wi-Fi NVS store without NVS
-  or flash encryption (development storage policy; see
-  [roadmap.md](roadmap.md) Phase 4).
-- Security1 (not Security2/SRP6a) is used; the IDF 4.4 manager in core 2.0.17
-  supports Security0/1 only.
-- Only SSID and passphrase are provisioned. Hostname, MQTT port and topics
-  remain compile-time defaults in `config.h`.
-- The Arduino core still retries once by itself after the very first
-  disconnect of each boot (independent of the auto-reconnect setting). That
-  single extra attempt can overlap with the firmware's own policy; it is
-  bounded and not repeated.
-- The BLE + Wi-Fi image needs the `min_spiffs.csv` partition table (two
-  1.875 MB OTA app slots, 128 KB SPIFFS). NVS offset and size are unchanged
-  from the default table.
+- Not yet tested on hardware or end to end.
+- Security1 rather than Security2 (SRP6a): ESP-IDF 4.4 in Arduino-ESP32 2.0.17 only
+  offers Security0 and Security1.
+- Only the SSID and password are provisioned. The host name, MQTT port and topics are
+  compile-time settings in `config.h`, and the wizard does not offer them.
+- Stored credentials are not encrypted on the device.
+- `resmon.local` is ambiguous when several monitors share a network; the saved IP
+  address (`FallbackAddress`) is then the reliable way to reach the paired one.
+
+## Testing on hardware
+
+When you have a board, these are the cases worth checking (on a board that ran older
+firmware, clear the old credentials first, see above):
+
+- First boot: advertised name, serial hint line, `RESMON?POP` reply.
+- Pairing from the wizard: IP address received; broker reachable via `resmon.local`
+  and via the IP; BLE stops about 35 s later and free heap rises.
+- Wrong pairing code, then the right one.
+- Wrong password and unknown SSID, then a retry in the same and in a new session.
+- A failure that is neither (for example an AP that refuses association): 30 s timeout,
+  rejected retry, BOOT gesture recovers.
+- Router power-cycled during the 35 s after success: credentials kept, reconnects.
+- Reconnect after losing the router in normal operation (5 s → 60 s backoff).
+- BOOT gesture released after under 5 s, 5–15 s and over 15 s, with a serial monitor
+  attached.
+- `secrets.h` fallback, and stored credentials taking priority over it.
