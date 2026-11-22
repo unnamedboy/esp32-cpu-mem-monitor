@@ -7,7 +7,7 @@ Windows daemon publishes metric percentages over MQTT; the ESP32 receives those
 values and drives two analogue gauge outputs through an external I2C DAC.
 
 A front-panel faceplate option is available as an SVG asset at
-[assets/SQ52_CPU_MEM_1to1.svg](assets/SQ52_CPU_MEM_1to1.svg). This is intended as a
+[assets/SQ52_CPU_MEM_1to1.svg](../assets/SQ52_CPU_MEM_1to1.svg). This is intended as a
 replacement face for a generic voltmeter-style housing and is designed to label
 CPU and memory as a paired 1:1 gauge set rather than a voltage meter.
 
@@ -73,7 +73,7 @@ checked and documented, so here is how the firmware uses it:
   non-blocking debounce. Holding it for 5–15 s and then releasing it
   (`BOOT_BUTTON_MIN_HOLD_MS` / `BOOT_BUTTON_MAX_HOLD_MS`) sets the NVS
   `prov_req` flag, clears the stored Wi-Fi credentials, and restarts into BLE
-  provisioning ([PROVISIONING.md](PROVISIONING.md)). The action fires on
+  provisioning ([provisioning.md](provisioning.md)). The action fires on
   release only. Holds longer than 15 s are logged (`BOOT held too long ...,
   ignored`) and do nothing. A button already held when the firmware starts
   sampling is ignored until it is released.

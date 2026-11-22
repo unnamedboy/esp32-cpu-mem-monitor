@@ -28,7 +28,7 @@ Completed implementation summary:
   `resmon/status`. The daemon subscribes to it and can push its log, a metrics
   line and the device status to the user's own Grafana Loki. Loki is disabled
   by default, and the token is stored DPAPI-encrypted. Contract and streams:
-  COMMUNICATION.md; see Observability below.
+  protocol.md; see Observability below.
 - Firmware Wi-Fi credentials are no longer tracked. Local development uses
   ignored `firmware/src/secrets.h`, copied from
   `firmware/src/secrets.example.h`.
@@ -38,7 +38,7 @@ Completed implementation summary:
   parsing, reconnect backoff, provisioning-start retry policy, the BOOT
   button hold-and-release window, and the `resmon/status` payload.
 - Firmware Wi-Fi startup is non-blocking and BLE provisioning is implemented
-  per [PROVISIONING.md](PROVISIONING.md) (hardware validation pending).
+  per [provisioning.md](provisioning.md) (hardware validation pending).
 - The firmware publishes a `resmon/status` device-health JSON snapshot every
   10 s into its own broker (see [Observability](#observability); hardware
   validation pending).
@@ -54,9 +54,9 @@ Completed implementation summary:
 - The tray UI is available in English and Simplified Chinese (`Ui:Language`
   = `auto` | `en` | `zh-Hans`); logs stay English.
 
-See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
-See [PROVISIONING.md](PROVISIONING.md) for the BLE pairing contract.
-See [HARDWARE.md](HARDWARE.md) for the current hardware design and open
+See [protocol.md](protocol.md) for the active message contract.
+See [provisioning.md](provisioning.md) for the BLE pairing contract.
+See [hardware.md](hardware.md) for the current hardware design and open
 electrical/mechanical decisions.
 
 ## Target Architecture
@@ -158,7 +158,7 @@ opt-in feature, not a prerequisite for the wizard.
 ## Phase 4: ESP32 Provisioning and Secure Storage
 
 Status: Implemented on both sides; **not yet validated on hardware** or end to
-end. Firmware side: see [PROVISIONING.md](PROVISIONING.md). Windows side: the BLE
+end. Firmware side: see [provisioning.md](provisioning.md). Windows side: the BLE
 provisioning client (`daemon/ResourceMonitorDaemon/Provisioning`) and the pairing
 wizard implement steps 4–6 and 8 of the desired user flow; steps 1–3 and 7 belong
 to the firmware. The optional fields in step 5 (device name, MQTT port and
@@ -172,7 +172,7 @@ credentials at rest and in transit.
 
 ### Implemented (firmware)
 
-The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
+The contract is [provisioning.md](provisioning.md). Summary:
 
 - BLE provisioning through the ESP-IDF `wifi_provisioning` manager (called
   directly so auto-stop can be disabled; BLE stays up ~35 s after success), Security1 with an 8-character Proof of Possession, advertised as
@@ -194,7 +194,7 @@ The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
    and after), BLE staying up ~35 s after success, the provisioning-start
    retry path, the BOOT gesture with a serial tool attached, and an AP loss
    during the BLE grace period (credentials must survive). Checklist and
-   results in PROVISIONING.md.
+   results in provisioning.md.
 2. End-to-end test with the Windows pairing client.
 3. Decide on NVS/flash encryption before treating stored credentials as
    product-grade (see Storage Policy).
@@ -329,7 +329,7 @@ Status: Firmware and daemon sides implemented (2026-11-22); not yet validated on
 - Firmware: `resmon/status` (QoS 0, not retained, every 10 s while Wi-Fi is
   connected, the first one 10 s after the broker starts) carries schema version,
   build id, uptime, free/minimum heap, RSSI, Wi-Fi and provisioning state and
-  DAC presence. Contract: [COMMUNICATION.md](COMMUNICATION.md). Formatting is
+  DAC presence. Contract: [protocol.md](protocol.md). Formatting is
   a pure, unit-tested header (`firmware/include/status_payload.h`); feature
   flag `ENABLE_STATUS_TOPIC` in `firmware/src/config.h`.
 - Daemon: subscribes to `Device:StatusTopic` (default `resmon/status`) after

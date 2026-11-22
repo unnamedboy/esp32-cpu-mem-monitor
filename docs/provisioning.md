@@ -22,7 +22,7 @@ implements. Both sides must follow it exactly.
   `components/protocomm/proto/*.proto`, `components/wifi_provisioning/proto/*.proto`).
 - BLE service UUID: `021a9004-0382-4aea-bff4-6b3f1c5adfb4` (Arduino WiFiProv
   default; the firmware sets it explicitly from `PROV_BLE_SERVICE_UUID` in
-  [firmware/src/config.h](firmware/src/config.h)).
+  [firmware/src/config.h](../firmware/src/config.h)).
 - BLE advertised device name / service name: `PROV_RESMON_XXXXXX`, where
   `XXXXXX` is the last 3 bytes of the Wi-Fi STA MAC in uppercase hex. The
   client discovers devices whose name starts with `PROV_RESMON_`.
@@ -109,7 +109,7 @@ The firmware is pinned to PlatformIO `espressif32 @ 7.0.1`
 and uses the IDF 4.4 `wifi_provisioning` API directly instead of
 `WiFiProv.beginProvision()`, because `beginProvision()` does init and start in
 one call and auto-stop can only be disabled in between. Sequence
-(`startProvisioning()` in [firmware/src/main.cpp](firmware/src/main.cpp)):
+(`startProvisioning()` in [firmware/src/main.cpp](../firmware/src/main.cpp)):
 
 ```cpp
 wifiLowLevelInit(true);                        // Wi-Fi driver + Arduino event task
@@ -227,7 +227,7 @@ Other calls and events:
   `RESMON-POP `.
 - The .NET client must open the COM port with `DtrEnable=false,
   RtsEnable=false` to avoid resetting the board (and to avoid pulling GPIO0
-  low through the auto-program circuit, see [HARDWARE.md](HARDWARE.md)), try
+  low through the auto-program circuit, see [hardware.md](hardware.md)), try
   each available COM port with a short timeout (≤ 1.5 s per port), and match
   the returned `name=` against the BLE device it is pairing with. If no port
   answers, the wizard asks the user to type the code.
@@ -235,7 +235,7 @@ Other calls and events:
 ## Device lifecycle
 
 - Boot (pure decision function `decideBootAction()` in
-  [firmware/include/provisioning_logic.h](firmware/include/provisioning_logic.h)):
+  [firmware/include/provisioning_logic.h](../firmware/include/provisioning_logic.h)):
   1. if the `prov_req` flag is set in NVS (`resmon/prov_req`, from the BOOT
      gesture or a provisioning-start retry) → clear it, reset stored Wi-Fi
      credentials, enter provisioning mode;
@@ -269,7 +269,7 @@ Other calls and events:
   Releasing earlier does nothing; holding longer than 15 s is logged
   (`BOOT held too long ..., ignored`) and does nothing.
 - MQTT contract (`resmon/cpu`, `resmon/mem`, port 1883) is unchanged; see
-  [COMMUNICATION.md](COMMUNICATION.md).
+  [protocol.md](protocol.md).
 
 ## Daemon-side result
 
@@ -380,7 +380,7 @@ full erase, see "First boot") or item 1 fails by design.
 - Not yet tested on physical hardware or against the Windows client.
 - Credentials are stored in the standard ESP-IDF Wi-Fi NVS store without NVS
   or flash encryption (development storage policy; see
-  [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) Phase 4).
+  [roadmap.md](roadmap.md) Phase 4).
 - Security1 (not Security2/SRP6a) is used; the IDF 4.4 manager in core 2.0.17
   supports Security0/1 only.
 - Only SSID and passphrase are provisioned. Hostname, MQTT port and topics

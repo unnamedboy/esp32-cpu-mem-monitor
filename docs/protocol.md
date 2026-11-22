@@ -17,7 +17,7 @@ The ESP32 validates each payload and ignores malformed or out-of-range values. C
 - Publisher: the ESP32 firmware, publishing into its own hosted broker (local
   publish). Only clients subscribed to `resmon/status` receive it.
 - Topic: `resmon/status` (`STATUS_TOPIC` in
-  [firmware/src/config.h](firmware/src/config.h); daemon setting
+  [firmware/src/config.h](../firmware/src/config.h); daemon setting
   `Device:StatusTopic`, default the same; no wildcards, must differ from the
   metric topics).
 - QoS 0, not retained. Published every 10 s (`STATUS_INTERVAL_MS`), only

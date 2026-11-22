@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ResourceMonitorDaemon.Observability
 {
-    /// <summary>The fixed, low-cardinality streams the daemon writes (see COMMUNICATION.md).</summary>
+    /// <summary>The fixed, low-cardinality streams the daemon writes (see docs/protocol.md).</summary>
     public enum LokiStreamKind
     {
         /// <summary><c>{app="resmon-daemon", kind="log", level="&lt;lvl&gt;"}</c></summary>

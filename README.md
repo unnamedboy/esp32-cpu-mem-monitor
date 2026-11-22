@@ -19,7 +19,7 @@ The .NET app in [daemon/ResourceMonitorDaemon](daemon/ResourceMonitorDaemon) cur
 - includes a tray UI with pause/resume, a settings dialog, a log viewer and once-per-outage MQTT notifications;
 - includes a pairing wizard that sets up the ESP32's Wi-Fi over Bluetooth LE and remembers the device's IP address (not yet tested on real hardware);
 - clamps values to the valid `0.0..100.0` range before publishing;
-- subscribes to the optional device status topic `resmon/status` (see [COMMUNICATION.md](COMMUNICATION.md#device-status-resmonstatus));
+- subscribes to the optional device status topic `resmon/status` (see [docs/protocol.md](docs/protocol.md#device-status-resmonstatus));
 - can optionally forward its log, a metrics line and the device status to your own Grafana Loki (off by default; see [Optional: Grafana Loki](#optional-grafana-loki)).
 
 ### ESP32 firmware
@@ -29,7 +29,7 @@ The firmware in [firmware/src/main.cpp](firmware/src/main.cpp) currently does th
 - gets Wi-Fi credentials through BLE provisioning (ESP-IDF `wifi_provisioning`
   called directly, Security1 + 8-character pairing code), with an
   optional compiled `secrets.h` development fallback — see
-  [PROVISIONING.md](PROVISIONING.md) (implemented, **not yet tested on hardware**);
+  [docs/provisioning.md](docs/provisioning.md) (implemented, **not yet tested on hardware**);
 - re-opens provisioning when the on-board BOOT button is held for 5–15 seconds and then released (longer holds are ignored);
 - answers `RESMON?POP` on USB serial with the pairing code while in provisioning mode;
 - connects to Wi-Fi as a station without blocking the main loop; the firmware owns the reconnect policy (bounded 5–60 s backoff);
@@ -44,10 +44,10 @@ The firmware in [firmware/src/main.cpp](firmware/src/main.cpp) currently does th
 
 ### Shared configuration and contract
 
-- MQTT contract: [COMMUNICATION.md](COMMUNICATION.md)
-- BLE provisioning / pairing contract: [PROVISIONING.md](PROVISIONING.md)
-- Hardware design/status: [HARDWARE.md](HARDWARE.md)
-- roadmap and future phases: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
+- MQTT contract: [docs/protocol.md](docs/protocol.md)
+- BLE provisioning / pairing contract: [docs/provisioning.md](docs/provisioning.md)
+- Hardware design/status: [docs/hardware.md](docs/hardware.md)
+- roadmap and future phases: [docs/roadmap.md](docs/roadmap.md)
 - firmware configuration: [firmware/src/config.h](firmware/src/config.h)
 
 ## Runtime contract
@@ -57,7 +57,7 @@ The firmware in [firmware/src/main.cpp](firmware/src/main.cpp) currently does th
 - CPU topic: `resmon/cpu` (default, configurable)
 - memory topic: `resmon/mem` (default, configurable)
 - payload: plain ASCII percentage, for example `42.5`
-- device status topic (ESP32 → subscribers such as the daemon): `resmon/status`, compact JSON, optional, see [COMMUNICATION.md](COMMUNICATION.md#device-status-resmonstatus)
+- device status topic (ESP32 → subscribers such as the daemon): `resmon/status`, compact JSON, optional, see [docs/protocol.md](docs/protocol.md#device-status-resmonstatus)
 - transport: MQTT only
 - QoS: 0 (at-most-once)
 
@@ -81,7 +81,7 @@ A firmware image built without `secrets.h` contains no Wi-Fi credentials. On
 first boot it enters BLE provisioning mode and is paired from the Windows app;
 the serial log shows the BLE name and the 8-character pairing code. Hold the
 board's BOOT button for 5–15 seconds while it is running, then release it, to
-forget the Wi-Fi network and pair again. Details: [PROVISIONING.md](PROVISIONING.md).
+forget the Wi-Fi network and pair again. Details: [docs/provisioning.md](docs/provisioning.md).
 
 > **Upgrading a board that ran earlier firmware:** the old firmware called
 > `WiFi.begin(SSID, PASS)` with the Arduino default `persistent=true`, so the
@@ -151,7 +151,7 @@ Invalid values are replaced by defaults (or clamped) with a warning in the log r
 The daemon never stores Wi-Fi credentials.
 
 The log is written to `%LocalAppData%\ResourceMonitorDaemon\daemon.log` (rolled to `daemon.log.1` at 5 MB) and can be opened from the tray menu.
-See [daemon/IMPLEMENTATION_SUMMARY.md](daemon/IMPLEMENTATION_SUMMARY.md) for all settings, validation rules and the settings API.
+See [docs/daemon.md](docs/daemon.md) for all settings, validation rules and the settings API.
 
 ### Language
 
@@ -169,7 +169,7 @@ The tray menu switches as soon as the setting changes; notifications and windows
 
 ### Pairing a device (Wi-Fi setup over Bluetooth)
 
-The tray's **Pair device… (配对设备…)** wizard sends your Wi-Fi name and password to the ESP32 over an encrypted Bluetooth LE session. The session is protected by the device's 8-character pairing code. You need a PC with Bluetooth LE and firmware that implements the pairing contract ([PROVISIONING.md](PROVISIONING.md)).
+The tray's **Pair device… (配对设备…)** wizard sends your Wi-Fi name and password to the ESP32 over an encrypted Bluetooth LE session. The session is protected by the device's 8-character pairing code. You need a PC with Bluetooth LE and firmware that implements the pairing contract ([docs/provisioning.md](docs/provisioning.md)).
 
 > Status: the wizard and the Bluetooth client are implemented and unit-tested, but they have **not yet been tested with a physical ESP32**.
 
@@ -226,7 +226,7 @@ Settings (section `Observability:Loki`; environment form `RESMON_Observability__
 | `BatchMaxEntries` / `QueueCapacity` / `FlushIntervalMs` | `500` / `5000` / `2000` | Batching. The queue is bounded: when it is full, the oldest entries are dropped and the drops are reported in the local log. |
 | `Gzip` | `true` | Sends the request body with `Content-Encoding: gzip` |
 
-Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-daemon--grafana-loki-streams). What is sent:
+Streams and labels are listed in [docs/protocol.md](docs/protocol.md#optional-daemon--grafana-loki-streams). What is sent:
 
 - daemon log lines at or above `MinLevel`, redacted before they are sent:
   - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`, including their short 8.3 forms such as `C:\Users\ABCDEF~1`;
@@ -314,8 +314,8 @@ Known limitations still present:
 
 For the exact contract, hardware assumptions, and roadmap, see:
 
-- [COMMUNICATION.md](COMMUNICATION.md)
-- [PROVISIONING.md](PROVISIONING.md)
-- [HARDWARE.md](HARDWARE.md)
-- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
-- [daemon/IMPLEMENTATION_SUMMARY.md](daemon/IMPLEMENTATION_SUMMARY.md)
+- [docs/protocol.md](docs/protocol.md)
+- [docs/provisioning.md](docs/provisioning.md)
+- [docs/hardware.md](docs/hardware.md)
+- [docs/roadmap.md](docs/roadmap.md)
+- [docs/daemon.md](docs/daemon.md)

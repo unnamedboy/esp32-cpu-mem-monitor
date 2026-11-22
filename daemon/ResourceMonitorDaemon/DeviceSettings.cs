@@ -43,7 +43,7 @@ namespace ResourceMonitorDaemon
 
         /// <summary>
         /// MQTT topic the daemon subscribes to for the optional device status JSON
-        /// (see COMMUNICATION.md). No wildcards; must differ from the metric topics.
+        /// (see docs/protocol.md). No wildcards; must differ from the metric topics.
         /// </summary>
         public string StatusTopic { get; set; } = DefaultStatusTopic;
 

@@ -2,7 +2,7 @@
 #define SERIAL_COMMAND_H
 
 // Pure helpers for the USB serial PoP query (`RESMON?POP`). No Arduino
-// dependencies so they can be unit-tested on the host. See PROVISIONING.md.
+// dependencies so they can be unit-tested on the host. See docs/provisioning.md.
 
 #include <stddef.h>
 #include <stdio.h>

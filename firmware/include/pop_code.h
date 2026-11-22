@@ -3,7 +3,7 @@
 
 // Pure helpers for the BLE provisioning Proof of Possession (pairing code)
 // and the advertised provisioning service name. No Arduino dependencies so
-// they can be unit-tested on the host. See PROVISIONING.md.
+// they can be unit-tested on the host. See docs/provisioning.md.
 
 #include <stddef.h>
 #include <stdint.h>
