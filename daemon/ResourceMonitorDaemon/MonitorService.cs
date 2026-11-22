@@ -72,7 +72,7 @@ namespace ResourceMonitorDaemon
                     var memInfo = NativeMemory.GetMemoryStatus();
 
                     string metrics = $"[Metrics] CPU: {cpuUsage:F1}% | RAM: {memInfo.UsedGB:F2}/{memInfo.TotalGB:F2} GB ({memInfo.MemoryLoad}%)";
-                    _logger.LogInformation(metrics);
+                    _logger.LogDebug(metrics);
 
                     if (_isPaused)
                     {

@@ -9,7 +9,8 @@ namespace ResourceMonitorDaemon
 {
     internal static class Program
     {
-        private static readonly string _logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "daemon.log");
+        // The exe directory may not be writable, so the log lives under %LocalAppData%.
+        private static readonly string _logFilePath = DaemonPaths.LogFilePath;
 
         [STAThread]
         static void Main()
@@ -25,6 +26,7 @@ namespace ResourceMonitorDaemon
                 {
                     logging.ClearProviders();
                     logging.AddConsole();
+                    logging.AddProvider(new DaemonLoggerProvider(_logFilePath));
                 });
 
             using var host = builder.Build();

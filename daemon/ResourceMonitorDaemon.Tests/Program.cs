@@ -203,6 +203,27 @@ var tests = new (string Name, Action Run)[]
         File.WriteAllText(path, "not json at all");
         AssertTrue(new UserSettingsStore(path).Load() == new DeviceSettings(), "expected defaults");
     }),
+
+    // ---- DaemonLoggerProvider ------------------------------------------------------------
+    ("DaemonLoggerProvider rolls daemon.log to daemon.log.1 at the size limit", () =>
+    {
+        using var temp = new TempDir();
+        var provider = new DaemonLoggerProvider(Path.Combine(temp.Path, "logs", "daemon.log"), maxFileSizeBytes: 2048);
+        var logger = provider.CreateLogger("ResourceMonitorDaemon.Tests");
+        var tasks = Enumerable.Range(0, 4).Select(t => Task.Run(() =>
+        {
+            for (var i = 0; i < 25; i++)
+            {
+                Microsoft.Extensions.Logging.LoggerExtensions.LogInformation(logger, "thread {Thread} line {Line} " + new string('x', 40), t, i);
+            }
+        })).ToArray();
+        Task.WaitAll(tasks);
+
+        AssertTrue(File.Exists(provider.RolledFilePath), "rolled file missing");
+        AssertTrue(new FileInfo(provider.FilePath).Length <= 2048, "active log exceeds limit");
+        var lines = File.ReadAllLines(provider.FilePath).Concat(File.ReadAllLines(provider.RolledFilePath)).ToArray();
+        AssertTrue(lines.All(l => l.StartsWith("[") && l.Contains("[Information] [Tests] thread")), "interleaved or malformed line");
+    }),
 };
 
 var failed = 0;
