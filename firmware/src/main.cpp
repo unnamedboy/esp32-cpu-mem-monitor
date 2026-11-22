@@ -245,7 +245,9 @@ void setProvisioningRequest(bool requested) {
     }
     if (requested) {
         prefs.putBool(PROV_NVS_KEY_REQUEST, true);
-    } else {
+    } else if (prefs.isKey(PROV_NVS_KEY_REQUEST)) {
+        // Only remove an existing key: Preferences::remove() logs an error
+        // for a missing key, which would be a misleading line on UART0.
         prefs.remove(PROV_NVS_KEY_REQUEST);
     }
     prefs.end();
