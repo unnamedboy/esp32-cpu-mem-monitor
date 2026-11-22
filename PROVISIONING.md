@@ -120,7 +120,16 @@ Other calls and events:
   `_CRED_FAIL`, `_CRED_SUCCESS` and `_END` arrive through `WiFi.onEvent()`
   exactly as with `WiFiProv`. On `PROV_END` the core calls
   `wifi_prov_mgr_deinit()`.
-- `wifi_prov_mgr_reset_sm_state_on_failure()` after `PROV_CRED_FAIL`.
+- `wifi_prov_mgr_reset_sm_state_on_failure()` after `PROV_CRED_FAIL`, but
+  only **before** provisioning has succeeded (`decideCredentialFailureAction()`
+  in `provisioning_logic.h`). The manager's Wi-Fi handler stays registered
+  until provisioning stops and reports a post-success drop (for example the AP
+  rebooting during the BLE grace period) as `CRED_FAIL` too. Resetting then
+  would write an empty STA config to flash and unpair the device, so after
+  success the firmware keeps the credentials, logs `Wi-Fi lost during BLE
+  grace period ...; credentials kept`, and calls
+  `wifi_prov_mgr_stop_provisioning()` immediately so only the firmware's
+  reconnect policy runs.
 - `wifi_prov_mgr_stop_provisioning()` 30 s after `PROV_CRED_SUCCESS`.
 - `wifi_prov_mgr_reset_provisioning()` (= `esp_wifi_restore()`) when the BOOT
   gesture requests re-provisioning.
@@ -287,6 +296,32 @@ enters the ROM serial download mode instead of running the firmware.
   and no provisioning was requested. Stored credentials always win; to go
   back to the fallback, use the BOOT gesture and then power-cycle without
   pairing.
+
+## Bench-test checklist (not yet run)
+
+Record the date, board, and result of each item here once tested:
+
+- [ ] First boot without credentials: advertising name, hint line, `RESMON?POP` reply.
+- [ ] Pairing from the Windows client; `ip4_addr` received; MQTT reachable via
+      `resmon.local` and the IP.
+- [ ] BLE stays up ~35 s after success, then `Provisioning: ended`; free heap
+      rises after the BT memory release.
+- [ ] Wrong PoP: client reports "pairing code rejected"; a retry with the right
+      code works.
+- [ ] Wrong password / unknown SSID: `ConnectionFailed` with AuthError /
+      NetworkNotFound; retry with correct credentials in the same session and in
+      a new session.
+- [ ] **AP lost during the BLE grace period:** pair successfully, then power-cycle
+      the AP within 30 s. Expect `Wi-Fi lost during BLE grace period ...;
+      credentials kept`, BLE stopping, reconnection once the AP is back, and the
+      credentials still present after a device power cycle.
+- [ ] Reconnect after AP loss in normal operation (backoff 5 s → 60 s, last
+      reason logged).
+- [ ] BOOT gesture: release after < 5 s (nothing), 5–15 s (re-provisioning),
+      > 15 s (ignored); with a serial monitor attached.
+- [ ] Dev fallback via `secrets.h`; stored credentials take priority.
+- [ ] Provisioning start failure path (if it can be provoked): 3 restarts, then
+      fallback or a rate-limited error.
 
 ## Limitations
 

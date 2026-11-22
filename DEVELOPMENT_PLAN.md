@@ -157,7 +157,8 @@ The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
    wrong PoP, wrong password / unknown SSID, re-pair via the BOOT hold-and-release gesture,
    dev fallback, reconnect after AP loss, BT memory release (heap before
    and after), BLE staying up ~35 s after success, the provisioning-start
-   retry path, and the BOOT gesture with a serial tool attached. Record
+   retry path, the BOOT gesture with a serial tool attached, and an AP loss
+   during the BLE grace period (credentials must survive). Checklist and
    results in PROVISIONING.md.
 2. End-to-end test with the Windows pairing client.
 3. Decide on NVS/flash encryption before treating stored credentials as

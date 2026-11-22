@@ -82,12 +82,12 @@ checked and documented, so here is how the firmware uses it:
   does not run. This is the normal flashing behaviour and is not changed.
 - **USB auto-program circuit:** on typical dev boards the USB-UART bridge's
   DTR/RTS lines can pull GPIO0 low (that is how auto-flashing works). A
-  serial tool holding DTR asserted with RTS released could therefore look like
-  a held BOOT button. Because the action needs a release within 5–15 s, a
-  tool that holds GPIO0 low continuously cannot trigger it; only toggling DTR
-  at exactly the wrong rhythm could. Open the port with DTR and RTS both
-  deasserted (the pairing client does this) or both asserted (the usual
-  serial-monitor default). Unverified on this board.
+  serial tool holding DTR asserted with RTS released therefore looks exactly
+  like a pressed BOOT button. Holding it low for more than 15 s is ignored,
+  but a tool that opens the port after boot with **only DTR asserted** and
+  closes it (releasing DTR) 5–15 s later **does trigger** the provisioning
+  reset. Use serial tools that assert both DTR and RTS or neither; the Windows
+  pairing client opens the port with both off. Unverified on this board.
 
 ## Intended Wiring
 
