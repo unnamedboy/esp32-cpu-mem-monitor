@@ -84,8 +84,16 @@ implements. Both sides must follow it exactly.
 - **Failure reporting:** only `AuthError` and `NetworkNotFound` surface as
   `ConnectionFailed`. Any other Wi-Fi failure makes ESP-IDF 4.4 keep retrying,
   so the client sees its 30 s timeout. The firmware never reboots or leaves
-  provisioning mode because of a failed attempt; the user can retry from the
-  wizard.
+  provisioning mode because of a failed attempt.
+  - After `ConnectionFailed` (AuthError / NetworkNotFound) the firmware resets
+    the manager state, so the user **can** retry from the wizard.
+  - After a **Timeout** (any other failure) the manager is still in its
+    "credentials received" state: IDF 4.4.7 rejects a new `ApplyConfig`
+    (`InternalError`), so a retry from the wizard does not work. The
+    credentials were also already written to NVS, so **power-cycling does not
+    reopen provisioning**: the device boots with the stored (bad) credentials
+    and keeps trying to connect. Recovery is the BOOT gesture (hold 5–15 s,
+    then release), then pair again.
 - **IP address:** `connected.ip4_addr` may be missing or invalid; the client
   must not save `FallbackAddress` in that case.
 - **Serial reply:** exactly `RESMON-POP name=PROV_RESMON_XXXXXX pop=ABCDEFGH`
@@ -130,6 +138,12 @@ Other calls and events:
   grace period ...; credentials kept`, and calls
   `wifi_prov_mgr_stop_provisioning()` immediately so only the firmware's
   reconnect policy runs.
+- After that reset the firmware calls `esp_wifi_disconnect()` to cancel the
+  Arduino core's single automatic retry, which would otherwise still use the
+  rejected credentials. If the STA nevertheless gets an IP while provisioning
+  and no credentials have been accepted, the firmware stays in provisioning
+  mode (BLE up, PoP served) instead of reporting `source=stored`
+  (`decideConnectedTransition()`), and re-evaluates once provisioning succeeds.
 - `wifi_prov_mgr_stop_provisioning()` 30 s after `PROV_CRED_SUCCESS`.
 - `wifi_prov_mgr_reset_provisioning()` (= `esp_wifi_restore()`) when the BOOT
   gesture requests re-provisioning.
@@ -166,9 +180,13 @@ Other calls and events:
   if the stored value is missing or not a valid 8-character code.
 - Never sent over Wi-Fi/MQTT. Never logged by the .NET daemon.
 - The firmware prints it on serial only as described below.
-  `platformio.ini` pins `-DCORE_DEBUG_LEVEL=1` (errors only), and
-  `firmware/src/config.h` fails the build at level ≥ 3: info logging prints
-  the PoP, and verbose logging (5) prints received Wi-Fi passwords.
+- Log level: `platformio.ini` pins `-DCORE_DEBUG_LEVEL=1` (errors only), and
+  `firmware/src/config.h` fails the build at level ≥ 3. The real leak is at
+  level 5: the Arduino core's `PROV_CRED_RECV` verbose log prints the received
+  SSID and Wi-Fi password. Levels 3–4 leak no secrets (`WiFiProv` is not
+  linked, and the precompiled ESP-IDF libraries are built with
+  `CONFIG_LOG_MAXIMUM_LEVEL=1`), but they flood UART0, which also carries the
+  pairing query, so they are refused as a margin.
 
 ### USB serial PoP query (auto-read)
 
@@ -260,6 +278,16 @@ never persisted or logged.
 
 ### First boot (no credentials)
 
+> **Boards that ran earlier firmware are not "no credentials".** The previous
+> firmware called `WiFi.begin(SSID, PASS)` with Arduino's default
+> `persistent=true`, so the `secrets.h` network is already in the Wi-Fi NVS
+> store. After upgrading, the device boots with `source=stored`, skips BLE,
+> ignores `secrets.h` changes, and answers
+> `RESMON-POP unavailable state=provisioned`. Before first-boot testing, either
+> use the BOOT gesture once (hold 5–15 s, then release), or erase the whole
+> flash and re-upload (`pio run -e esp32dev -t erase`, then
+> `pio run -e esp32dev -t upload`; the erase also generates a new pairing code).
+
 1. Flash the firmware without `firmware/src/secrets.h` (or with an empty
    `WIFI_SSID`).
 2. The serial log shows
@@ -299,7 +327,9 @@ enters the ROM serial download mode instead of running the firmware.
 
 ## Bench-test checklist (not yet run)
 
-Record the date, board, and result of each item here once tested:
+Record the date, board, and result of each item here once tested. On a board
+that ran earlier firmware, first clear the old Wi-Fi NVS entry (BOOT gesture or
+full erase, see "First boot") or item 1 fails by design.
 
 - [ ] First boot without credentials: advertising name, hint line, `RESMON?POP` reply.
 - [ ] Pairing from the Windows client; `ip4_addr` received; MQTT reachable via
@@ -313,9 +343,16 @@ Record the date, board, and result of each item here once tested:
       a new session.
 - [ ] Transient auth failure on the first attempt (e.g. a handshake timeout with
       the correct password): the core's single automatic retry may then succeed
-      after the firmware already reset the provisioning state, leaving the device
-      online for this boot but unprovisioned in NVS. Confirm the client reports
-      the failure and that a retry from the wizard re-provisions it.
+      after the firmware already reset the provisioning state. The firmware now
+      cancels that retry (`esp_wifi_disconnect()` after the reset), and if the
+      device still gets an IP before any credentials were accepted it stays in
+      provisioning mode (`Wi-Fi: got an IP while provisioning ...`), not
+      `source=stored`. Confirm the client reports the failure and that a retry
+      from the wizard re-provisions it.
+- [ ] Timeout (failure other than AuthError / NetworkNotFound, e.g. AP refuses
+      association): the client times out after 30 s; a wizard retry gets
+      `InternalError`; a power cycle boots with the stored credentials (no BLE);
+      the BOOT gesture reopens provisioning.
 - [ ] **AP lost during the BLE grace period:** pair successfully, then power-cycle
       the AP within 30 s. Expect `Wi-Fi lost during BLE grace period ...;
       credentials kept`, BLE stopping, reconnection once the AP is back, and the

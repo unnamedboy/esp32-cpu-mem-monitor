@@ -76,6 +76,16 @@ the serial log shows the BLE name and the 8-character pairing code. Hold the
 board's BOOT button for 5–15 seconds while it is running, then release it, to
 forget the Wi-Fi network and pair again. Details: [PROVISIONING.md](PROVISIONING.md).
 
+> **Upgrading a board that ran earlier firmware:** the old firmware called
+> `WiFi.begin(SSID, PASS)` with the Arduino default `persistent=true`, so the
+> `secrets.h` network is already in the ESP32's Wi-Fi NVS store. The new
+> firmware treats that as provisioned credentials: it boots with
+> `source=stored`, skips BLE, ignores later `secrets.h` changes, and answers
+> `RESMON-POP unavailable state=provisioned`. To get first-boot behaviour, use
+> the BOOT gesture once (hold 5–15 s, then release), or erase the whole flash
+> and re-upload (`pio run -e esp32dev -t erase` then `pio run -e esp32dev -t upload`;
+> this also generates a new pairing code).
+
 ### Optional development fallback (`secrets.h`)
 
 Real Wi-Fi credentials must not be committed to git. For development without
@@ -105,7 +115,7 @@ dotnet run --project daemon\ResourceMonitorDaemon.Tests\ResourceMonitorDaemon.Te
 
 PlatformIO firmware build (pinned to `espressif32 @ 7.0.1` = Arduino-ESP32
 core 2.0.17; uses the `min_spiffs.csv` partition table because the BLE
-provisioning image is ~1.66 MB):
+provisioning image is ~1.63 MB):
 
 ```powershell
 platformio run -e esp32dev
