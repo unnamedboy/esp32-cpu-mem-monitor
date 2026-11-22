@@ -9,6 +9,8 @@
 **/[Bb]in/
 **/[Oo]bj/
 /artifacts/
+# Isolated build output used while the live daemon locks bin/
+.tmpbuild/
 
 # 运行时的本地日志（如 daemon.log）
 *.log
@@ -75,3 +77,6 @@ Desktop.ini
 *.local
 .env
 firmware/src/secrets.h
+
+# Local Claude Code session data
+.claude/

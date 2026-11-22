@@ -2,15 +2,28 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Resources/Strings.resx is English; translations build into satellite assemblies (zh-Hans/ResourceMonitorDaemon.resources.dll). -->
+    <NeutralLanguage>en</NeutralLanguage>
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ResourceMonitorDaemon.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
     <PackageReference Include="MQTTnet" Version="4.3.2.930" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Non-secret defaults; per-user overrides live in %LocalAppData%\ResourceMonitorDaemon\settings.json -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
