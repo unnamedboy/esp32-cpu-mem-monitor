@@ -1,12 +1,14 @@
+using System.Globalization;
 using System.Windows.Forms;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ResourceMonitorDaemon.Localization;
 using ResourceMonitorDaemon.Provisioning;
 
 namespace ResourceMonitorDaemon.Pairing
 {
     /// <summary>
-    /// "配对设备 (Pair device)" wizard: scan for <c>PROV_RESMON_*</c> devices over BLE, get the pairing
+    /// "Pair device" wizard: scan for <c>PROV_RESMON_*</c> devices over BLE, get the pairing
     /// code (automatically over USB, or typed), send the Wi-Fi credentials, then save the reported IPv4
     /// address as <c>FallbackAddress</c> and wait for the daemon's own MQTT connection.
     /// </summary>
@@ -16,7 +18,9 @@ namespace ResourceMonitorDaemon.Pairing
     /// then disposes the BLE connection. The Wi-Fi password only lives in the password box and in the
     /// <see cref="ProvisioningService.ProvisionAsync"/> call: the box is cleared after every attempt and
     /// the password is never logged or saved. Decisions and messages come from
-    /// <see cref="PairingOutcomePresenter"/>.
+    /// <see cref="PairingOutcomePresenter"/>. Texts come from <see cref="Strings"/>: labels are set once
+    /// when the form is created, so an open wizard keeps its language if the UI language changes;
+    /// status messages shown later use the language current at that moment.
     /// </remarks>
     public sealed class PairingWizardForm : Form
     {
@@ -56,6 +60,7 @@ namespace ResourceMonitorDaemon.Pairing
         private readonly TextBox _password;
         private readonly CheckBox _showPassword;
         private readonly Label[] _steps;
+        private readonly string[] _stepTexts;
         private readonly Label _result;
         private readonly Label _finalStatus;
         private readonly Button _pair;
@@ -88,7 +93,7 @@ namespace ResourceMonitorDaemon.Pairing
             SuspendLayout();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
-            Text = PairingText.WindowTitle;
+            Text = Strings.Pairing_WindowTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -108,7 +113,7 @@ namespace ResourceMonitorDaemon.Pairing
             root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
             AddRow(root, NewLabel(
-                PairingText.Intro,
+                Strings.Pairing_Intro(Strings.Pairing_ReprovisionInstruction),
                 SystemColors.ControlText,
                 2 * ContentWidth));
 
@@ -129,7 +134,7 @@ namespace ResourceMonitorDaemon.Pairing
             AddRow(root, columns);
 
             // 1. Device
-            var deviceGroup = NewGroup(PairingText.DeviceGroup, out var deviceLayout);
+            var deviceGroup = NewGroup(Strings.Pairing_DeviceGroup, out var deviceLayout);
             _devices = new ListView
             {
                 View = View.Details,
@@ -139,11 +144,11 @@ namespace ResourceMonitorDaemon.Pairing
                 HeaderStyle = ColumnHeaderStyle.Nonclickable,
                 Size = new Size(ContentWidth, 96),
             };
-            _devices.Columns.Add(PairingText.DeviceColumn, 300);
-            _devices.Columns.Add(PairingText.SignalColumn, 120);
+            _devices.Columns.Add(Strings.Pairing_DeviceColumn, 300);
+            _devices.Columns.Add(Strings.Pairing_SignalColumn, 120);
             _devices.SelectedIndexChanged += OnDeviceSelectionChanged;
             AddRow(deviceLayout, _devices);
-            _rescan = new Button { Text = PairingText.RescanButton, AutoSize = true };
+            _rescan = new Button { Text = Strings.Pairing_RescanButton, AutoSize = true };
             _rescan.Click += async (_, _) => await RunSafelyAsync(ScanAsync);
             AddRow(deviceLayout, _rescan);
             _scanStatus = NewLabel(string.Empty, SystemColors.ControlText);
@@ -151,7 +156,7 @@ namespace ResourceMonitorDaemon.Pairing
             AddRow(left, deviceGroup);
 
             // 2. Pairing code
-            var codeGroup = NewGroup(PairingText.CodeGroup, out var codeLayout);
+            var codeGroup = NewGroup(Strings.Pairing_CodeGroup, out var codeLayout);
             var codeRow = NewFlow();
             _code = new TextBox { Width = 150, CharacterCasing = CharacterCasing.Upper, MaxLength = 16 };
             _code.TextChanged += OnCodeTextChanged;
@@ -160,41 +165,51 @@ namespace ResourceMonitorDaemon.Pairing
             codeRow.Controls.Add(_code);
             codeRow.Controls.Add(_codeLink);
             AddRow(codeLayout, codeRow);
-            _codeStatus = NewLabel(PairingText.CodeSelectDeviceFirst, SystemColors.ControlText);
+            _codeStatus = NewLabel(Strings.Pairing_SelectDeviceFirst, SystemColors.ControlText);
             AddRow(codeLayout, _codeStatus);
-            AddRow(codeLayout, NewLabel(PairingText.CodeHint, SystemColors.GrayText));
+            AddRow(codeLayout, NewLabel(Strings.Pairing_CodeHint, SystemColors.GrayText));
             AddRow(left, codeGroup);
 
             // 3. Wi-Fi
-            var wifiGroup = NewGroup(PairingText.WifiGroup, out var wifiLayout);
+            var wifiGroup = NewGroup(Strings.Pairing_WifiGroup, out var wifiLayout);
             var wifiGrid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             wifiGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             wifiGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             _ssid = new TextBox { Width = 230 };
             _ssid.TextChanged += (_, _) => _ssidNote!.Visible = _prefilledSsid is not null && _ssid.Text == _prefilledSsid;
             _password = new TextBox { Width = 230, UseSystemPasswordChar = true };
-            _showPassword = new CheckBox { Text = PairingText.ShowPassword, AutoSize = true, Margin = new Padding(8, 5, 3, 3) };
+            _showPassword = new CheckBox { Text = Strings.Pairing_ShowPassword, AutoSize = true, Margin = new Padding(8, 5, 3, 3) };
             _showPassword.CheckedChanged += (_, _) => _password.UseSystemPasswordChar = !_showPassword.Checked;
             var passwordRow = NewFlow();
             passwordRow.Controls.Add(_password);
             passwordRow.Controls.Add(_showPassword);
-            _useThisPcWifi = new LinkLabel { Text = PairingText.UseThisPcWifi, AutoSize = true, Margin = new Padding(8, 6, 3, 3) };
+            _useThisPcWifi = new LinkLabel { Text = Strings.Pairing_UseThisPcWifi, AutoSize = true, Margin = new Padding(8, 6, 3, 3) };
             _useThisPcWifi.LinkClicked += async (_, _) => await RunSafelyAsync(UseThisPcWifiAsync);
             var ssidRow = NewFlow();
             ssidRow.Controls.Add(_ssid);
             ssidRow.Controls.Add(_useThisPcWifi);
-            AddGridRow(wifiGrid, PairingText.SsidLabel, ssidRow);
-            AddGridRow(wifiGrid, PairingText.PasswordLabel, passwordRow);
+            AddGridRow(wifiGrid, Strings.Pairing_SsidLabel, ssidRow);
+            AddGridRow(wifiGrid, Strings.Pairing_PasswordLabel, passwordRow);
             AddRow(wifiLayout, wifiGrid);
             _ssidNote = NewLabel(string.Empty, SystemColors.GrayText);
             _ssidNote.Visible = false;
             AddRow(wifiLayout, _ssidNote);
-            AddRow(wifiLayout, NewLabel(PairingText.WifiNote, SystemColors.GrayText));
+            AddRow(wifiLayout, NewLabel(Strings.Pairing_WifiNote, SystemColors.GrayText));
             AddRow(right, wifiGroup);
 
             // 4. Progress
-            var progressGroup = NewGroup(PairingText.ProgressGroup, out var progressLayout);
-            _steps = new Label[PairingText.Steps.Count];
+            var progressGroup = NewGroup(Strings.Pairing_ProgressGroup, out var progressLayout);
+            // Step texts, in step order: the four ProvisioningStep values, then save and daemon.
+            _stepTexts = new[]
+            {
+                Strings.Pairing_StepConnect,
+                Strings.Pairing_StepSecure,
+                Strings.Pairing_StepSend,
+                Strings.Pairing_StepWifi,
+                Strings.Pairing_StepSave,
+                Strings.Pairing_StepDaemon,
+            };
+            _steps = new Label[_stepTexts.Length];
             for (var i = 0; i < _steps.Length; i++)
             {
                 _steps[i] = NewLabel(string.Empty, SystemColors.GrayText);
@@ -211,9 +226,9 @@ namespace ResourceMonitorDaemon.Pairing
             AddRow(right, progressGroup);
 
             // Buttons
-            _pair = new Button { Text = PairingText.PairButton, AutoSize = true };
+            _pair = new Button { Text = Strings.Pairing_PairButton, AutoSize = true };
             _pair.Click += async (_, _) => await RunSafelyAsync(PairAsync);
-            _cancel = new Button { Text = PairingText.CloseButton, AutoSize = true };
+            _cancel = new Button { Text = Strings.Common_Close, AutoSize = true };
             _cancel.Click += OnCancelClick;
             var buttons = new FlowLayoutPanel
             {
@@ -322,7 +337,7 @@ namespace ResourceMonitorDaemon.Pairing
 
             _scanning = true;
             UpdateControls();
-            _scanStatus.Text = PairingText.Scanning;
+            _scanStatus.Text = Strings.Pairing_Scanning;
             var progress = new Progress<ProvisioningDeviceInfo>(device =>
             {
                 if (!_closed && ReferenceEquals(_scanCts, cts))
@@ -389,7 +404,7 @@ namespace ResourceMonitorDaemon.Pairing
 
         private void AddOrUpdateDevice(ProvisioningDeviceInfo device)
         {
-            var signal = PairingText.SignalStrength(device.Rssi);
+            var signal = string.Create(CultureInfo.InvariantCulture, $"{device.Rssi} dBm");
             foreach (ListViewItem existing in _devices.Items)
             {
                 if (existing.Tag is ProvisioningDeviceInfo known && known.BluetoothAddress == device.BluetoothAddress)
@@ -431,7 +446,7 @@ namespace ResourceMonitorDaemon.Pairing
             using var cts = NewOperationSource();
             _popCts = cts;
             _codeStatus.ForeColor = SystemColors.ControlText;
-            _codeStatus.Text = PairingText.CodeReadingUsb;
+            _codeStatus.Text = Strings.Pairing_CodeReadingUsb;
             UpdateCodeLink();
             try
             {
@@ -460,12 +475,12 @@ namespace ResourceMonitorDaemon.Pairing
                     }
 
                     _codeStatus.ForeColor = Color.DarkGreen;
-                    _codeStatus.Text = PairingText.CodeReadOverUsb;
+                    _codeStatus.Text = Strings.Pairing_CodeReadOverUsb;
                     _logger.LogInformation("Pairing wizard: pairing code for {Device} read over USB.", device.Name);
                 }
                 else
                 {
-                    _codeStatus.Text = PairingText.CodeNotFoundOverUsb;
+                    _codeStatus.Text = Strings.Pairing_CodeNotFoundOverUsb;
                 }
 
                 UpdateCodeLink();
@@ -475,7 +490,7 @@ namespace ResourceMonitorDaemon.Pairing
                 // Another device selected, pairing started or wizard closed.
                 if (!_closed && ReferenceEquals(_popCts, cts))
                 {
-                    _codeStatus.Text = PairingText.CodeUsbQueryStopped;
+                    _codeStatus.Text = Strings.Pairing_CodeUsbQueryStopped;
                 }
             }
             finally
@@ -534,12 +549,12 @@ namespace ResourceMonitorDaemon.Pairing
         {
             if (_codeSource == CodeSource.Usb)
             {
-                _codeLink.Text = PairingText.CodeEnterManually;
+                _codeLink.Text = Strings.Pairing_CodeEnterManually;
                 _codeLink.Visible = true;
             }
             else if (_usbPop is not null)
             {
-                _codeLink.Text = PairingText.CodeUseUsb;
+                _codeLink.Text = Strings.Pairing_CodeUseUsb;
                 _codeLink.Visible = true;
             }
             else
@@ -563,7 +578,7 @@ namespace ResourceMonitorDaemon.Pairing
 
             _useThisPcWifi.Enabled = false;
             _ssidNote.ForeColor = SystemColors.GrayText;
-            _ssidNote.Text = PairingText.ReadingThisPcWifi;
+            _ssidNote.Text = Strings.Pairing_ReadingThisPcWifi;
             _ssidNote.Visible = true;
             CurrentWifiInfo? info;
             try
@@ -590,7 +605,7 @@ namespace ResourceMonitorDaemon.Pairing
             if (info is null)
             {
                 _prefilledSsid = null;
-                _ssidNote.Text = PairingText.ThisPcWifiUnavailable;
+                _ssidNote.Text = Strings.Pairing_ThisPcWifiUnavailable;
                 _ssidNote.Visible = true;
                 return;
             }
@@ -598,7 +613,7 @@ namespace ResourceMonitorDaemon.Pairing
             _prefilledSsid = info.Ssid;
             _ssid.Text = info.Ssid;
             _ssidNote.ForeColor = info.IsKnownNot24GHz ? Color.DarkOrange : SystemColors.GrayText;
-            _ssidNote.Text = info.IsKnownNot24GHz ? PairingText.SsidPrefilledNot24GHz : PairingText.SsidPrefilled;
+            _ssidNote.Text = info.IsKnownNot24GHz ? Strings.Pairing_SsidPrefilledNot24GHz : Strings.Pairing_SsidPrefilled;
             _ssidNote.Visible = true;
         }
 
@@ -635,7 +650,7 @@ namespace ResourceMonitorDaemon.Pairing
             UpdateControls();
             ResetSteps();
             _finalStatus.Text = string.Empty;
-            ShowResult(PairingText.Pairing, Tone.Info);
+            ShowResult(Strings.Pairing_InProgress, Tone.Info);
 
             var progress = new StepProgress(this);
             PairingOutcome outcome;
@@ -711,7 +726,7 @@ namespace ResourceMonitorDaemon.Pairing
 
                 // The link dropped after the settings were applied: the device may have joined Wi-Fi.
                 ShowResult(outcome.Message, Tone.Info);
-                SetStep(StepSave, StepState.Running, PairingText.StepCheckNetwork);
+                SetStep(StepSave, StepState.Running, Strings.Pairing_StepCheckNetwork);
                 var reachable = await BrokerProbe.WaitForBrokerAsync(
                     settings.Host,
                     settings.Port,
@@ -722,7 +737,7 @@ namespace ResourceMonitorDaemon.Pairing
                     settings.Host, settings.Port, reachable ? "reachable" : "not reachable");
                 if (!_closed)
                 {
-                    SetStep(StepSave, reachable ? StepState.Done : StepState.Failed, PairingText.StepCheckNetwork);
+                    SetStep(StepSave, reachable ? StepState.Done : StepState.Failed, Strings.Pairing_StepCheckNetwork);
                 }
 
                 return PairingOutcomePresenter.PresentBrokerCheck(reachable, settings.Host, settings.Port);
@@ -771,7 +786,7 @@ namespace ResourceMonitorDaemon.Pairing
                     }
 
                     SetStep(StepSave, StepState.Failed);
-                    ShowResult($"{outcome.Message}\n{PairingText.SaveFailed(ex.Message)}", Tone.Warning);
+                    ShowResult($"{outcome.Message}\n{Strings.Pairing_SaveFailed(ex.Message)}", Tone.Warning);
                 }
 
                 if (_closed)
@@ -781,19 +796,19 @@ namespace ResourceMonitorDaemon.Pairing
 
                 if (savedAddress is not null)
                 {
-                    SetStep(StepSave, StepState.Done, PairingText.StepSaved(savedAddress));
+                    SetStep(StepSave, StepState.Done, Strings.Pairing_StepSaved(savedAddress));
                 }
             }
             else if (_steps[StepSave].Tag is StepState.Pending)
             {
-                SetStep(StepSave, StepState.Skipped, PairingText.StepNoAddress);
+                SetStep(StepSave, StepState.Skipped, Strings.Pairing_StepNoAddress);
             }
 
             var environmentOverride = savedAddress is not null
                 && DaemonConfiguration.GetEnvironmentOverriddenDeviceFields().Contains(nameof(DeviceSettings.FallbackAddress));
             if (environmentOverride)
             {
-                ShowResult($"{outcome.Message}\n{PairingText.FallbackOverriddenByEnvironment}", Tone.Warning);
+                ShowResult($"{outcome.Message}\n{Strings.Pairing_FallbackOverriddenByEnvironment}", Tone.Warning);
             }
 
             SetStep(StepDaemon, StepState.Running);
@@ -901,7 +916,7 @@ namespace ResourceMonitorDaemon.Pairing
             };
             var label = _steps[index];
             label.Tag = state;
-            label.Text = $"{glyph}  {text ?? PairingText.Steps[index]}";
+            label.Text = $"{glyph}  {text ?? _stepTexts[index]}";
             label.ForeColor = state switch
             {
                 StepState.Running => SystemColors.ControlText,
@@ -1020,7 +1035,7 @@ namespace ResourceMonitorDaemon.Pairing
             _password.Enabled = !_busy;
             _showPassword.Enabled = !_busy;
             _pair.Enabled = !_busy;
-            _cancel.Text = _busy ? PairingText.CancelButton : PairingText.CloseButton;
+            _cancel.Text = _busy ? Strings.Common_Cancel : Strings.Common_Close;
         }
 
         // ---- Layout helpers -------------------------------------------------------------------

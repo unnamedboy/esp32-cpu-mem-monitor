@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using ResourceMonitorDaemon.Localization;
 using ResourceMonitorDaemon.Pairing;
 using ResourceMonitorDaemon.Provisioning;
 
@@ -64,12 +65,17 @@ namespace ResourceMonitorDaemon.Tests
             {
                 var auth = PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), Host);
                 AssertEqual(PairingOutcomeKind.Failed, auth.Kind);
-                AssertTrue(auth.Message.Contains("Wi-Fi 密码错误"), auth.Message);
+                AssertEqual(Strings.Pairing_WrongPassword, auth.Message);
+                AssertEqual("Wi-Fi 密码错误，请重新输入密码后重试。", LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture,
+                    () => PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), Host).Message));
                 AssertEqual(PairingField.Password, auth.Focus);
                 AssertTrue(auth.AddressToSave is null, "nothing saved on failure");
 
                 var notFound = PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.NetworkNotFound), Host);
-                AssertTrue(notFound.Message.Contains("找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）"), notFound.Message);
+                AssertEqual(Strings.Pairing_NetworkNotFound, notFound.Message);
+                AssertTrue(LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture,
+                    () => PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.NetworkNotFound), Host).Message)
+                    .StartsWith("找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）", StringComparison.Ordinal), "zh: network not found");
                 AssertEqual(PairingField.Ssid, notFound.Focus);
 
                 var unknown = PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed((WifiConnectFailedReason)7), Host);
@@ -94,23 +100,34 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual(PairingOutcomeKind.Failed, unreachable.Kind);
                 AssertTrue(unreachable.SuggestRescan, "suggest rescan");
                 AssertTrue(unreachable.Message.Contains(ProvisioningConstants.ReprovisionInstruction), "reprovision hint (en)");
-                AssertTrue(unreachable.Message.Contains(PairingOutcomePresenter.ReprovisionInstructionZh), "reprovision hint (zh)");
+                AssertTrue(LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.PresentBrokerCheck(false, Host, 1883).Message)
+                    .Contains("按住设备上的 BOOT 键 5–15 秒后松开"), "reprovision hint (zh)");
             }),
             ("Pairing: provisioning exceptions map to clear messages", () =>
             {
                 var code = PairingOutcomePresenter.PresentException(new PairingCodeRejectedException(PairingCodeRejectionReason.DeviceClosedConnection));
-                AssertTrue(code.Message.Contains("配对码错误"), code.Message);
+                AssertEqual(Strings.Provisioning_CodeRejected, code.Message);
+                AssertTrue(LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.PresentException(
+                    new PairingCodeRejectedException(PairingCodeRejectionReason.DeviceClosedConnection)).Message).StartsWith("配对码错误", StringComparison.Ordinal), "zh: code rejected");
+                AssertEqual(Strings.Provisioning_CodeNotVerified, PairingOutcomePresenter.PresentException(
+                    new PairingCodeRejectedException(PairingCodeRejectionReason.VerificationMismatch)).Message);
                 AssertEqual(PairingField.PairingCode, code.Focus);
 
                 var retryException = new ProvisioningRetryRejectedException(previousAttemptFailed: true);
                 var retry = PairingOutcomePresenter.PresentException(retryException);
-                AssertTrue(retry.Message.Contains(retryException.Message), "keeps the library message");
+                AssertEqual(Strings.Provisioning_RetryRejectedAfterFailure(Strings.Pairing_ReprovisionInstruction), retry.Message);
                 AssertTrue(retry.Message.Contains(ProvisioningConstants.ReprovisionInstruction), "BOOT instruction");
+                AssertEqual(
+                    Strings.Provisioning_RetryRejected(Strings.Pairing_ReprovisionInstruction),
+                    PairingOutcomePresenter.PresentException(new ProvisioningRetryRejectedException(previousAttemptFailed: false)).Message);
                 AssertTrue(retry.SuggestRescan, "rescan after restart");
 
                 var off = PairingOutcomePresenter.PresentException(
                     new ProvisioningTransportException(ProvisioningTransportError.BluetoothOff, "Bluetooth is turned off."));
-                AssertTrue(off.Message.Contains("蓝牙已关闭") && off.Message.Contains("Bluetooth is turned off."), off.Message);
+                AssertEqual(Strings.Provisioning_BluetoothOff, off.Message);
+                AssertTrue(LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.PresentException(
+                    new ProvisioningTransportException(ProvisioningTransportError.BluetoothOff, "Bluetooth is turned off.")).Message) is var zhOff
+                    && zhOff.Contains("蓝牙已关闭") && !zhOff.Contains("Bluetooth is turned off."), "zh: localized from the error code, English message only logged");
                 AssertTrue(!off.SuggestRescan, "rescan does not help while Bluetooth is off");
 
                 var gone = PairingOutcomePresenter.PresentException(
@@ -120,7 +137,8 @@ namespace ResourceMonitorDaemon.Tests
 
                 var protocol = PairingOutcomePresenter.PresentException(new ProvisioningProtocolException("odd answer"));
                 AssertEqual(PairingOutcomeKind.Failed, protocol.Kind);
-                AssertTrue(protocol.Message.Contains("odd answer"), protocol.Message);
+                AssertEqual(Strings.Provisioning_UnexpectedAnswer, protocol.Message);
+                AssertTrue(!protocol.Message.Contains("odd answer"), "English protocol detail is logged, not shown");
 
                 AssertEqual(PairingOutcomeKind.Cancelled, PairingOutcomePresenter.PresentException(new OperationCanceledException()).Kind);
                 AssertEqual(PairingOutcomeKind.Cancelled, PairingOutcomePresenter.PresentException(new TaskCanceledException()).Kind);
@@ -137,6 +155,7 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual(PairingField.Password, outcome.Focus);
                 AssertTrue(!outcome.Message.Contains("(Parameter"), outcome.Message);
                 AssertTrue(!outcome.Message.Contains(tooLong), "password not echoed");
+                AssertEqual(Strings.Provisioning_PasswordLength(ProvisioningConstants.MaxPassphraseBytes), outcome.Message);
 
                 var ssid = PairingOutcomePresenter.PresentException(new ArgumentException("bad", "ssid"));
                 AssertEqual(PairingField.Ssid, ssid.Focus);
@@ -163,17 +182,21 @@ namespace ResourceMonitorDaemon.Tests
             ("Pairing: scan status texts cover none / one / many / Bluetooth off / unavailable", () =>
             {
                 AssertTrue(PairingOutcomePresenter.DescribeScanResult(0).Contains(ProvisioningConstants.ReprovisionInstruction), "none: BOOT hint");
-                AssertTrue(PairingOutcomePresenter.DescribeScanResult(1).Contains("已自动选择"), "one: preselected");
+                AssertEqual(Strings.Pairing_ScanOne, PairingOutcomePresenter.DescribeScanResult(1));
+                AssertTrue(LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.DescribeScanResult(1)).Contains("已自动选择"), "one: preselected (zh)");
                 AssertTrue(PairingOutcomePresenter.DescribeScanResult(3).Contains("3"), "many: count");
                 AssertTrue(PairingOutcomePresenter.DescribeScanFailure(
-                    new ProvisioningTransportException(ProvisioningTransportError.BluetoothOff, "off")).Contains("蓝牙已关闭"), "off");
+                    new ProvisioningTransportException(ProvisioningTransportError.BluetoothOff, "off")) == Strings.Pairing_ScanBluetoothOff, "off");
                 AssertTrue(PairingOutcomePresenter.DescribeScanFailure(
-                    new ProvisioningTransportException(ProvisioningTransportError.BluetoothUnavailable, "none")).Contains("低功耗蓝牙"), "unavailable");
+                    new ProvisioningTransportException(ProvisioningTransportError.BluetoothUnavailable, "none")) == Strings.Pairing_ScanBluetoothUnavailable, "unavailable");
+                AssertTrue(LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.DescribeScanFailure(
+                    new ProvisioningTransportException(ProvisioningTransportError.BluetoothUnavailable, "none"))).Contains("低功耗蓝牙"), "unavailable (zh)");
                 AssertTrue(PairingOutcomePresenter.DescribeScanFailure(new InvalidOperationException("x")).Contains("see the log"), "generic");
             }),
             ("Pairing: daemon status text after saving", () =>
             {
-                AssertEqual("已连接，正在发送数据 (connected, publishing)", PairingOutcomePresenter.DescribeDaemonStatus(true, false, Host));
+                AssertEqual(Strings.Pairing_DaemonConnected, PairingOutcomePresenter.DescribeDaemonStatus(true, false, Host));
+                AssertEqual("已连接，正在发送数据", LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.DescribeDaemonStatus(true, false, Host)));
                 AssertTrue(PairingOutcomePresenter.DescribeDaemonStatus(false, true, Host).Contains("paused"), "paused");
                 AssertTrue(PairingOutcomePresenter.DescribeDaemonStatus(false, false, Host).Contains(Host), "retrying");
             }),

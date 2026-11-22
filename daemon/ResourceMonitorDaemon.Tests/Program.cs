@@ -4,7 +4,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ResourceMonitorDaemon;
+using ResourceMonitorDaemon.Localization;
 using ResourceMonitorDaemon.Tests;
+
+// Tests assert English UI texts unless they switch the language themselves (LocalizationTests.InCulture).
+UiCulture.Apply(UiLanguage.EnglishCulture);
 
 var tests = new (string Name, Action Run)[]
 {
@@ -512,7 +516,7 @@ var tests = new (string Name, Action Run)[]
     {
         MqttConnectionScenario.LateNotificationHandler().GetAwaiter().GetResult();
     }),
-}.Concat(ProvisioningTests.All).Concat(PairingTests.All).Concat(ObservabilityTests.All).ToArray();
+}.Concat(ProvisioningTests.All).Concat(PairingTests.All).Concat(ObservabilityTests.All).Concat(LocalizationTests.All).ToArray();
 
 var failed = 0;
 
