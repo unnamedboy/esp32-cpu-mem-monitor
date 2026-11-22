@@ -50,7 +50,7 @@ Sources, lowest to highest priority:
 
 1. built-in defaults (`DeviceSettings`);
 2. `appsettings.json` next to the executable (copied to the build output, non-secret);
-3. user settings `%LocalAppData%\ResourceMonitorDaemon\settings.json` (written by the tray dialog and the future pairing wizard);
+3. user settings `%LocalAppData%\ResourceMonitorDaemon\settings.json` (written by the tray dialog and the future pairing wizard; contains **only the fields explicitly set there**, so values not set keep coming from `appsettings.json`/defaults);
 4. environment variables prefixed `RESMON_`, e.g. `RESMON_Device__Host=192.168.1.50`.
 
 Invalid values never crash the daemon: `DeviceSettingsLoader` parses
@@ -59,32 +59,43 @@ logged warning. A JSON file that cannot be parsed is ignored (its layer
 contributes nothing) and reported in the log.
 
 Changes apply without restart: both JSON files are watched
-(`reloadOnChange`), `UserSettingsStore.Save` additionally forces
-`IConfigurationRoot.Reload()`, and `MonitorService` consumes
-`IOptionsMonitor<DeviceSettings>`. Topic and interval changes take effect on the
-next tick; a host, fallback or port change drops the current connection and
-reconnects.
+(`reloadOnChange`, typically picked up within half a second) and
+`MonitorService` consumes `IOptionsMonitor<DeviceSettings>`. Topic and interval
+changes take effect on the next tick; a host, fallback or port change drops the
+current connection and reconnects. A single save can raise several watcher
+reloads; identical settings are ignored and identical sanitize warnings are
+logged only once.
 
 ### Settings API for other features (pairing wizard)
 
+The user file is a patch (`UserDeviceSettingsPatch`, every property nullable;
+`null` = not set here). There is one way to change it:
+
 ```csharp
-// Resolve from DI: ISettingsStore (UserSettingsStore) and IOptionsMonitor<DeviceSettings>.
-var updated = optionsMonitor.CurrentValue with { FallbackAddress = "192.168.1.50" };
-settingsStore.Save(updated); // validates, writes atomically, raises Saved → live reload
+// Resolve ISettingsStore (UserSettingsStore) from DI.
+settingsStore.Update(patch => patch.FallbackAddress = "192.168.1.50");
+// Set a property to null to remove it from the file again.
 ```
 
+- `ISettingsStore.Update(Action<UserDeviceSettingsPatch>)` — loads the current
+  patch, applies the edit, validates the set fields
+  (`UserDeviceSettingsPatch.Validate`, throws `ArgumentException`), and writes
+  atomically (`settings.json.tmp` then replace; `IOException` on failure). Only
+  non-null fields are written. Other top-level sections and unknown `Device` keys
+  are preserved; comments and trailing commas are accepted when reading (comments
+  are not kept). An unparsable file is copied to `settings.json.bak` before it is
+  replaced.
+- `ISettingsStore.Load()` — the fields set in the user file only (not
+  `appsettings.json`, defaults or environment); never throws.
+- `ISettingsStore.Saved` — raised after a successful update. No reload call is
+  needed: the configuration file watcher applies the change.
 - `ISettingsStore.FilePath` — absolute path of the user settings file.
-- `ISettingsStore.Load()` — values persisted in the user file over built-in
-  defaults (excludes `appsettings.json` and environment overrides); never throws.
-- `ISettingsStore.Save(DeviceSettings)` — throws `ArgumentException` if
-  `DeviceSettingsValidator.Validate` reports errors, `IOException` if the file
-  cannot be written. Writes `settings.json.tmp` then replaces `settings.json`;
-  other top-level sections in the file are preserved.
-- `ISettingsStore.Saved` — raised after a successful save; `Program` wires it to
-  a configuration reload, so callers need no extra step.
-- Save writes every `Device` field, so start from the effective settings
-  (`IOptionsMonitor<DeviceSettings>.CurrentValue` or `MonitorService.CurrentSettings`)
-  to avoid resetting values that came from `appsettings.json`.
+- Never copy effective settings (`IOptionsMonitor<DeviceSettings>.CurrentValue`)
+  wholesale into the patch: that would persist environment overrides and freeze
+  `appsettings.json` values. The tray dialog uses
+  `UserDeviceSettingsPatch.ApplyDialogEdit(lowerLayers, edited, envFields)`, which
+  skips env-overridden fields and clears values equal to
+  `DaemonConfiguration.LoadLowerLayers(...)` (defaults + `appsettings.json`).
 
 ### Connection Handling
 
@@ -96,11 +107,18 @@ schedule, and never blocks the sampling loop:
   `Host` first, then `FallbackAddress` if set, each bounded by `ConnectTimeoutMs`.
 - While disconnected or an attempt is in flight, publishing is skipped for that tick.
 - Backoff (`ReconnectBackoff`, pure and clock-injectable) starts at
-  `ReconnectInitialBackoffMs`, doubles per failure up to `ReconnectMaxBackoffMs`,
-  and resets on success, on endpoint change and when an established connection drops.
-- A failed publish marks the connection lost and reconnects on the next tick.
+  `ReconnectInitialBackoffMs` and doubles per failure up to `ReconnectMaxBackoffMs`.
+  A successful connect does not reset it by itself: only a connection that stays
+  up for at least `ReconnectMaxBackoffMs` resets it when it drops; a shorter-lived
+  connection counts as a failure, so a flapping broker is still backed off. An
+  endpoint change resets it and reconnects immediately.
+- A failed publish marks the connection lost; the reconnect follows the backoff.
+- Shutdown cancels any in-flight connect attempt first (a shutdown token is linked
+  into every connect/close/publish timeout), so exit does not wait for connect
+  timeouts; `MonitorService.StopAsync` honours the host stop token.
 - One tray notification per outage ("MQTT connection failed") and one
-  "MQTT reconnected" notice when it recovers. The first failure of an outage
+  "MQTT reconnected" notice when it recovers. The outage only counts as notified
+  once a handler actually ran (the tray attaches it before the host starts). The first failure of an outage
   is logged as a Warning, later failures at Debug with an Information summary
   every 20 attempts.
 
@@ -120,11 +138,15 @@ schedule, and never blocks the sampling loop:
 
 - Pause/resume sending (label refreshes once per second).
 - "⚙ 设置 (Settings)…" opens a dialog for Host, Port, CpuTopic, MemTopic and
-  SampleIntervalMs with validation; Save writes the user settings file and the
-  change is applied live. The dialog warns when `RESMON_Device__*` environment
-  variables override the saved values.
+  SampleIntervalMs with validation. Fields overridden by `RESMON_Device__*`
+  environment variables are shown read-only with "(env)" and are never saved.
+  Save writes only values that differ from defaults + `appsettings.json` and
+  leaves other user-file fields (e.g. FallbackAddress) untouched; the change is
+  applied live, and the confirmation balloon names any field still overridden by
+  an environment variable.
 - "查看日志 (Log)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
-- Exit stops the hosted service and disposes the tray icon.
+- Exit hides the icon and disables the menu first (re-entry guarded), then stops
+  the hosted service within 3 s and disposes the tray icon.
 
 ## Project Structure
 
@@ -132,6 +154,7 @@ schedule, and never blocks the sampling loop:
 - `DeviceSettings.cs`: settings record and defaults.
 - `DeviceSettingsValidator.cs`: strict validation and lenient sanitizing.
 - `DaemonConfiguration.cs`: file paths (`DaemonPaths`), configuration sources, options registration, lenient loader.
+- `UserDeviceSettingsPatch.cs`: the explicitly-set user fields, validation and dialog-edit rules.
 - `UserSettingsStore.cs`: `ISettingsStore` for the user settings file.
 - `ReconnectBackoff.cs`: pure reconnect schedule.
 - `MqttConnection.cs`: non-blocking connection management and publishing.
@@ -149,12 +172,18 @@ The C# test runner covers:
 - one-decimal invariant percentage formatting and clamping;
 - settings validation, sanitizing to defaults and non-numeric values;
 - configuration precedence (defaults < appsettings.json < user file < `RESMON_` env) and broken JSON files;
-- `UserSettingsStore` round-trip, atomic write, section preservation, invalid input and corrupt files;
+- `UserSettingsStore`: only set fields written, `appsettings.json` still applying
+  after saving `FallbackAddress`, env values not persisted by the dialog edit,
+  comments/trailing commas and unknown keys preserved, `.bak` backup of an
+  unparsable file, invalid input, live reload through the file watcher;
+- sanitize-warning de-duplication across reloads and absolute paths in load errors;
 - log rotation under concurrent writers;
-- `ReconnectBackoff` doubling, cap and reset;
+- `ReconnectBackoff` doubling, cap, reset, flapping broker and stable-connection reset;
 - `MqttConnection` against an in-process loopback MQTTnet broker: non-blocking ticks,
   one notification per outage, reconnect notice, fallback address, and unchanged
-  topic/payload/QoS/retain on the wire.
+  topic/payload/QoS/retain on the wire; dispose with unreachable host + fallback
+  finishing in under a second; a handler attached after the first failure still
+  gets the outage notification.
 
 Run it with:
 
@@ -167,14 +196,17 @@ If the live daemon is running and locks the normal output files, build to a
 temporary output directory (ignored by git):
 
 ```powershell
-dotnet build daemon\ResourceMonitorDaemon.sln /p:OutDir=D:\source\esp32-cpu-mem-monitor\.tmpbuild\
+# from the repository root
+dotnet build daemon\ResourceMonitorDaemon.sln /p:OutDir="$PWD\.tmpbuild\"
 dotnet .tmpbuild\ResourceMonitorDaemon.Tests.dll
 ```
 
 ## Current Limitations
 
 - There is no first-run setup / pairing wizard yet; it will write `FallbackAddress`
-  through `ISettingsStore`.
+  through `ISettingsStore.Update`.
+- Comments in a hand-edited `settings.json` are not preserved when the file is
+  saved from the dialog or wizard.
 - The daemon does not provision ESP32 Wi-Fi credentials yet.
 - Wi-Fi credentials must not be stored in daemon settings, source code or logs.
 - If later password recall is needed, it should be opt-in and protected with Windows DPAPI.

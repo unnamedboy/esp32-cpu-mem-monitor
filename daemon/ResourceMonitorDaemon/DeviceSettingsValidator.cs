@@ -5,7 +5,8 @@ namespace ResourceMonitorDaemon
 {
     /// <summary>
     /// Validation rules for <see cref="DeviceSettings"/>.
-    /// <see cref="Validate"/> is strict (used by the settings UI and <see cref="UserSettingsStore.Save"/>);
+    /// <see cref="Validate"/> is strict (used by the settings UI; <see cref="UserDeviceSettingsPatch.Validate"/>
+    /// applies the same per-field rules before <see cref="UserSettingsStore.Update"/> writes);
     /// <see cref="Sanitize"/> never fails and replaces bad values with defaults or clamped values
     /// (used when loading configuration so a bad file can never crash the daemon).
     /// </summary>

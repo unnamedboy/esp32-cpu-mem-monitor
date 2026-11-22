@@ -88,7 +88,7 @@ The daemon reads non-secret settings from these sources, lowest to highest prior
 3. `%LocalAppData%\ResourceMonitorDaemon\settings.json` (per-user; written by the tray **⚙ 设置 (Settings)…** dialog);
 4. environment variables with the `RESMON_` prefix (`__` separates sections).
 
-Example user settings file:
+The user settings file contains only the values you set there; anything not listed keeps coming from `appsettings.json` or the defaults. Example:
 
 ```json
 {
@@ -113,6 +113,7 @@ $env:RESMON_Logging__LogLevel__Default = "Debug"   # log every sample
 ```
 
 Edits to either JSON file, or a Save from the tray dialog, are applied while the daemon runs; a host or port change reconnects automatically.
+Fields set by `RESMON_` environment variables are shown read-only in the dialog and are never written to the user settings file.
 Invalid values are replaced by defaults (or clamped) with a warning in the log rather than stopping the daemon.
 The daemon never stores Wi-Fi credentials.
 

@@ -109,7 +109,7 @@ setup wizard without making the real-time sampling path more complex.
    (validated, sanitized to defaults, applied live via `IOptionsMonitor`).
 4. Partly done: tray-menu entry "⚙ 设置 (Settings)…" edits and saves settings
    through `UserSettingsStore`. Pending: first-run wizard, which should write
-   `FallbackAddress` through `ISettingsStore.Save`.
+   `FallbackAddress` with `ISettingsStore.Update(p => p.FallbackAddress = ip)`.
 5. Keep Wi-Fi passwords in memory only while a provisioning operation is in
    progress.
 6. Do not persist Wi-Fi passwords on the Windows PC by default.
