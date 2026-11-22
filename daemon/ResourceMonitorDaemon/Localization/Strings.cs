@@ -210,6 +210,7 @@ namespace ResourceMonitorDaemon.Localization
         public static string Pairing_Failed => Get(nameof(Pairing_Failed));
         public static string Pairing_BrokerReachable(string host, int port) => Format(nameof(Pairing_BrokerReachable), host, port);
         public static string Pairing_BrokerUnreachable(string host, int port, int seconds, string reprovisionInstruction) => Format(nameof(Pairing_BrokerUnreachable), host, port, seconds, reprovisionInstruction);
+        public static string Pairing_AlreadyOnDifferentNetwork(string joinedSsid, string reprovisionInstruction) => Format(nameof(Pairing_AlreadyOnDifferentNetwork), joinedSsid, reprovisionInstruction);
         public static string Pairing_Cancelled => Get(nameof(Pairing_Cancelled));
         public static string Pairing_ScanNone(string reprovisionInstruction) => Format(nameof(Pairing_ScanNone), reprovisionInstruction);
         public static string Pairing_ScanOne => Get(nameof(Pairing_ScanOne));

@@ -3,8 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ResourceMonitorDaemon.Localization;
-using ResourceMonitorDaemon.Pairing;
 using ResourceMonitorDaemon.Observability;
+using ResourceMonitorDaemon.Pairing;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -24,8 +24,8 @@ namespace ResourceMonitorDaemon
         private readonly MonitorService _monitorService;
         private readonly ISettingsStore _settingsStore;
         private readonly IOptionsMonitor<DeviceSettings> _settingsMonitor;
-        private readonly ILoggerFactory _loggerFactory;
         private readonly IServiceProvider _services;   // dialog dependencies only; the host is owned by Program.Main
+        private readonly ILoggerFactory _loggerFactory;
         private readonly SynchronizationContext? _uiContext;
         private readonly System.Windows.Forms.Timer _updateTimer;
         private readonly ToolStripMenuItem _pauseResumeItem;
@@ -36,10 +36,10 @@ namespace ResourceMonitorDaemon
         private readonly ToolStripMenuItem _exitItem;
         private readonly UiLanguageMonitor _languageMonitor;
         private SettingsForm? _settingsForm;
+        private ObservabilityForm? _observabilityForm;
         private PairingWizardForm? _pairingWizard;
         private readonly FirstRunPairingPrompt _firstRunPrompt;
         private bool _pairingBalloonShown;
-        private ObservabilityForm? _observabilityForm;
         private bool _exiting;
 
         public TrayContext(IHost host, string logFilePath, MonitorService monitorService, ISettingsStore settingsStore)
@@ -48,11 +48,9 @@ namespace ResourceMonitorDaemon
             _monitorService = monitorService;
             _settingsStore = settingsStore;
             _settingsMonitor = host.Services.GetRequiredService<IOptionsMonitor<DeviceSettings>>();
-            _loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
-            _firstRunPrompt = new FirstRunPairingPrompt(
-                FirstRunPairingPrompt.DefaultMarkerPath,
-                _loggerFactory.CreateLogger<FirstRunPairingPrompt>());
             _services = host.Services;
+            _loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
+            _firstRunPrompt = FirstRunPairingPrompt.CreateDefault(_loggerFactory.CreateLogger<FirstRunPairingPrompt>());
             _languageMonitor = host.Services.GetRequiredService<UiLanguageMonitor>();
 
             var contextMenu = new ContextMenuStrip();
@@ -176,7 +174,7 @@ namespace ResourceMonitorDaemon
         private void ShowNotification(string title, string message, ToolTipIcon icon)
         {
             var isFailure = icon == ToolTipIcon.Error && !_monitorService.IsConnected;
-            if (!_exiting && _firstRunPrompt.TryClaim(isFailure, _settingsMonitor.CurrentValue.FallbackAddress))
+            if (!_exiting && _firstRunPrompt.TryClaim(isFailure, _settingsMonitor.CurrentValue))
             {
                 // Keeps the failure's title and states the failure in its text.
                 ShowBalloon(15000, title, Strings.Pairing_FirstRunBalloonText, icon);
@@ -232,7 +230,7 @@ namespace ResourceMonitorDaemon
             }
 
             _settingsForm = new SettingsForm(
-                // Fresh effective settings: MonitorService.CurrentSettings lags until its next tick.
+                // Fresh effective settings: MonitorService.CurrentSettings can briefly lag a reload.
                 _settingsMonitor.CurrentValue,
                 DaemonConfiguration.LoadLowerLayers(AppContext.BaseDirectory),
                 _settingsStore,
@@ -317,8 +315,8 @@ namespace ResourceMonitorDaemon
             _updateTimer.Stop();
             _updateTimer.Dispose();
             _settingsForm?.Close();
-            _pairingWizard?.Close();
             _observabilityForm?.Close();
+            _pairingWizard?.Close();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
         }
@@ -341,8 +339,8 @@ namespace ResourceMonitorDaemon
 
             _notifyIcon.Visible = false;
             _settingsForm?.Close();
-            _pairingWizard?.Close();
             _observabilityForm?.Close();
+            _pairingWizard?.Close();
             Application.ExitThread();
         }
     }

@@ -42,6 +42,12 @@ namespace ResourceMonitorDaemon.Pairing
         /// </summary>
         public bool DeviceWasAlreadyConnected { get; init; }
 
+        /// <summary>
+        /// The device was already on Wi-Fi and reports a different network from the one entered
+        /// (<see cref="WifiProvisioningResult.Connected.JoinedDifferentNetwork"/>): not a success.
+        /// </summary>
+        public bool DeviceOnDifferentNetwork { get; init; }
+
         public PairingField Focus { get; init; }
         public bool SuggestRescan { get; init; }
     }
@@ -69,7 +75,17 @@ namespace ResourceMonitorDaemon.Pairing
             ArgumentNullException.ThrowIfNull(result);
             switch (result)
             {
+                case WifiProvisioningResult.Connected { AlreadyConnected: true, JoinedDifferentNetwork: true, JoinedSsid: { Length: > 0 } joinedSsid }:
+                    // Nothing was sent: the device stays on the other network. Not a success, nothing saved.
+                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Pairing_AlreadyOnDifferentNetwork(joinedSsid, Strings.Pairing_ReprovisionInstruction))
+                    {
+                        DeviceWasAlreadyConnected = true,
+                        DeviceOnDifferentNetwork = true,
+                        Focus = PairingField.Ssid,
+                    };
+
                 case WifiProvisioningResult.Connected connected:
+                    // Includes an already-connected device that did not report its SSID (JoinedSsid null).
                     var address = GetAddressToSave(connected.Ip4Address);
                     var message = address is null ? Strings.Pairing_SucceededNoAddress(host) : Strings.Pairing_Succeeded(address);
                     if (connected.AlreadyConnected)
@@ -332,16 +348,27 @@ namespace ResourceMonitorDaemon.Pairing
         // ---- First-run prompt -----------------------------------------------------------------
 
         /// <summary>
-        /// Whether a connection-failure notification should be replaced by the one-time
-        /// "No device found — click to pair" prompt: only for a failure notification, when the prompt
-        /// was never shown before, no fallback address is configured and the daemon has not connected
-        /// to the broker since it started.
+        /// Whether a connection-failure notification should be shown as the one-time
+        /// "No device found — click to pair" prompt. All of these must hold:
+        /// it is the connection-failure notification; the marker does not exist (it is written when the
+        /// prompt is shown and when the daemon first connects to a broker); no fallback address is
+        /// configured; <c>Host</c> is the default <see cref="DeviceSettings.DefaultHost"/> (a custom host
+        /// means the user configured the connection); the daemon has not connected since it started; and
+        /// the daemon did not run on this PC before this process (covers installations from before the
+        /// marker existed).
         /// </summary>
         public static bool ShouldOfferFirstRunPairing(
-            bool isConnectionFailure, bool promptedBefore, string? effectiveFallbackAddress, bool connectedSinceStart) =>
+            bool isConnectionFailure,
+            bool markerExists,
+            string? effectiveFallbackAddress,
+            string? effectiveHost,
+            bool connectedSinceStart,
+            bool daemonRanBefore) =>
             isConnectionFailure
-            && !promptedBefore
+            && !markerExists
             && string.IsNullOrWhiteSpace(effectiveFallbackAddress)
-            && !connectedSinceStart;
+            && string.Equals((effectiveHost ?? string.Empty).Trim(), DeviceSettings.DefaultHost, StringComparison.OrdinalIgnoreCase)
+            && !connectedSinceStart
+            && !daemonRanBefore;
     }
 }

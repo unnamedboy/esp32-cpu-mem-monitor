@@ -12,15 +12,38 @@ namespace ResourceMonitorDaemon.Provisioning
 
         /// <summary>
         /// The device joined Wi-Fi. <paramref name="Ip4Address"/> is the address it reported, or null
-        /// if it did not report a valid dotted-quad IPv4 address.
+        /// if it did not report a usable unicast IPv4 address (do not save a fallback address then).
         /// </summary>
         public sealed record Connected(string? Ip4Address) : WifiProvisioningResult
         {
             /// <summary>
-            /// True when the device already reported Connected before any credentials were sent in this
-            /// attempt (it joined Wi-Fi after an earlier attempt), so nothing was sent or re-applied.
+            /// SSID the device reports it joined (WifiConnectedState.ssid), or null if not reported.
+            /// For display only; never log it.
+            /// </summary>
+            public string? JoinedSsid { get; init; }
+
+            /// <summary>
+            /// True when the device was already connected before this attempt sent anything, so no
+            /// credentials were sent (it joined after an earlier attempt ended in Timeout/ConnectionLost).
             /// </summary>
             public bool AlreadyConnected { get; init; }
+
+            /// <summary>
+            /// True when <see cref="AlreadyConnected"/> and the device reports a different SSID from the one
+            /// requested now. The UI should then say "the device is already on network X" instead of
+            /// reporting success for the requested network. False if the device did not report its SSID.
+            /// </summary>
+            public bool JoinedDifferentNetwork { get; init; }
+
+            // Record ToString() would print JoinedSsid; redact it so logging a result never leaks the SSID.
+            protected override bool PrintMembers(StringBuilder builder)
+            {
+                builder.Append("Ip4Address = ").Append(Ip4Address)
+                    .Append(", JoinedSsid = ").Append(JoinedSsid is null ? "(none)" : "<redacted>")
+                    .Append(", AlreadyConnected = ").Append(AlreadyConnected)
+                    .Append(", JoinedDifferentNetwork = ").Append(JoinedDifferentNetwork);
+                return true;
+            }
         }
 
         /// <summary>The device gave up joining Wi-Fi (wrong password or network not found).</summary>
@@ -31,15 +54,29 @@ namespace ResourceMonitorDaemon.Provisioning
 
         /// <summary>
         /// The Bluetooth link dropped while waiting for the result, after the device had accepted and
-        /// applied the settings. The device may well have joined Wi-Fi (it stops BLE once it reports
-        /// Connected), so the caller should check the normal connection (e.g. MQTT to resmon.local)
-        /// before declaring failure. <paramref name="Reason"/> is a user-presentable description.
+        /// applied the settings. The device may well have joined Wi-Fi (the firmware keeps BLE up for
+        /// about 35 s after success, but the link can also drop for radio reasons), so the caller should
+        /// check the normal connection (e.g. MQTT to resmon.local) before declaring failure. <paramref name="Reason"/> is a user-presentable description.
         /// </summary>
         public sealed record ConnectionLost(WifiStationState LastState, string Reason) : WifiProvisioningResult;
     }
 
     /// <summary>A single decoded GetStatus answer.</summary>
-    public sealed record WifiStatus(WifiStationState State, WifiConnectFailedReason? FailReason, string? Ip4Address);
+    public sealed record WifiStatus(WifiStationState State, WifiConnectFailedReason? FailReason, string? Ip4Address)
+    {
+        /// <summary>SSID reported with a Connected status, or null. Never log it.</summary>
+        public string? JoinedSsid { get; init; }
+
+        // Record ToString() would print JoinedSsid; redact it so logging a status never leaks the SSID.
+        private bool PrintMembers(StringBuilder builder)
+        {
+            builder.Append("State = ").Append(State)
+                .Append(", FailReason = ").Append(FailReason)
+                .Append(", Ip4Address = ").Append(Ip4Address)
+                .Append(", JoinedSsid = ").Append(JoinedSsid is null ? "(none)" : "<redacted>");
+            return true;
+        }
+    }
 
     /// <summary>
     /// Client for the prov-config endpoint (wifi_config.proto), following esp_prov wifi_prov.py:
@@ -52,6 +89,9 @@ namespace ResourceMonitorDaemon.Provisioning
         private readonly TimeSpan _pollInterval;
         private readonly TimeSpan _connectTimeout;
         private bool _previousAttemptFailed;
+
+        /// <summary>True once the device has reported ConnectionFailed (in this or an earlier session).</summary>
+        public bool PreviousAttemptFailed => _previousAttemptFailed;
 
         /// <summary>Uses the contract limits: one poll per second, at most 30 s.</summary>
         public WifiConfigClient(Security1Session session)
@@ -68,48 +108,59 @@ namespace ResourceMonitorDaemon.Provisioning
         }
 
         /// <summary>
-        /// Checks the current status, then sends SetConfig, ApplyConfig and waits for the device to join
-        /// the network. If the device already reports Connected (it joined after an earlier attempt that
-        /// ended in Timeout/ConnectionLost), no credentials are sent and Connected is returned directly.
+        /// The whole Wi-Fi step: checks the current status, then sends SetConfig, ApplyConfig and waits
+        /// for the device to join the network.
+        /// The status check comes first because the device's Wi-Fi state survives reconnects and
+        /// wifi_prov_mgr_reset_sm_state_on_failure():
+        /// <list type="bullet">
+        /// <item>ConnectionFailed: an earlier attempt failed (sets <see cref="PreviousAttemptFailed"/>);</item>
+        /// <item>Connected: the device already joined Wi-Fi after an earlier attempt ended in
+        /// Timeout/ConnectionLost. No credentials are sent (ApplyConfig would fail) and a Connected result
+        /// with <see cref="WifiProvisioningResult.Connected.AlreadyConnected"/> is returned; compare
+        /// <see cref="WifiProvisioningResult.Connected.JoinedDifferentNetwork"/> before reporting success;</item>
+        /// <item>Connecting: the normal state of a device that has not been configured yet.</item>
+        /// </list>
+        /// A non-success or malformed answer to the status check is ignored; transport errors propagate.
         /// The byte copies made from the passphrase are zeroed after encryption; the caller's string
         /// itself cannot be wiped, so drop references to it promptly.
         /// </summary>
-        public async Task<WifiProvisioningResult> ConfigureAsync(string ssid, string passphrase, CancellationToken cancellationToken)
+        public Task<WifiProvisioningResult> ConfigureAsync(string ssid, string passphrase, CancellationToken cancellationToken) =>
+            ConfigureAsync(ssid, passphrase, beforeWaiting: null, cancellationToken);
+
+        /// <summary>
+        /// Same as the public overload; <paramref name="beforeWaiting"/> runs after ApplyConfig succeeded,
+        /// just before polling starts (the facade reports its progress step there).
+        /// </summary>
+        internal async Task<WifiProvisioningResult> ConfigureAsync(
+            string ssid, string passphrase, Action? beforeWaiting, CancellationToken cancellationToken)
         {
-            var initial = await CheckStatusBeforeConfigAsync(cancellationToken).ConfigureAwait(false);
+            ValidateCredentials(ssid, passphrase);
+
+            WifiStatus? initial;
+            try
+            {
+                initial = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (ProvisioningProtocolException)
+            {
+                initial = null;
+            }
+
             if (initial?.State == WifiStationState.Connected)
             {
-                return new WifiProvisioningResult.Connected(NormalizeIp4(initial.Ip4Address)) { AlreadyConnected = true };
+                return new WifiProvisioningResult.Connected(NormalizeIp4(initial.Ip4Address))
+                {
+                    JoinedSsid = initial.JoinedSsid,
+                    AlreadyConnected = true,
+                    JoinedDifferentNetwork = initial.JoinedSsid is not null
+                                             && !string.Equals(initial.JoinedSsid, ssid, StringComparison.Ordinal),
+                };
             }
 
             await SetConfigAsync(ssid, passphrase, cancellationToken).ConfigureAwait(false);
             await ApplyConfigAsync(cancellationToken).ConfigureAwait(false);
+            beforeWaiting?.Invoke();
             return await WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        /// <summary>
-        /// Best effort: asks for the current status once, before sending credentials. The device's Wi-Fi
-        /// state survives reconnects and wifi_prov_mgr_reset_sm_state_on_failure(), so this reveals
-        /// <list type="bullet">
-        /// <item>ConnectionFailed: an earlier attempt failed (a retry may be refused without a device reset);</item>
-        /// <item>Connected: the device already joined Wi-Fi in this provisioning run; do not send
-        /// credentials again (ApplyConfig would fail). Note that on a real device this answer makes the
-        /// firmware finish provisioning and shut BLE down shortly afterwards;</item>
-        /// <item>Connecting: the normal state of a device that has not been configured yet.</item>
-        /// </list>
-        /// Returns null if the device answered with a non-success status or a malformed message;
-        /// transport errors propagate.
-        /// </summary>
-        public async Task<WifiStatus?> CheckStatusBeforeConfigAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                return await GetStatusAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (ProvisioningProtocolException)
-            {
-                return null;
-            }
         }
 
         public async Task SetConfigAsync(string ssid, string passphrase, CancellationToken cancellationToken)
@@ -141,8 +192,10 @@ namespace ResourceMonitorDaemon.Provisioning
         {
             var response = await SendAsync(WifiConfigMessages.EncodeApplyConfig(), WifiConfigMsgType.RespApplyConfig, cancellationToken)
                 .ConfigureAwait(false);
-            // In v4.4.7 an InternalError here only comes from wifi_prov_mgr_configure_sta failing (stuck
-            // after a failed attempt) or from no config having been set, so always give the restart advice.
+            // In v4.4.7 an InternalError here comes from wifi_prov_mgr_configure_sta failing because
+            // prov_state is already CRED_RECV or later: an earlier attempt is still connecting (e.g. after a
+            // Timeout) or failed without wifi_prov_mgr_reset_sm_state_on_failure(). The only other source is
+            // no config having been set. Either way the device needs a provisioning restart.
             EnsureAccepted(response.Status, "could not apply the Wi-Fi settings", internalErrorMeansRetryRejected: true);
         }
 
@@ -162,7 +215,10 @@ namespace ResourceMonitorDaemon.Provisioning
 
             return response.StaState switch
             {
-                WifiStationState.Connected => new WifiStatus(response.StaState, null, response.Ip4Address),
+                WifiStationState.Connected => new WifiStatus(response.StaState, null, response.Ip4Address)
+                {
+                    JoinedSsid = response.ConnectedSsid,
+                },
                 WifiStationState.ConnectionFailed => new WifiStatus(response.StaState, response.FailReason, null),
                 _ => new WifiStatus(response.StaState, null, null),
             };
@@ -172,8 +228,8 @@ namespace ResourceMonitorDaemon.Provisioning
         /// Polls GetStatus at most once per poll interval until Connected, ConnectionFailed or the timeout.
         /// Connecting and Disconnected are treated as transient (esp_prov retries on them too).
         /// The whole wait, including an in-flight GetStatus exchange, is bounded by the timeout.
-        /// A dropped link is reported as <see cref="WifiProvisioningResult.ConnectionLost"/>, because the
-        /// device tears BLE down shortly after it reports Connected and may have joined Wi-Fi.
+        /// Losing the link is reported as <see cref="WifiProvisioningResult.ConnectionLost"/>, because the
+        /// device may have joined Wi-Fi anyway (it applied the settings before the link went away).
         /// </summary>
         public async Task<WifiProvisioningResult> WaitForConnectionAsync(CancellationToken cancellationToken)
         {
@@ -191,7 +247,10 @@ namespace ResourceMonitorDaemon.Provisioning
                     switch (status.State)
                     {
                         case WifiStationState.Connected:
-                            return new WifiProvisioningResult.Connected(NormalizeIp4(status.Ip4Address));
+                            return new WifiProvisioningResult.Connected(NormalizeIp4(status.Ip4Address))
+                            {
+                                JoinedSsid = status.JoinedSsid,
+                            };
                         case WifiStationState.ConnectionFailed:
                             return new WifiProvisioningResult.Failed(status.FailReason ?? WifiConnectFailedReason.AuthError);
                     }
@@ -246,11 +305,23 @@ namespace ResourceMonitorDaemon.Provisioning
 
             var trimmed = candidate.Trim().TrimEnd('\0');
             var parts = trimmed.Split('.');
-            return parts.Length == 4
-                   && IPAddress.TryParse(trimmed, out var address)
-                   && address.AddressFamily == AddressFamily.InterNetwork
-                ? address.ToString()
-                : null;
+            if (parts.Length != 4
+                || !IPAddress.TryParse(trimmed, out var address)
+                || address.AddressFamily != AddressFamily.InterNetwork)
+            {
+                return null;
+            }
+
+            // Reject addresses a station can't be reached at: 0.0.0.0/8 ("this network", e.g. no lease
+            // yet), 127.0.0.0/8 loopback, 224.0.0.0/4 multicast and 240.0.0.0/4 reserved, which includes
+            // the 255.255.255.255 broadcast address.
+            var first = address.GetAddressBytes()[0];
+            if (first == 0 || first == 127 || first >= 224)
+            {
+                return null;
+            }
+
+            return address.ToString();
         }
 
         private void EnsureAccepted(ProtocommStatus status, string action, bool internalErrorMeansRetryRejected)

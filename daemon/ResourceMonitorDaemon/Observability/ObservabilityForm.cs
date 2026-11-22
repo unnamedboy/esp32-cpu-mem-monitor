@@ -319,8 +319,8 @@ namespace ResourceMonitorDaemon.Observability
                 return;
             }
 
-            if (edited.Enabled && edited.AuthMode != LokiAuthMode.None
-                && Uri.TryCreate(edited.Url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp
+            if (edited.Enabled
+                && LokiUrl.SendsCredentialsInsecurely(edited with { Token = CandidateToken() })
                 && MessageBox.Show(
                     this,
                     Strings.Observability_InsecureSaveQuestion,

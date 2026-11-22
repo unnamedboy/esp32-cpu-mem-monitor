@@ -130,6 +130,11 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual(ProtocommStatus.Success, decoded.Status);
                 AssertEqual(WifiStationState.Connected, decoded.StaState);
                 AssertEqual("192.168.1.50", decoded.Ip4Address);
+                AssertEqual<string?>(null, decoded.ConnectedSsid);
+
+                // connected{ip4_addr, ssid(3) = "home"}: 0A 0C ip, 1A 04 "home" -> 20 bytes = 0x14
+                var withSsid = WifiConfigMessages.DecodeResponse(Hex("0801" + "5A16" + "5A14" + "0A0C" + ip + "1A04" + ToHex(Encoding.ASCII.GetBytes("home"))));
+                AssertEqual("home", withSsid.ConnectedSsid);
             }),
             ("WifiConfig RespGetStatus decodes ConnectionFailed reasons", () =>
             {
@@ -211,7 +216,7 @@ namespace ResourceMonitorDaemon.Tests
 
                 var result = await client.ConfigureAsync("home-network", "correct horse battery", CancellationToken.None);
 
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertTrue(!AssertConnected("192.168.1.50", result).AlreadyConnected, "unexpected AlreadyConnected");
                 AssertEqual("home-network", device.ReceivedSsid);
                 AssertEqual("correct horse battery", device.ReceivedPassphrase);
                 AssertTrue(device.Applied, "ApplyConfig was not sent");
@@ -305,6 +310,13 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4(""));
                 AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4("fe80::1"));
                 AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4("12345"));
+                foreach (var unusable in new[] { "0.0.0.0", "0.1.2.3", "255.255.255.255", "127.0.0.1", "224.0.0.251", "240.0.0.1" })
+                {
+                    AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4(unusable));
+                }
+
+                AssertEqual("169.254.10.20", WifiConfigClient.NormalizeIp4("169.254.10.20"));
+                AssertEqual("223.255.255.254", WifiConfigClient.NormalizeIp4("223.255.255.254"));
             }),
 
             // ---- BLE helpers (pure logic only; WinRT calls need real hardware) ----------------
@@ -352,13 +364,16 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual<PopReply?>(new PopReply.Available("PROV_RESMON_A1B2C3", "ABCDEFGH"),
                     PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=ABCDEFGH"));
             }),
-            ("PopLineParser accepts CRLF and LF line endings and log noise before the reply", () =>
+            ("PopLineParser accepts CRLF/LF endings and leading whitespace, not mid-line replies", () =>
             {
                 var expected = new PopReply.Available("PROV_RESMON_A1B2C3", "XYZ23456");
                 AssertEqual<PopReply?>(expected, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456\r\n"));
                 AssertEqual<PopReply?>(expected, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456\r"));
                 AssertEqual<PopReply?>(expected, PopLineParser.Parse("RESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456\n"));
-                AssertEqual<PopReply?>(expected, PopLineParser.Parse("\u001b[0mRESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456"));
+                AssertEqual<PopReply?>(expected, PopLineParser.Parse("  \rRESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456"));
+                // Contract: the line must start with RESMON-POP; anything else in front is rejected.
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("\u001b[0mRESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456"));
+                AssertEqual<PopReply?>(null, PopLineParser.Parse("I (512) app: RESMON-POP name=PROV_RESMON_A1B2C3 pop=XYZ23456"));
             }),
             ("PopLineParser parses the unavailable reply", () =>
             {
@@ -420,7 +435,7 @@ namespace ResourceMonitorDaemon.Tests
 
                 var result = await service.ProvisionAsync(TestDevice, "k7m3-p9qx", "home-network", "hunter2-wifi-pass", steps, CancellationToken.None);
 
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertTrue(!AssertConnected("192.168.1.50", result).AlreadyConnected, "unexpected AlreadyConnected");
                 AssertEqual(
                     "ConnectingToDevice,SecuringSession,SendingWifiConfig,WaitingForWifiConnection",
                     string.Join(",", steps.Items));
@@ -435,7 +450,7 @@ namespace ResourceMonitorDaemon.Tests
                 var device = new FakeProvisioningDevice("K7M3P9QX") { SupportsVersionEndpoint = false };
                 var service = new ProvisioningService(null, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
                 var result = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home-network", "password1", null, CancellationToken.None);
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertTrue(!AssertConnected("192.168.1.50", result).AlreadyConnected, "unexpected AlreadyConnected");
             })),
             ("ProvisioningService surfaces a wrong pairing code and disposes the transport", () => RunAsync(async () =>
             {
@@ -556,7 +571,7 @@ namespace ResourceMonitorDaemon.Tests
                 var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 0, EmptyStatusPolls = 2 };
                 using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
                 var result = await new WifiConfigClient(session, FastPoll, FastTimeout).ConfigureAsync("home", "password1", CancellationToken.None);
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertTrue(!AssertConnected("192.168.1.50", result).AlreadyConnected, "unexpected AlreadyConnected");
                 AssertEqual(3, device.StatusPolls);
             })),
             ("Stale Response0 returned for Command1 -> PairingCodeRejectedException", () => RunAsync(async () =>
@@ -580,7 +595,7 @@ namespace ResourceMonitorDaemon.Tests
                 var device = new FakeProvisioningDevice("ABCDEFGH") { CloseLinkAfterConnected = true };
                 var service = new ProvisioningService(null, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
                 var result = await service.ProvisionAsync(TestDevice, "ABCDEFGH", "home", "password1", null, CancellationToken.None);
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertTrue(!AssertConnected("192.168.1.50", result).AlreadyConnected, "unexpected AlreadyConnected");
             })),
             ("Retry after Failed without device reset -> ProvisioningRetryRejectedException", () => RunAsync(async () =>
             {
@@ -604,7 +619,7 @@ namespace ResourceMonitorDaemon.Tests
                 await client.ConfigureAsync("home", "wrong-pass", CancellationToken.None);
                 device.FinalState = WifiStationState.Connected;
                 var second = await client.ConfigureAsync("home", "right-pass", CancellationToken.None);
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), second);
+                AssertTrue(!AssertConnected("192.168.1.50", second).AlreadyConnected, "unexpected AlreadyConnected");
                 AssertEqual("right-pass", device.ReceivedPassphrase);
             })),
             ("WaitForConnectionAsync stays within its budget when GetStatus hangs", () => RunAsync(async () =>
@@ -651,7 +666,7 @@ namespace ResourceMonitorDaemon.Tests
 
                 device.FinalState = WifiStationState.Connected;
                 var second = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "right-pass", null, CancellationToken.None);
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), second);
+                AssertTrue(!AssertConnected("192.168.1.50", second).AlreadyConnected, "unexpected AlreadyConnected");
                 AssertEqual("right-pass", device.ReceivedPassphrase);
             })),
             ("ApplyConfig InternalError always gives restart guidance", () => RunAsync(async () =>
@@ -661,7 +676,8 @@ namespace ResourceMonitorDaemon.Tests
                 var ex = await AssertThrowsAsync<ProvisioningRetryRejectedException>(
                     () => service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "password1", null, CancellationToken.None));
                 AssertTrue(!ex.PreviousAttemptFailed, "no earlier failure was reported by the device");
-                AssertTrue(ex.Message.Contains("Power-cycle the device"), "missing restart guidance");
+                AssertTrue(ex.Message.Contains("BOOT button for 5–15 seconds, then release it"), "missing restart guidance");
+                AssertTrue(!ex.Message.Contains("ower-cycle"), "power-cycling would boot with the stored bad credentials");
 
                 device.ApplyStatusOverride = ProtocommStatus.InvalidArgument;
                 var other = await AssertThrowsAsync<ProvisioningProtocolException>(
@@ -684,21 +700,81 @@ namespace ResourceMonitorDaemon.Tests
                 var steps = new SyncProgress<ProvisioningStep>();
                 var second = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "second-pass", steps, CancellationToken.None);
 
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50") { AlreadyConnected = true }, second);
+                var connected = AssertConnected("192.168.1.50", second);
+                AssertTrue(connected.AlreadyConnected, "AlreadyConnected not set");
+                AssertEqual("home", connected.JoinedSsid);
+                AssertTrue(!connected.JoinedDifferentNetwork, "same network reported as different");
                 AssertEqual(1, device.SetConfigCount);               // credentials were not sent again
                 AssertEqual("first-pass", device.ReceivedPassphrase);
                 AssertTrue(!steps.Items.Contains(ProvisioningStep.WaitingForWifiConnection), "should not wait again");
                 AssertTrue(logger.Lines.Any(l => l.Contains("already connected")), "missing 'already connected' log");
+                AssertTrue(logger.Lines.All(l => !l.Contains("home")), "SSID leaked into the log");
+            })),
+            ("Already-connected device on a different network is flagged, not reported as plain success", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("K7M3P9QX") { ConnectingPolls = int.MaxValue };
+                var logger = new CapturingLogger();
+                var service = new ProvisioningService(logger, (_, _) => Task.FromResult<IProvisioningTransport>(device),
+                    TimeSpan.FromMilliseconds(5), TimeSpan.FromMilliseconds(100));
+                await service.ProvisionAsync(TestDevice, "K7M3P9QX", "office-net", "office-pass", null, CancellationToken.None);
+
+                // The device joined the first network; the user now asks for a different one.
+                device.ConnectingPolls = 0;
+                var result = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home-net", "home-pass", null, CancellationToken.None);
+                var connected = AssertConnected("192.168.1.50", result);
+                AssertTrue(connected.AlreadyConnected, "AlreadyConnected not set");
+                AssertTrue(connected.JoinedDifferentNetwork, "different network not flagged");
+                AssertEqual("office-net", connected.JoinedSsid);
+                AssertEqual(1, device.SetConfigCount);
+                AssertTrue(logger.Lines.Any(l => l.Contains("a different network than requested")), "missing mismatch log");
+                AssertTrue(logger.Lines.All(l => !l.Contains("office-net") && !l.Contains("home-net")), "SSID leaked into the log");
+            })),
+            ("Connected and WifiStatus ToString never contain the SSID", () =>
+            {
+                var connected = new WifiProvisioningResult.Connected("192.168.1.50")
+                {
+                    JoinedSsid = "SecretHomeNet", AlreadyConnected = true, JoinedDifferentNetwork = true,
+                };
+                var text = connected.ToString();
+                AssertTrue(!text.Contains("SecretHomeNet"), "SSID leaked from Connected.ToString()");
+                AssertTrue(text.Contains("192.168.1.50") && text.Contains("<redacted>") && text.Contains("AlreadyConnected = True"),
+                    "ToString lost the non-secret fields");
+                AssertTrue(!$"{connected}".Contains("SecretHomeNet"), "SSID leaked through interpolation");
+
+                var status = new WifiStatus(WifiStationState.Connected, null, "192.168.1.50") { JoinedSsid = "SecretHomeNet" };
+                AssertTrue(!status.ToString().Contains("SecretHomeNet"), "SSID leaked from WifiStatus.ToString()");
+                AssertTrue(status.ToString().Contains("State = Connected"), "WifiStatus ToString lost the state");
+                AssertTrue(new WifiProvisioningResult.Connected(null).ToString().Contains("JoinedSsid = (none)"), "missing (none)");
+            }),
+            ("Empty or absent connected.ssid decodes as not reported", () =>
+            {
+                var ip = ToHex(Encoding.ASCII.GetBytes("192.168.1.50"));
+                // connected{ip4_addr, ssid = ""}: 0A 0C ip, 1A 00 -> 16 bytes = 0x10
+                var empty = WifiConfigMessages.DecodeResponse(Hex("0801" + "5A12" + "5A10" + "0A0C" + ip + "1A00"));
+                AssertEqual<string?>(null, empty.ConnectedSsid);
+                // ssid made only of NUL padding is also "not reported"
+                var nul = WifiConfigMessages.DecodeResponse(Hex("0801" + "5A14" + "5A12" + "0A0C" + ip + "1A020000"));
+                AssertEqual<string?>(null, nul.ConnectedSsid);
+            }),
+            ("Already-connected device that does not report its SSID is not flagged as different", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 0, JoinedSsid = "" };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+                await client.ConfigureAsync("home", "first-pass", CancellationToken.None);
+                var again = AssertConnected("192.168.1.50", await client.ConfigureAsync("other", "second-pass", CancellationToken.None));
+                AssertTrue(again.AlreadyConnected, "AlreadyConnected not set");
+                AssertTrue(!again.JoinedDifferentNetwork, "unknown SSID must not count as different");
             })),
             ("ConfigureAsync on an already-connected device returns Connected without SetConfig", () => RunAsync(async () =>
             {
                 var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 0 };
                 using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
                 var client = new WifiConfigClient(session, FastPoll, FastTimeout);
-                var first = await client.ConfigureAsync("home", "first-pass", CancellationToken.None);
-                AssertTrue(first is WifiProvisioningResult.Connected { AlreadyConnected: false }, "first attempt sent the credentials");
+                await client.ConfigureAsync("home", "first-pass", CancellationToken.None);
                 var again = await client.ConfigureAsync("home", "second-pass", CancellationToken.None);
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50") { AlreadyConnected = true }, again);
+                var already = AssertConnected("192.168.1.50", again);
+                AssertTrue(already.AlreadyConnected, "AlreadyConnected not set");
                 AssertEqual(1, device.SetConfigCount);
             })),
             ("ConnectionLost wording does not assume a disconnect", () => RunAsync(async () =>
@@ -770,6 +846,19 @@ namespace ResourceMonitorDaemon.Tests
             "2b0930daa23de94ce87017ba2d84988d" + "dfc9c58db67aada613c2dd08457941a6";
 
         private static void RunAsync(Func<Task> test) => test().GetAwaiter().GetResult();
+
+        /// <summary>Checks for a Connected result with the given address (JoinedSsid and flags vary).</summary>
+        private static WifiProvisioningResult.Connected AssertConnected(string expectedIp, WifiProvisioningResult result)
+        {
+            if (result is not WifiProvisioningResult.Connected connected)
+            {
+                // Only the type name: never interpolate a result that may carry an SSID.
+                throw new InvalidOperationException($"expected Connected, got {result.GetType().Name}");
+            }
+
+            AssertEqual<string?>(expectedIp, connected.Ip4Address);
+            return connected;
+        }
 
         // ---- assertion helpers -------------------------------------------------------------
 

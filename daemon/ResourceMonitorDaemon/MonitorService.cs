@@ -22,6 +22,10 @@ namespace ResourceMonitorDaemon
         private DeviceSettings _settings;
         private DeviceSettings? _pendingSettings;
         private IDisposable? _settingsSubscription;
+
+        // Released by the settings OnChange callback so the loop applies changes right away
+        // instead of at the next sample tick (which can be up to 60 s away).
+        private readonly SemaphoreSlim _settingsChanged = new(0, 1);
         private volatile bool _isPaused;
         private int _stopRequested;
 
@@ -65,7 +69,7 @@ namespace ResourceMonitorDaemon
         {
             // Subscribe before reading CurrentValue so a reload during start-up (e.g. while the
             // performance counter initializes) is not lost; equal values are ignored later.
-            _settingsSubscription = _settingsMonitor.OnChange(updated => Volatile.Write(ref _pendingSettings, updated));
+            _settingsSubscription = _settingsMonitor.OnChange(OnSettingsChanged);
             _settings = _settingsMonitor.CurrentValue;
             LogStartupDiagnostics(_settings);
 
@@ -85,48 +89,60 @@ namespace ResourceMonitorDaemon
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_settings.SampleIntervalMs));
-
             // Start connecting right away instead of waiting one sample period.
             _connection.MaintainConnection();
 
-            while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
+            var clock = Stopwatch.StartNew();
+            var nextTick = clock.Elapsed + SampleInterval;
+            try
             {
-                try
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    ApplyPendingSettings(timer);
-
-                    float cpuUsage = _cpuCounter?.NextValue() ?? 0;
-                    var memInfo = NativeMemory.GetMemoryStatus();
-                    _logger.LogDebug(
-                        "[Metrics] CPU: {Cpu:F1}% | RAM: {UsedGb:F2}/{TotalGb:F2} GB ({MemoryLoad}%)",
-                        cpuUsage, memInfo.UsedGB, memInfo.TotalGB, memInfo.MemoryLoad);
-                    NotifyObserver(cpuUsage, memInfo);
-
-                    if (_isPaused)
+                    var delay = nextTick - clock.Elapsed;
+                    if (delay > TimeSpan.Zero && await _settingsChanged.WaitAsync(delay, stoppingToken))
                     {
+                        // Woken by a settings change: apply it now, then keep waiting. Like a
+                        // sample, a failure here is logged and the loop keeps running.
+                        try
+                        {
+                            if (ApplyPendingSettings(out var intervalChanged))
+                            {
+                                if (intervalChanged)
+                                {
+                                    nextTick = clock.Elapsed + SampleInterval;
+                                }
+
+                                if (!_isPaused)
+                                {
+                                    _connection.MaintainConnection(); // reconnects at once on endpoint change
+                                }
+                            }
+                        }
+                        catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                        {
+                            _logger.LogError(ex, "An error occurred while applying changed settings.");
+                        }
+
                         continue;
                     }
 
-                    // Never waits for the network: at most starts a background connect attempt.
-                    _connection.MaintainConnection();
-
-                    var settings = _settings;
-                    if (await _connection.PublishAsync(settings.CpuTopic, MetricPayloadFormatter.FormatPercentPayload(cpuUsage), stoppingToken))
+                    // Fixed-rate schedule without drift; skip missed ticks instead of bursting.
+                    nextTick += SampleInterval;
+                    if (nextTick <= clock.Elapsed)
                     {
-                        await _connection.PublishAsync(settings.MemTopic, MetricPayloadFormatter.FormatPercentPayload(memInfo.MemoryLoad), stoppingToken);
+                        nextTick = clock.Elapsed + SampleInterval;
                     }
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "An error occurred while sampling resources.");
+
+                    await SampleAndPublishAsync(stoppingToken);
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Normal shutdown.
+            }
         }
+
+        private TimeSpan SampleInterval => TimeSpan.FromMilliseconds(_settings.SampleIntervalMs);
 
         private void NotifyObserver(float cpuUsage, (double TotalGB, double UsedGB, uint MemoryLoad) memInfo)
         {
@@ -147,22 +163,76 @@ namespace ResourceMonitorDaemon
             }
         }
 
-        private void ApplyPendingSettings(PeriodicTimer timer)
+        private async Task SampleAndPublishAsync(CancellationToken stoppingToken)
         {
+            try
+            {
+                ApplyPendingSettings(out _);
+
+                float cpuUsage = _cpuCounter?.NextValue() ?? 0;
+                var memInfo = NativeMemory.GetMemoryStatus();
+                _logger.LogDebug(
+                    "[Metrics] CPU: {Cpu:F1}% | RAM: {UsedGb:F2}/{TotalGb:F2} GB ({MemoryLoad}%)",
+                    cpuUsage, memInfo.UsedGB, memInfo.TotalGB, memInfo.MemoryLoad);
+                NotifyObserver(cpuUsage, memInfo);
+
+                if (_isPaused)
+                {
+                    return;
+                }
+
+                // Never waits for the network: at most starts a background connect attempt.
+                _connection.MaintainConnection();
+
+                var settings = _settings;
+                if (await _connection.PublishAsync(settings.CpuTopic, MetricPayloadFormatter.FormatPercentPayload(cpuUsage), stoppingToken))
+                {
+                    await _connection.PublishAsync(settings.MemTopic, MetricPayloadFormatter.FormatPercentPayload(memInfo.MemoryLoad), stoppingToken);
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred while sampling resources.");
+            }
+        }
+
+        /// <summary>IOptionsMonitor callback (any thread): queue the settings and wake the loop.</summary>
+        private void OnSettingsChanged(DeviceSettings updated)
+        {
+            Volatile.Write(ref _pendingSettings, updated);
+
+            // Always wake, even if the value equals the current settings: an A→B→A revert can
+            // race with the loop applying B. The semaphore's cap of 1 prevents spinning, and the
+            // loop ignores values equal to what is already in effect.
+            try
+            {
+                _settingsChanged.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // A wake-up is already pending; the loop will read the latest settings.
+            }
+        }
+
+        /// <summary>Applies queued settings on the loop thread. Returns true if anything changed.</summary>
+        private bool ApplyPendingSettings(out bool intervalChanged)
+        {
+            intervalChanged = false;
             var updated = Interlocked.Exchange(ref _pendingSettings, null);
             if (updated == null || updated == _settings)
             {
-                return;
+                return false;
             }
 
             _logger.LogInformation("Settings changed: {Settings}", updated.Describe());
-            if (updated.SampleIntervalMs != _settings.SampleIntervalMs)
-            {
-                timer.Period = TimeSpan.FromMilliseconds(updated.SampleIntervalMs);
-            }
-
+            intervalChanged = updated.SampleIntervalMs != _settings.SampleIntervalMs;
             Volatile.Write(ref _settings, updated);
             _connection.Configure(updated);
+            return true;
         }
 
         private void LogStartupDiagnostics(DeviceSettings settings)

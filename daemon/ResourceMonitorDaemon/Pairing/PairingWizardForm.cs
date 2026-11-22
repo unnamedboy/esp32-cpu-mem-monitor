@@ -60,9 +60,11 @@ namespace ResourceMonitorDaemon.Pairing
         private readonly TextBox _password;
         private readonly CheckBox _showPassword;
         private readonly Label[] _steps;
-        private readonly string[] _stepTexts;
+        private readonly string[] _defaultStepTexts;   // in the language the wizard was opened in
+        private readonly string[] _stepTexts;          // current text per step (a step may show a custom text)
         private readonly Label _result;
         private readonly Label _finalStatus;
+        private readonly Font _finalStatusFont;
         private readonly Button _pair;
         private readonly Button _cancel;
 
@@ -76,6 +78,7 @@ namespace ResourceMonitorDaemon.Pairing
         private string? _prefilledSsid;
         private bool _busy;
         private bool _scanning;
+        private bool _wifiLookupRunning;
         private bool _closed;
 
         public PairingWizardForm(
@@ -200,7 +203,7 @@ namespace ResourceMonitorDaemon.Pairing
             // 4. Progress
             var progressGroup = NewGroup(Strings.Pairing_ProgressGroup, out var progressLayout);
             // Step texts, in step order: the four ProvisioningStep values, then save and daemon.
-            _stepTexts = new[]
+            _defaultStepTexts = new[]
             {
                 Strings.Pairing_StepConnect,
                 Strings.Pairing_StepSecure,
@@ -209,7 +212,8 @@ namespace ResourceMonitorDaemon.Pairing
                 Strings.Pairing_StepSave,
                 Strings.Pairing_StepDaemon,
             };
-            _steps = new Label[_stepTexts.Length];
+            _steps = new Label[_defaultStepTexts.Length];
+            _stepTexts = new string[_steps.Length];
             for (var i = 0; i < _steps.Length; i++)
             {
                 _steps[i] = NewLabel(string.Empty, SystemColors.GrayText);
@@ -221,7 +225,8 @@ namespace ResourceMonitorDaemon.Pairing
             _result.Margin = new Padding(3, 8, 3, 3);
             AddRow(progressLayout, _result);
             _finalStatus = NewLabel(string.Empty, Color.DarkGreen);
-            _finalStatus.Font = new Font(Font, FontStyle.Bold);
+            _finalStatusFont = new Font(Font, FontStyle.Bold);
+            _finalStatus.Font = _finalStatusFont;
             AddRow(progressLayout, _finalStatus);
             AddRow(right, progressGroup);
 
@@ -294,6 +299,10 @@ namespace ResourceMonitorDaemon.Pairing
             }
 
             base.Dispose(disposing);
+            if (disposing)
+            {
+                _finalStatusFont.Dispose();
+            }
         }
 
         /// <summary>Runs an event-handler operation; nothing escapes to the message loop.</summary>
@@ -571,12 +580,14 @@ namespace ResourceMonitorDaemon.Pairing
         /// </summary>
         private async Task UseThisPcWifiAsync()
         {
-            if (_closed || _busy)
+            if (_closed || _busy || _wifiLookupRunning)
             {
                 return;
             }
 
-            _useThisPcWifi.Enabled = false;
+            _wifiLookupRunning = true;
+            UpdateControls();
+            var textAtClick = _ssid.Text;
             _ssidNote.ForeColor = SystemColors.GrayText;
             _ssidNote.Text = Strings.Pairing_ReadingThisPcWifi;
             _ssidNote.Visible = true;
@@ -591,14 +602,22 @@ namespace ResourceMonitorDaemon.Pairing
             }
             finally
             {
+                _wifiLookupRunning = false;
                 if (!_closed)
                 {
-                    _useThisPcWifi.Enabled = !_busy;
+                    UpdateControls();
                 }
             }
 
             if (_closed)
             {
+                return;
+            }
+
+            if (_busy || _ssid.Text != textAtClick)
+            {
+                // Pairing started or the user edited the box meanwhile: their input wins.
+                _ssidNote.Visible = _prefilledSsid is not null && _ssid.Text == _prefilledSsid;
                 return;
             }
 
@@ -662,7 +681,7 @@ namespace ResourceMonitorDaemon.Pairing
                     return;
                 }
 
-                ShowResult(outcome.Message, ToneOf(outcome.Kind));
+                ShowResult(outcome.Message, ToneOf(outcome));
                 if (outcome.Kind == PairingOutcomeKind.Succeeded)
                 {
                     await FinishSuccessAsync(outcome, settings, startGeneration, previousFallback, cts.Token);
@@ -671,6 +690,13 @@ namespace ResourceMonitorDaemon.Pairing
                 {
                     FocusField(outcome.SuggestRescan && outcome.Focus == PairingField.None ? PairingField.Device : outcome.Focus);
                 }
+            }
+            catch (Exception) when (!_closed)
+            {
+                // Unexpected failure (e.g. while saving the address): no step may stay "running".
+                // RunSafelyAsync logs it and shows the generic message.
+                SettleRunningSteps(StepState.Failed);
+                throw;
             }
             finally
             {
@@ -696,6 +722,7 @@ namespace ResourceMonitorDaemon.Pairing
             StepProgress progress,
             CancellationToken cancellationToken)
         {
+            var resultStepsMarked = false;
             try
             {
                 WifiProvisioningResult result;
@@ -718,7 +745,8 @@ namespace ResourceMonitorDaemon.Pairing
                 }
 
                 var outcome = PairingOutcomePresenter.Present(result, settings.Host);
-                MarkResultSteps(outcome.Kind);
+                MarkResultSteps(outcome);
+                resultStepsMarked = true;
                 if (outcome.Kind != PairingOutcomeKind.CheckBroker || _closed)
                 {
                     return outcome;
@@ -758,7 +786,13 @@ namespace ResourceMonitorDaemon.Pairing
                         break;
                 }
 
-                MarkExceptionSteps(progress.LastStep, outcome.Kind);
+                if (!resultStepsMarked)
+                {
+                    MarkExceptionSteps(progress.LastStep, outcome.Kind);
+                }
+
+                // e.g. cancelled during the broker check: no step may stay "running".
+                SettleRunningSteps(outcome.Kind == PairingOutcomeKind.Cancelled ? StepState.Skipped : StepState.Failed);
                 return outcome;
             }
         }
@@ -916,7 +950,8 @@ namespace ResourceMonitorDaemon.Pairing
             };
             var label = _steps[index];
             label.Tag = state;
-            label.Text = $"{glyph}  {text ?? _stepTexts[index]}";
+            _stepTexts[index] = text ?? _defaultStepTexts[index];
+            label.Text = $"{glyph}  {_stepTexts[index]}";
             label.ForeColor = state switch
             {
                 StepState.Running => SystemColors.ControlText,
@@ -938,7 +973,7 @@ namespace ResourceMonitorDaemon.Pairing
             SetStep(current, StepState.Running);
         }
 
-        private void MarkResultSteps(PairingOutcomeKind kind)
+        private void MarkResultSteps(PairingOutcome outcome)
         {
             if (_closed)
             {
@@ -950,12 +985,24 @@ namespace ResourceMonitorDaemon.Pairing
                 SetStep(i, StepState.Done);
             }
 
-            SetStep(StepWifi, kind switch
+            SetStep(StepWifi, outcome.Kind switch
             {
                 PairingOutcomeKind.Succeeded => StepState.Done,
                 PairingOutcomeKind.CheckBroker => StepState.Warning,
+                _ when outcome.DeviceOnDifferentNetwork => StepState.Warning,
                 _ => StepState.Failed,
             });
+        }
+
+        private void SettleRunningSteps(StepState state)
+        {
+            for (var i = 0; i < _steps.Length; i++)
+            {
+                if (_steps[i].Tag is StepState.Running)
+                {
+                    SetStep(i, state, _stepTexts[i]);   // keep a custom text such as "check network connection"
+                }
+            }
         }
 
         private void MarkExceptionSteps(int lastStep, PairingOutcomeKind kind)
@@ -990,7 +1037,7 @@ namespace ResourceMonitorDaemon.Pairing
             };
         }
 
-        private static Tone ToneOf(PairingOutcomeKind kind) => kind switch
+        private static Tone ToneOf(PairingOutcome outcome) => outcome.DeviceOnDifferentNetwork ? Tone.Warning : outcome.Kind switch
         {
             PairingOutcomeKind.Succeeded => Tone.Success,
             PairingOutcomeKind.Failed => Tone.Error,
@@ -1031,7 +1078,7 @@ namespace ResourceMonitorDaemon.Pairing
             _code.Enabled = !_busy;
             _codeLink.Enabled = !_busy;
             _ssid.Enabled = !_busy;
-            _useThisPcWifi.Enabled = !_busy;
+            _useThisPcWifi.Enabled = !_busy && !_wifiLookupRunning;
             _password.Enabled = !_busy;
             _showPassword.Enabled = !_busy;
             _pair.Enabled = !_busy;

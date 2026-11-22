@@ -61,6 +61,46 @@ namespace ResourceMonitorDaemon.Tests
                 AssertTrue(!PairingOutcomePresenter.RequiresNewDaemonConnection(true, "", null), "no address");
                 AssertTrue(!PairingOutcomePresenter.RequiresNewDaemonConnection(true, null, ""), "no address (null/empty)");
             }),
+            ("Pairing: an already-connected device on a different network is not reported as success", () =>
+            {
+                var other = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40")
+                    {
+                        AlreadyConnected = true,
+                        JoinedSsid = "Example-Other-Net",
+                        JoinedDifferentNetwork = true,
+                    },
+                    Host);
+                AssertEqual(PairingOutcomeKind.Failed, other.Kind);
+                AssertTrue(other.DeviceOnDifferentNetwork && other.DeviceWasAlreadyConnected, "flags");
+                AssertTrue(other.AddressToSave is null, "nothing saved for the other network");
+                AssertEqual(PairingField.Ssid, other.Focus);
+                AssertTrue(other.Message.Contains("“Example-Other-Net”"), other.Message);
+                AssertTrue(other.Message.Contains(ProvisioningConstants.ReprovisionInstruction), "BOOT instruction (en)");
+                AssertEqual(Strings.Pairing_AlreadyOnDifferentNetwork("Example-Other-Net", Strings.Pairing_ReprovisionInstruction), other.Message);
+                AssertTrue(!other.Message.Contains("power-cycle", StringComparison.OrdinalIgnoreCase), "BOOT-only advice");
+                var otherZh = LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40") { AlreadyConnected = true, JoinedSsid = "Example-Other-Net", JoinedDifferentNetwork = true },
+                    Host).Message);
+                AssertTrue(otherZh.Contains("“Example-Other-Net”") && otherZh.Contains("按住设备上的 BOOT 键 5–15 秒后松开") && !otherZh.Contains("重启设备"), "zh: " + otherZh);
+
+                // Same network, or SSID not reported: success as before.
+                var same = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40") { AlreadyConnected = true, JoinedSsid = "Example-Home-Net" }, Host);
+                AssertEqual(PairingOutcomeKind.Succeeded, same.Kind);
+                AssertEqual("192.0.2.40", same.AddressToSave);
+                AssertTrue(!same.DeviceOnDifferentNetwork, "same network");
+
+                var unknown = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40") { AlreadyConnected = true, JoinedSsid = null }, Host);
+                AssertEqual(PairingOutcomeKind.Succeeded, unknown.Kind);
+                AssertTrue(unknown.DeviceWasAlreadyConnected && !unknown.DeviceOnDifferentNetwork, "SSID not reported");
+
+                // The flag only matters for the already-connected path.
+                var fresh = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40") { JoinedSsid = "Example-Other-Net", JoinedDifferentNetwork = true }, Host);
+                AssertEqual(PairingOutcomeKind.Succeeded, fresh.Kind);
+            }),
             ("Pairing: Wi-Fi failures map to password / 2.4 GHz messages and focus the right field", () =>
             {
                 var auth = PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), Host);
@@ -100,6 +140,7 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual(PairingOutcomeKind.Failed, unreachable.Kind);
                 AssertTrue(unreachable.SuggestRescan, "suggest rescan");
                 AssertTrue(unreachable.Message.Contains(ProvisioningConstants.ReprovisionInstruction), "reprovision hint (en)");
+                AssertTrue(unreachable.Message.EndsWith(", then pair again.", StringComparison.Ordinal), unreachable.Message);
                 AssertTrue(LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.PresentBrokerCheck(false, Host, 1883).Message)
                     .Contains("按住设备上的 BOOT 键 5–15 秒后松开"), "reprovision hint (zh)");
             }),
@@ -117,6 +158,20 @@ namespace ResourceMonitorDaemon.Tests
                 var retry = PairingOutcomePresenter.PresentException(retryException);
                 AssertEqual(Strings.Provisioning_RetryRejectedAfterFailure(Strings.Pairing_ReprovisionInstruction), retry.Message);
                 AssertTrue(retry.Message.Contains(ProvisioningConstants.ReprovisionInstruction), "BOOT instruction");
+                foreach (var culture in new[] { UiLanguage.EnglishCulture, UiLanguage.ChineseSimplifiedCulture })
+                {
+                    // BOOT-only advice: a power-cycle would boot the device with the stored (wrong) credentials.
+                    foreach (var message in LocalizationTests.InCulture(culture, () => new[]
+                    {
+                        PairingOutcomePresenter.PresentException(new ProvisioningRetryRejectedException(true)).Message,
+                        PairingOutcomePresenter.PresentException(new ProvisioningRetryRejectedException(false)).Message,
+                        PairingOutcomePresenter.PresentBrokerCheck(false, Host, 1883).Message,
+                    }))
+                    {
+                        AssertTrue(!message.Contains("power-cycle", StringComparison.OrdinalIgnoreCase) && !message.Contains("重启设备"), message);
+                    }
+                }
+
                 AssertEqual(
                     Strings.Provisioning_RetryRejected(Strings.Pairing_ReprovisionInstruction),
                     PairingOutcomePresenter.PresentException(new ProvisioningRetryRejectedException(previousAttemptFailed: false)).Message);
@@ -202,33 +257,52 @@ namespace ResourceMonitorDaemon.Tests
             }),
             ("Pairing: first-run prompt decision", () =>
             {
-                AssertTrue(PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, "", false), "unconfigured, first failure");
-                AssertTrue(PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, null, false), "null fallback");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(false, false, "", false), "not a failure notification");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, true, "", false), "already prompted");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, "192.168.1.50", false), "fallback configured");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, "", true), "connected earlier");
+                static bool Offer(bool failure = true, bool marker = false, string? fallback = "", string? host = "resmon.local",
+                    bool connected = false, bool ranBefore = false) =>
+                    PairingOutcomePresenter.ShouldOfferFirstRunPairing(failure, marker, fallback, host, connected, ranBefore);
+
+                AssertTrue(Offer(), "fresh PC, first failure");
+                AssertTrue(Offer(fallback: null, host: "RESMON.LOCAL "), "null fallback, default host in other case");
+                AssertTrue(!Offer(failure: false), "not a failure notification");
+                AssertTrue(!Offer(marker: true), "marker: prompted or connected before");
+                AssertTrue(!Offer(fallback: "192.0.2.10"), "fallback configured");
+                AssertTrue(!Offer(host: "192.0.2.20"), "custom host");
+                AssertTrue(!Offer(host: "monitor.example"), "custom host name");
+                AssertTrue(!Offer(connected: true), "connected in this session");
+                AssertTrue(!Offer(ranBefore: true), "daemon ran on this PC before (upgrade)");
             }),
-            ("Pairing: first-run prompt is recorded in a marker file and shown once", () =>
+            ("Pairing: first-run marker is written when the prompt is shown or the daemon first connects", () =>
             {
                 var directory = Path.Combine(Path.GetTempPath(), "resmon-pairing-tests-" + Guid.NewGuid().ToString("N"));
+                var defaults = new DeviceSettings();
                 try
                 {
                     var marker = Path.Combine(directory, FirstRunPairingPrompt.MarkerFileName);
                     var prompt = new FirstRunPairingPrompt(marker);
-                    AssertTrue(!prompt.TryClaim(false, ""), "info notification does not trigger");
+                    AssertTrue(!prompt.TryClaim(false, defaults), "info notification does not trigger");
                     AssertTrue(!File.Exists(marker), "nothing recorded yet");
-                    AssertTrue(prompt.TryClaim(true, ""), "first failure triggers");
+                    AssertTrue(prompt.TryClaim(true, defaults), "first failure triggers");
                     AssertTrue(File.Exists(marker), "marker written");
-                    AssertTrue(!prompt.TryClaim(true, ""), "only once per session");
-                    AssertTrue(!new FirstRunPairingPrompt(marker).TryClaim(true, ""), "not again after restart");
+                    AssertTrue(!prompt.TryClaim(true, defaults), "only once per session");
+                    AssertTrue(!new FirstRunPairingPrompt(marker).TryClaim(true, defaults), "not again after restart");
 
-                    var connected = new FirstRunPairingPrompt(Path.Combine(directory, "other"));
+                    // A PC that connected once never gets the prompt, even after a restart with the device off.
+                    var connectedMarker = Path.Combine(directory, "connected", FirstRunPairingPrompt.MarkerFileName);
+                    var connected = new FirstRunPairingPrompt(connectedMarker);
                     connected.ObserveConnection(false);
+                    AssertTrue(!File.Exists(connectedMarker), "not connected yet");
                     connected.ObserveConnection(true);
+                    AssertTrue(File.Exists(connectedMarker), "marker written on first connection");
                     connected.ObserveConnection(false);
-                    AssertTrue(!connected.TryClaim(true, ""), "no prompt after a connection this session");
-                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "third")).TryClaim(true, "10.0.0.2"), "fallback configured");
+                    AssertTrue(!connected.TryClaim(true, defaults), "no prompt after a connection this session");
+                    AssertTrue(!new FirstRunPairingPrompt(connectedMarker).TryClaim(true, defaults), "no prompt after restart");
+
+                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "a"))
+                        .TryClaim(true, defaults with { FallbackAddress = "192.0.2.10" }), "fallback configured");
+                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "b"))
+                        .TryClaim(true, defaults with { Host = "192.0.2.20" }), "custom host");
+                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "c"), daemonRanBefore: true)
+                        .TryClaim(true, defaults), "earlier run (upgrade)");
                 }
                 finally
                 {
@@ -236,6 +310,46 @@ namespace ResourceMonitorDaemon.Tests
                     {
                         Directory.Delete(directory, recursive: true);
                     }
+                }
+            }),
+            ("Pairing: an earlier daemon run is detected from an older per-user log or a legacy log next to the exe", () =>
+            {
+                var directory = Path.Combine(Path.GetTempPath(), "resmon-pairing-tests-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(directory);
+                try
+                {
+                    var log = Path.Combine(directory, "appdata", "daemon.log");
+                    Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+                    var noLegacy = Array.Empty<string>();
+                    var start = DateTime.UtcNow;
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "no log: first run");
+
+                    File.WriteAllText(log, "line\n");
+                    File.SetCreationTimeUtc(log, start.AddSeconds(1));
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "log created by this process");
+
+                    File.SetCreationTimeUtc(log, start.AddDays(-30));
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "log from an earlier run");
+
+                    File.SetCreationTimeUtc(log, start.AddSeconds(1));
+                    File.WriteAllText(log + ".1", "rotated\n");
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, noLegacy, start), "rotated log exists");
+                    File.Delete(log + ".1");
+
+                    // Older releases wrote daemon.log next to the executable: its existence alone counts,
+                    // even when the current per-user log was just created by this process.
+                    var legacy = Path.Combine(directory, "exe", "daemon.log");
+                    Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, new[] { legacy }, start), "legacy log absent");
+                    File.WriteAllText(legacy, "old release\n");
+                    File.SetCreationTimeUtc(legacy, start.AddSeconds(1));
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, new[] { legacy }, start), "legacy log next to the exe");
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, new[] { log }, start),
+                        "a legacy path equal to the current log is ignored");
+                }
+                finally
+                {
+                    Directory.Delete(directory, recursive: true);
                 }
             }),
             ("Pairing: SSID selection needs exactly one connected, plausible SSID", () =>

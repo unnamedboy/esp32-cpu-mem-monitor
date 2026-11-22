@@ -548,8 +548,12 @@ You can also use the tray menu → Pair device.</value>
     <comment>{0} = host, {1} = port</comment>
   </data>
   <data name="Pairing_BrokerUnreachable" xml:space="preserve">
-    <value>Lost the Bluetooth link and {0}:{1} did not answer within {2} s. The device may not have joined Wi-Fi: rescan and try again. If the device no longer appears, power-cycle it or {3}.</value>
+    <value>Lost the Bluetooth link and {0}:{1} did not answer within {2} s. The device may not have joined Wi-Fi: rescan and try again. If the device no longer appears, {3}, then pair again.</value>
     <comment>{0} = host, {1} = port, {2} = seconds, {3} = reprovisionInstruction</comment>
+  </data>
+  <data name="Pairing_AlreadyOnDifferentNetwork" xml:space="preserve">
+    <value>The device is already connected to network “{0}”, not the one you entered. To switch networks, {1}, then pair again.</value>
+    <comment>{0} = joinedSsid, {1} = reprovisionInstruction. {0} is shown in the UI only and must never be logged. Only the BOOT-button restart is advised, never a power-cycle (the device would keep the stored network).</comment>
   </data>
   <data name="Pairing_Cancelled" xml:space="preserve">
     <value>Cancelled.</value>
@@ -594,12 +598,12 @@ You can also use the tray menu → Pair device.</value>
     <value>Pairing code rejected: the device could not prove it knows the same pairing code. Check the code (serial log line "Provisioning: name=... pop=...") and try again.</value>
   </data>
   <data name="Provisioning_RetryRejectedAfterFailure" xml:space="preserve">
-    <value>The device did not accept another attempt after the previous one failed. Power-cycle the device or {0}, then rescan and try again.</value>
-    <comment>{0} = reprovisionInstruction</comment>
+    <value>The device did not accept another attempt after the previous one failed. To restart provisioning, {0}, then rescan and try again.</value>
+    <comment>{0} = reprovisionInstruction. Only the BOOT-button restart is advised, never a power-cycle: the device has already stored the earlier credentials.</comment>
   </data>
   <data name="Provisioning_RetryRejected" xml:space="preserve">
-    <value>The device could not accept the Wi-Fi settings. Power-cycle the device or {0}, then rescan and try again.</value>
-    <comment>{0} = reprovisionInstruction</comment>
+    <value>The device could not accept the Wi-Fi settings; it may still be handling an earlier attempt. To restart provisioning, {0}, then rescan and try again.</value>
+    <comment>{0} = reprovisionInstruction. Only the BOOT-button restart is advised, never a power-cycle: the device has already stored the earlier credentials.</comment>
   </data>
   <data name="Provisioning_BluetoothOff" xml:space="preserve">
     <value>Bluetooth is turned off. Turn it on in Windows Settings and try again.</value>

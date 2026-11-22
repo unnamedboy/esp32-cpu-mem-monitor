@@ -47,6 +47,8 @@ namespace ResourceMonitorDaemon
         private int _connectionGeneration;
         private DateTimeOffset? _outageStartedAt;
         private bool _disposed;
+        private string? _subscribedTopic;   // status topic the current client subscribed to (or tried)
+        private Task? _resubscribe;
 
         public MqttConnection(ILogger<MqttConnection> logger, Func<DateTimeOffset>? clock = null)
         {
@@ -90,6 +92,18 @@ namespace ResourceMonitorDaemon
                 lock (_gate)
                 {
                     return _connectionGeneration;
+                }
+            }
+        }
+
+        /// <summary>Test hook: the in-flight (or last) background status resubscription.</summary>
+        internal Task PendingResubscribe
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _resubscribe ?? Task.CompletedTask;
                 }
             }
         }
@@ -155,12 +169,32 @@ namespace ResourceMonitorDaemon
                     _backoff.Reset();
                     _logger.LogInformation("MQTT broker endpoint changed to {Endpoint}; reconnecting.", DescribeEndpoint(settings).English);
                 }
-                else if (previous != null && previous.StatusTopic != settings.StatusTopic && IsConnectedLocked)
+                else
                 {
-                    var client = _client!;
-                    _ = Task.Run(() => ResubscribeAsync(client, previous.StatusTopic, settings));
+                    EnsureStatusSubscriptionLocked();
                 }
             }
+        }
+
+        /// <summary>
+        /// Resubscribes in the background when the connected client's status subscription does not
+        /// match the current <see cref="DeviceSettings.StatusTopic"/>: after a topic change, also one
+        /// made while a connect attempt (which subscribes to its own snapshot) was in flight. Called
+        /// from <see cref="Configure"/> and every <see cref="MaintainConnection"/> tick.
+        /// </summary>
+        private void EnsureStatusSubscriptionLocked()
+        {
+            if (_settings == null || !IsConnectedLocked || _subscribedTopic == null
+                || _subscribedTopic == _settings.StatusTopic || _resubscribe is { IsCompleted: false })
+            {
+                return;
+            }
+
+            var client = _client!;
+            var previousTopic = _subscribedTopic;
+            var settings = _settings;
+            _subscribedTopic = settings.StatusTopic;
+            _resubscribe = Task.Run(() => ResubscribeAsync(client, previousTopic, settings));
         }
 
         /// <summary>
@@ -184,6 +218,7 @@ namespace ResourceMonitorDaemon
                 var connected = _client?.IsConnected == true && !_dropRequested;
                 if (connected && !_reconnectRequested)
                 {
+                    EnsureStatusSubscriptionLocked();
                     return;
                 }
 
@@ -265,6 +300,7 @@ namespace ResourceMonitorDaemon
         public async ValueTask DisposeAsync()
         {
             Task? attempt;
+            Task? resubscribe;
             IMqttClient? client;
             lock (_gate)
             {
@@ -275,17 +311,20 @@ namespace ResourceMonitorDaemon
 
                 _disposed = true;
                 attempt = _attempt;
+                resubscribe = _resubscribe;
                 client = _client;
                 _client = null;
             }
 
             _shutdown.Cancel();
 
-            if (attempt is { IsCompleted: false })
+            // Background work that may still use _shutdown: the connect attempt and a resubscribe.
+            var running = new[] { attempt, resubscribe }.OfType<Task>().Where(task => !task.IsCompleted).ToArray();
+            if (running.Length > 0)
             {
                 try
                 {
-                    await attempt.WaitAsync(ShutdownAttemptWait).ConfigureAwait(false);
+                    await Task.WhenAll(running).WaitAsync(ShutdownAttemptWait).ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
@@ -294,13 +333,22 @@ namespace ResourceMonitorDaemon
             }
 
             // Dispose the token source only once nothing can still be using it.
-            if (attempt is null or { IsCompleted: true })
+            var unfinished = running.Where(task => !task.IsCompleted).ToArray();
+            if (unfinished.Length == 0)
             {
                 _shutdown.Dispose();
             }
             else
             {
-                _ = attempt.ContinueWith(_ => _shutdown.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                _ = Task.WhenAll(unfinished).ContinueWith(
+                    task =>
+                    {
+                        _ = task.Exception;   // observe, never surface as an unobserved task exception
+                        _shutdown.Dispose();
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
 
             if (client != null)
@@ -353,7 +401,17 @@ namespace ResourceMonitorDaemon
                     }
 
                     // Clean session: the broker forgets subscriptions, so subscribe after every connect.
-                    await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
+                    try
+                    {
+                        await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // Shutdown cancelled the subscription: never leak the connected client.
+                        await CloseClientAsync(client, ShutdownDisconnectTimeoutMs, CancellationToken.None).ConfigureAwait(false);
+                        throw;
+                    }
+
                     if (!OnConnected(client, address, settings))
                     {
                         await CloseClientAsync(client, ShutdownDisconnectTimeoutMs, CancellationToken.None).ConfigureAwait(false);
@@ -402,21 +460,34 @@ namespace ResourceMonitorDaemon
             }
         }
 
+        /// <summary>
+        /// Best-effort background resubscription; never faults. It may start just before
+        /// <see cref="DisposeAsync"/>, so even reading the shutdown token is guarded.
+        /// </summary>
         private async Task ResubscribeAsync(IMqttClient client, string previousTopic, DeviceSettings settings)
         {
-            var shutdown = _shutdown.Token;
             try
             {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
-                timeout.CancelAfter(settings.ConnectTimeoutMs);
-                await client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(previousTopic).Build(), timeout.Token).ConfigureAwait(false);
+                var shutdown = _shutdown.Token;   // throws ObjectDisposedException once disposed
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
+                    timeout.CancelAfter(settings.ConnectTimeoutMs);
+                    await client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(previousTopic).Build(), timeout.Token).ConfigureAwait(false);
+                }
+                catch (Exception) when (!shutdown.IsCancellationRequested)
+                {
+                    // Messages on the old topic are ignored anyway (see OnApplicationMessageReceivedAsync).
+                }
+
+                shutdown.ThrowIfCancellationRequested();
+                await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
             }
             catch (Exception)
             {
-                // Messages on the old topic are ignored anyway (see OnApplicationMessageReceivedAsync).
+                // Disposed (ObjectDisposedException) or shutting down (cancellation): nothing to
+                // resubscribe. Other failures are logged by SubscribeStatusAsync itself.
             }
-
-            await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
         }
 
         private Task OnApplicationMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs args)
@@ -457,6 +528,7 @@ namespace ResourceMonitorDaemon
 
                 _client = client;
                 _connectedAddress = address;
+                _subscribedTopic = settings.StatusTopic;
                 _wasConnected = true;
                 _connectionGeneration++;
                 _backoff!.RecordConnected();

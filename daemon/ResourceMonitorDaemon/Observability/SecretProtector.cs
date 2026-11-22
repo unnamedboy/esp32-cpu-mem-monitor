@@ -20,8 +20,9 @@ namespace ResourceMonitorDaemon.Observability
     /// </summary>
     public sealed class DpapiSecretProtector : ISecretProtector
     {
-        // Application-specific entropy: another program running as the same user cannot decrypt
-        // the value with a plain ProtectedData.Unprotect(..., null, CurrentUser) call.
+        // Namespacing only: this constant is public (open source), so any program running as the
+        // same Windows user can decrypt the value. DPAPI CurrentUser is the protection boundary
+        // (other users and other PCs cannot decrypt it).
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("ResourceMonitorDaemon/Observability/Loki/Token/v1");
 
         public string Protect(string secret)
