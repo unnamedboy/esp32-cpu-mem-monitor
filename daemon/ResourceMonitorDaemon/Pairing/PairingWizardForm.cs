@@ -56,8 +56,10 @@ namespace ResourceMonitorDaemon.Pairing
         private readonly TextBox _password;
         private readonly CheckBox _showPassword;
         private readonly Label[] _steps;
+        private readonly string[] _stepTexts;
         private readonly Label _result;
         private readonly Label _finalStatus;
+        private readonly Font _finalStatusFont;
         private readonly Button _pair;
         private readonly Button _cancel;
 
@@ -71,6 +73,7 @@ namespace ResourceMonitorDaemon.Pairing
         private string? _prefilledSsid;
         private bool _busy;
         private bool _scanning;
+        private bool _wifiLookupRunning;
         private bool _closed;
 
         public PairingWizardForm(
@@ -195,6 +198,7 @@ namespace ResourceMonitorDaemon.Pairing
             // 4. Progress
             var progressGroup = NewGroup(PairingText.ProgressGroup, out var progressLayout);
             _steps = new Label[PairingText.Steps.Count];
+            _stepTexts = new string[_steps.Length];
             for (var i = 0; i < _steps.Length; i++)
             {
                 _steps[i] = NewLabel(string.Empty, SystemColors.GrayText);
@@ -206,7 +210,8 @@ namespace ResourceMonitorDaemon.Pairing
             _result.Margin = new Padding(3, 8, 3, 3);
             AddRow(progressLayout, _result);
             _finalStatus = NewLabel(string.Empty, Color.DarkGreen);
-            _finalStatus.Font = new Font(Font, FontStyle.Bold);
+            _finalStatusFont = new Font(Font, FontStyle.Bold);
+            _finalStatus.Font = _finalStatusFont;
             AddRow(progressLayout, _finalStatus);
             AddRow(right, progressGroup);
 
@@ -279,6 +284,10 @@ namespace ResourceMonitorDaemon.Pairing
             }
 
             base.Dispose(disposing);
+            if (disposing)
+            {
+                _finalStatusFont.Dispose();
+            }
         }
 
         /// <summary>Runs an event-handler operation; nothing escapes to the message loop.</summary>
@@ -556,12 +565,14 @@ namespace ResourceMonitorDaemon.Pairing
         /// </summary>
         private async Task UseThisPcWifiAsync()
         {
-            if (_closed || _busy)
+            if (_closed || _busy || _wifiLookupRunning)
             {
                 return;
             }
 
-            _useThisPcWifi.Enabled = false;
+            _wifiLookupRunning = true;
+            UpdateControls();
+            var textAtClick = _ssid.Text;
             _ssidNote.ForeColor = SystemColors.GrayText;
             _ssidNote.Text = PairingText.ReadingThisPcWifi;
             _ssidNote.Visible = true;
@@ -576,14 +587,22 @@ namespace ResourceMonitorDaemon.Pairing
             }
             finally
             {
+                _wifiLookupRunning = false;
                 if (!_closed)
                 {
-                    _useThisPcWifi.Enabled = !_busy;
+                    UpdateControls();
                 }
             }
 
             if (_closed)
             {
+                return;
+            }
+
+            if (_busy || _ssid.Text != textAtClick)
+            {
+                // Pairing started or the user edited the box meanwhile: their input wins.
+                _ssidNote.Visible = _prefilledSsid is not null && _ssid.Text == _prefilledSsid;
                 return;
             }
 
@@ -681,6 +700,7 @@ namespace ResourceMonitorDaemon.Pairing
             StepProgress progress,
             CancellationToken cancellationToken)
         {
+            var resultStepsMarked = false;
             try
             {
                 WifiProvisioningResult result;
@@ -704,6 +724,7 @@ namespace ResourceMonitorDaemon.Pairing
 
                 var outcome = PairingOutcomePresenter.Present(result, settings.Host);
                 MarkResultSteps(outcome.Kind);
+                resultStepsMarked = true;
                 if (outcome.Kind != PairingOutcomeKind.CheckBroker || _closed)
                 {
                     return outcome;
@@ -743,7 +764,13 @@ namespace ResourceMonitorDaemon.Pairing
                         break;
                 }
 
-                MarkExceptionSteps(progress.LastStep, outcome.Kind);
+                if (!resultStepsMarked)
+                {
+                    MarkExceptionSteps(progress.LastStep, outcome.Kind);
+                }
+
+                // e.g. cancelled during the broker check: no step may stay "running".
+                SettleRunningSteps(outcome.Kind == PairingOutcomeKind.Cancelled ? StepState.Skipped : StepState.Failed);
                 return outcome;
             }
         }
@@ -901,7 +928,8 @@ namespace ResourceMonitorDaemon.Pairing
             };
             var label = _steps[index];
             label.Tag = state;
-            label.Text = $"{glyph}  {text ?? PairingText.Steps[index]}";
+            _stepTexts[index] = text ?? PairingText.Steps[index];
+            label.Text = $"{glyph}  {_stepTexts[index]}";
             label.ForeColor = state switch
             {
                 StepState.Running => SystemColors.ControlText,
@@ -941,6 +969,17 @@ namespace ResourceMonitorDaemon.Pairing
                 PairingOutcomeKind.CheckBroker => StepState.Warning,
                 _ => StepState.Failed,
             });
+        }
+
+        private void SettleRunningSteps(StepState state)
+        {
+            for (var i = 0; i < _steps.Length; i++)
+            {
+                if (_steps[i].Tag is StepState.Running)
+                {
+                    SetStep(i, state, _stepTexts[i]);   // keep a custom text such as "check network connection"
+                }
+            }
         }
 
         private void MarkExceptionSteps(int lastStep, PairingOutcomeKind kind)
@@ -1016,7 +1055,7 @@ namespace ResourceMonitorDaemon.Pairing
             _code.Enabled = !_busy;
             _codeLink.Enabled = !_busy;
             _ssid.Enabled = !_busy;
-            _useThisPcWifi.Enabled = !_busy;
+            _useThisPcWifi.Enabled = !_busy && !_wifiLookupRunning;
             _password.Enabled = !_busy;
             _showPassword.Enabled = !_busy;
             _pair.Enabled = !_busy;

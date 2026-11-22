@@ -34,9 +34,7 @@ namespace ResourceMonitorDaemon
             _settingsStore = settingsStore;
             _settingsMonitor = host.Services.GetRequiredService<IOptionsMonitor<DeviceSettings>>();
             _loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
-            _firstRunPrompt = new FirstRunPairingPrompt(
-                FirstRunPairingPrompt.DefaultMarkerPath,
-                _loggerFactory.CreateLogger<FirstRunPairingPrompt>());
+            _firstRunPrompt = FirstRunPairingPrompt.CreateDefault(_loggerFactory.CreateLogger<FirstRunPairingPrompt>());
 
             var contextMenu = new ContextMenuStrip();
 
@@ -140,9 +138,9 @@ namespace ResourceMonitorDaemon
         private void ShowNotification(string title, string message, ToolTipIcon icon)
         {
             var isFailure = icon == ToolTipIcon.Error && !_monitorService.IsConnected;
-            if (!_exiting && _firstRunPrompt.TryClaim(isFailure, _settingsMonitor.CurrentValue.FallbackAddress))
+            if (!_exiting && _firstRunPrompt.TryClaim(isFailure, _settingsMonitor.CurrentValue))
             {
-                ShowBalloon(15000, PairingText.FirstRunBalloonTitle(title), PairingText.FirstRunBalloonText, icon);
+                ShowBalloon(15000, title, PairingText.FirstRunBalloonText, icon);
                 _pairingBalloonShown = true;
                 return;
             }

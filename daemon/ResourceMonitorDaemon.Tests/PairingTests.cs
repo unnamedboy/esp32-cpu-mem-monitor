@@ -179,33 +179,52 @@ namespace ResourceMonitorDaemon.Tests
             }),
             ("Pairing: first-run prompt decision", () =>
             {
-                AssertTrue(PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, "", false), "unconfigured, first failure");
-                AssertTrue(PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, null, false), "null fallback");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(false, false, "", false), "not a failure notification");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, true, "", false), "already prompted");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, "192.168.1.50", false), "fallback configured");
-                AssertTrue(!PairingOutcomePresenter.ShouldOfferFirstRunPairing(true, false, "", true), "connected earlier");
+                static bool Offer(bool failure = true, bool marker = false, string? fallback = "", string? host = "resmon.local",
+                    bool connected = false, bool ranBefore = false) =>
+                    PairingOutcomePresenter.ShouldOfferFirstRunPairing(failure, marker, fallback, host, connected, ranBefore);
+
+                AssertTrue(Offer(), "fresh PC, first failure");
+                AssertTrue(Offer(fallback: null, host: "RESMON.LOCAL "), "null fallback, default host in other case");
+                AssertTrue(!Offer(failure: false), "not a failure notification");
+                AssertTrue(!Offer(marker: true), "marker: prompted or connected before");
+                AssertTrue(!Offer(fallback: "192.0.2.10"), "fallback configured");
+                AssertTrue(!Offer(host: "192.0.2.20"), "custom host");
+                AssertTrue(!Offer(host: "monitor.example"), "custom host name");
+                AssertTrue(!Offer(connected: true), "connected in this session");
+                AssertTrue(!Offer(ranBefore: true), "daemon ran on this PC before (upgrade)");
             }),
-            ("Pairing: first-run prompt is recorded in a marker file and shown once", () =>
+            ("Pairing: first-run marker is written when the prompt is shown or the daemon first connects", () =>
             {
                 var directory = Path.Combine(Path.GetTempPath(), "resmon-pairing-tests-" + Guid.NewGuid().ToString("N"));
+                var defaults = new DeviceSettings();
                 try
                 {
                     var marker = Path.Combine(directory, FirstRunPairingPrompt.MarkerFileName);
                     var prompt = new FirstRunPairingPrompt(marker);
-                    AssertTrue(!prompt.TryClaim(false, ""), "info notification does not trigger");
+                    AssertTrue(!prompt.TryClaim(false, defaults), "info notification does not trigger");
                     AssertTrue(!File.Exists(marker), "nothing recorded yet");
-                    AssertTrue(prompt.TryClaim(true, ""), "first failure triggers");
+                    AssertTrue(prompt.TryClaim(true, defaults), "first failure triggers");
                     AssertTrue(File.Exists(marker), "marker written");
-                    AssertTrue(!prompt.TryClaim(true, ""), "only once per session");
-                    AssertTrue(!new FirstRunPairingPrompt(marker).TryClaim(true, ""), "not again after restart");
+                    AssertTrue(!prompt.TryClaim(true, defaults), "only once per session");
+                    AssertTrue(!new FirstRunPairingPrompt(marker).TryClaim(true, defaults), "not again after restart");
 
-                    var connected = new FirstRunPairingPrompt(Path.Combine(directory, "other"));
+                    // A PC that connected once never gets the prompt, even after a restart with the device off.
+                    var connectedMarker = Path.Combine(directory, "connected", FirstRunPairingPrompt.MarkerFileName);
+                    var connected = new FirstRunPairingPrompt(connectedMarker);
                     connected.ObserveConnection(false);
+                    AssertTrue(!File.Exists(connectedMarker), "not connected yet");
                     connected.ObserveConnection(true);
+                    AssertTrue(File.Exists(connectedMarker), "marker written on first connection");
                     connected.ObserveConnection(false);
-                    AssertTrue(!connected.TryClaim(true, ""), "no prompt after a connection this session");
-                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "third")).TryClaim(true, "10.0.0.2"), "fallback configured");
+                    AssertTrue(!connected.TryClaim(true, defaults), "no prompt after a connection this session");
+                    AssertTrue(!new FirstRunPairingPrompt(connectedMarker).TryClaim(true, defaults), "no prompt after restart");
+
+                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "a"))
+                        .TryClaim(true, defaults with { FallbackAddress = "192.0.2.10" }), "fallback configured");
+                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "b"))
+                        .TryClaim(true, defaults with { Host = "192.0.2.20" }), "custom host");
+                    AssertTrue(!new FirstRunPairingPrompt(Path.Combine(directory, "c"), daemonRanBefore: true)
+                        .TryClaim(true, defaults), "earlier run (upgrade)");
                 }
                 finally
                 {
@@ -213,6 +232,32 @@ namespace ResourceMonitorDaemon.Tests
                     {
                         Directory.Delete(directory, recursive: true);
                     }
+                }
+            }),
+            ("Pairing: an earlier daemon run is detected from a log created before this process", () =>
+            {
+                var directory = Path.Combine(Path.GetTempPath(), "resmon-pairing-tests-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(directory);
+                try
+                {
+                    var log = Path.Combine(directory, "daemon.log");
+                    var start = DateTime.UtcNow;
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, start), "no log: first run");
+
+                    File.WriteAllText(log, "line\n");
+                    File.SetCreationTimeUtc(log, start.AddSeconds(1));
+                    AssertTrue(!FirstRunPairingPrompt.DetectEarlierRun(log, start), "log created by this process");
+
+                    File.SetCreationTimeUtc(log, start.AddDays(-30));
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, start), "log from an earlier run");
+
+                    File.SetCreationTimeUtc(log, start.AddSeconds(1));
+                    File.WriteAllText(log + ".1", "rotated\n");
+                    AssertTrue(FirstRunPairingPrompt.DetectEarlierRun(log, start), "rotated log exists");
+                }
+                finally
+                {
+                    Directory.Delete(directory, recursive: true);
                 }
             }),
             ("Pairing: SSID selection needs exactly one connected, plausible SSID", () =>

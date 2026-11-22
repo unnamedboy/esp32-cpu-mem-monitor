@@ -14,11 +14,9 @@ namespace ResourceMonitorDaemon.Pairing
         public const string TrayMenuItem = "配对设备 (Pair device)…";
 
         /// <summary>
-        /// The one-time first-run balloon. It replaces the first "MQTT connection failed" balloon, so it
-        /// keeps that failure's title and states the failure in its text.
+        /// Text of the one-time first-run balloon. It replaces the first "MQTT connection failed" balloon,
+        /// so the tray keeps that failure's title and this text states the failure.
         /// </summary>
-        public static string FirstRunBalloonTitle(string connectionFailureTitle) => connectionFailureTitle;
-
         public const string FirstRunBalloonText =
             "无法连接设备。未找到设备，点击进行配对 (Cannot reach the device. No device found — click to pair)\n" +
             "也可以右键托盘图标 → 配对设备 (or tray menu → Pair device)";

@@ -365,16 +365,27 @@ namespace ResourceMonitorDaemon.Pairing
         // ---- First-run prompt -----------------------------------------------------------------
 
         /// <summary>
-        /// Whether a connection-failure notification should be replaced by the one-time
-        /// "No device found — click to pair" prompt: only for a failure notification, when the prompt
-        /// was never shown before, no fallback address is configured and the daemon has not connected
-        /// to the broker since it started.
+        /// Whether a connection-failure notification should be shown as the one-time
+        /// "No device found — click to pair" prompt. All of these must hold:
+        /// it is the connection-failure notification; the marker does not exist (it is written when the
+        /// prompt is shown and when the daemon first connects to a broker); no fallback address is
+        /// configured; <c>Host</c> is the default <see cref="DeviceSettings.DefaultHost"/> (a custom host
+        /// means the user configured the connection); the daemon has not connected since it started; and
+        /// the daemon did not run on this PC before this process (covers installations from before the
+        /// marker existed).
         /// </summary>
         public static bool ShouldOfferFirstRunPairing(
-            bool isConnectionFailure, bool promptedBefore, string? effectiveFallbackAddress, bool connectedSinceStart) =>
+            bool isConnectionFailure,
+            bool markerExists,
+            string? effectiveFallbackAddress,
+            string? effectiveHost,
+            bool connectedSinceStart,
+            bool daemonRanBefore) =>
             isConnectionFailure
-            && !promptedBefore
+            && !markerExists
             && string.IsNullOrWhiteSpace(effectiveFallbackAddress)
-            && !connectedSinceStart;
+            && string.Equals((effectiveHost ?? string.Empty).Trim(), DeviceSettings.DefaultHost, StringComparison.OrdinalIgnoreCase)
+            && !connectedSinceStart
+            && !daemonRanBefore;
     }
 }
