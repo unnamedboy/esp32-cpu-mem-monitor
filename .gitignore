@@ -77,3 +77,6 @@ Desktop.ini
 *.local
 .env
 firmware/src/secrets.h
+
+# Local Claude Code session data
+.claude/

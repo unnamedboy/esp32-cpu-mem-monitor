@@ -1,7 +1,7 @@
 namespace ResourceMonitorDaemon.Provisioning
 {
     /// <summary>
-    /// Values fixed by the shared pairing contract (PROVISIONING.md on the firmware branch) and by
+    /// Values fixed by the shared pairing contract (PROVISIONING.md) and by
     /// ESP-IDF v4.4.7 wifi_provisioning (the IDF version bundled with Arduino-ESP32 2.0.17).
     /// Keep every protocol constant here instead of scattering literals through the client code.
     /// </summary>
