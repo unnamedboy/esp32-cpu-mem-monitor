@@ -541,17 +541,20 @@ void consumeProvisioningEvents(uint32_t now) {
                 // provisioning here.
                 if (wifi_prov_mgr_reset_sm_state_on_failure() == ESP_OK) {
                     printDebugLine("Provisioning: ready for new credentials");
+                    // Cancel the Arduino core's one automatic retry after the
+                    // first disconnect of the boot, which would otherwise still
+                    // use the rejected credentials. The resulting ASSOC_LEAVE
+                    // disconnect is ignored by the core, the manager (state
+                    // reset) and our policy. Not done when the reset failed:
+                    // the manager may already be in SUCCESS (the retry worked),
+                    // and disconnecting would drop a correctly provisioned STA.
+                    esp_wifi_disconnect();
                 } else {
                     printDebugFormatted("Provisioning: could not reset state; hold BOOT %u-%u s, then release, "
                                         "to restart provisioning",
                                         (unsigned)(BOOT_BUTTON_MIN_HOLD_MS / 1000UL),
                                         (unsigned)(BOOT_BUTTON_MAX_HOLD_MS / 1000UL));
                 }
-                // Cancel the Arduino core's one automatic retry after the first
-                // disconnect of the boot, which would otherwise still use the
-                // rejected credentials. The resulting ASSOC_LEAVE disconnect is
-                // ignored by the core, the manager (state reset) and our policy.
-                esp_wifi_disconnect();
                 break;
             case CredentialFailureAction::KeepCredentialsAndStopProvisioning:
                 // The manager's Wi-Fi handler stays active until provisioning
