@@ -252,7 +252,7 @@ settings or environment; the repository and `appsettings.json` hold none of it.
   `MonitorService`, so it starts first and stops last; the shutdown messages of the other services
   are still flushed. On stop it flushes within a 2 s budget, which is also bounded by the host
   stop token, then disposes the sink. `Program.Main` is the single shutdown owner and stops the host
-  once (3 s budget), so `MonitorService` stops first and the sink flushes in the remaining time. A sink failure never affects sampling or MQTT.
+  once (4 s budget = `MqttConnection.MaxShutdownDuration` 1 s + `ShutdownFlushBudget` 2 s + 1 s margin), so `MonitorService` stops first and the sink still gets its full flush budget. A sink failure never affects sampling or MQTT.
 - **Diagnostics**: one startup line, logged after all services have started:
   `Observability: Loki enabled|disabled; url host=<host[:port]>, auth=<mode>, token configured=yes|no.`
   Settings changes are logged with the same host-only description.
@@ -349,7 +349,7 @@ Privacy notes:
   - The dialog is modeless; Cancel closes it without saving, and Exit closes it.
 - Exit hides the icon and disables the menu immediately (re-entry guarded) and ends
   the message loop; `Program.Main` is the single owner of shutdown and stops the
-  host once (3 s budget) before disposing it. `MonitorService.StopAsync` is also
+  host once (4 s budget, see above) before disposing it. `MonitorService.StopAsync` is also
   idempotent.
 - The settings dialog is modeless; Cancel and Esc close it without saving.
 - If the host fails to start, the tray icon is removed, the error is logged and

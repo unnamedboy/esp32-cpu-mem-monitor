@@ -810,7 +810,8 @@ namespace ResourceMonitorDaemon.Pairing
                     // Only FallbackAddress is touched; every other user setting stays as it is.
                     await Task.Run(() => _settingsStore.Update(patch => patch.FallbackAddress = address), CancellationToken.None);
                     savedAddress = address;
-                    // The device IP stays at Debug so Information-level logs (possibly sent to Loki) do not carry it.
+                    // The wizard itself logs the device IP only at Debug. Once saved it is the configured
+                    // FallbackAddress, which normal settings/connection diagnostics may mention.
                     _logger.LogInformation("Pairing wizard: saved FallbackAddress.");
                     _logger.LogDebug("Pairing wizard: FallbackAddress is {Address}.", address);
                 }

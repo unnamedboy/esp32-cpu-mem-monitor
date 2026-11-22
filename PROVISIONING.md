@@ -228,9 +228,14 @@ Other calls and events:
 - The .NET client must open the COM port with `DtrEnable=false,
   RtsEnable=false` to avoid resetting the board (and to avoid pulling GPIO0
   low through the auto-program circuit, see [HARDWARE.md](HARDWARE.md)), try
-  each available COM port with a short timeout (≤ 1.5 s per port), and match
-  the returned `name=` against the BLE device it is pairing with. If no port
-  answers, the wizard asks the user to type the code.
+  each likely ESP32 port with a short timeout (≤ 1.5 s per port), and match
+  the returned `name=` against the BLE device it is pairing with. Ports whose
+  USB vendor is known are probed only for common ESP32 USB-UART bridges
+  (Silicon Labs CP210x `10C4`, WCH CH340/CH9102 `1A86`, FTDI `0403`, Espressif
+  native USB `303A`); ports of unknown origin are probed unless they are legacy
+  `\Device\Serial<n>` UARTs or Bluetooth serial ports. If no port answers, or
+  the board uses another USB-serial bridge, the wizard asks the user to type
+  the code.
 
 ## Device lifecycle
 

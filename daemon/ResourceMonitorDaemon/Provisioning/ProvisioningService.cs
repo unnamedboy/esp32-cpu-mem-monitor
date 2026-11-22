@@ -125,8 +125,9 @@ namespace ResourceMonitorDaemon.Provisioning
             WifiConfigClient.ValidateCredentials(ssid, password);
 
             progress?.Report(ProvisioningStep.ConnectingToDevice);
-            // Device identifiers (Bluetooth address, Wi-Fi IP) are logged at Debug only, so the
-            // default Information level — which may be forwarded to Loki — carries neither.
+            // The provisioning client logs device identifiers (Bluetooth address, Wi-Fi IP) at Debug
+            // only. A saved IP later appears as the configured FallbackAddress in settings and
+            // connection diagnostics, like any configured broker address.
             _logger.LogInformation("Provisioning {Device}: connecting.", device.Name);
             _logger.LogDebug("Provisioning {Device}: Bluetooth address {Address}.", device.Name, device.AddressText);
             var transport = await _transportFactory(device, cancellationToken).ConfigureAwait(false);
