@@ -155,7 +155,7 @@ only be set in JSON or the environment.
   delay is one sample interval.
 - The delay starts at `ReconnectInitialBackoffMs` and doubles per failure up to
   `ReconnectMaxBackoffMs`. A connect does not reset it by itself: only a connection that
-  stays up for `ReconnectMaxBackoffMs` (at most 30 s) does. A broker that accepts and
+  stays up for min(`ReconnectMaxBackoffMs`, 30 s) does. A broker that accepts and
   immediately drops connections therefore stays backed off.
 - A failed publish marks the connection lost.
 - Each outage shows one "MQTT connection failed" notification, and one "MQTT
@@ -315,8 +315,8 @@ as pure, unit-tested code.
   doesn't count. The exception: if the device was already on Wi-Fi before the attempt
   and the effective `FallbackAddress` did not change, the daemon has no reason to
   reconnect, so an existing connection counts.
-- **Lost Bluetooth link.** `BrokerProbe` checks for up to 15 s, about once per second,
-  for a new daemon connection or a TCP connection to `Host:Port`.
+- **Lost Bluetooth link.** `BrokerProbe` checks for up to 15 s, every 1–3 s (each probe
+  takes up to 2 s, followed by a 1 s pause), for a new daemon connection or a TCP connection to `Host:Port`.
 - **Wi-Fi helpers.** "Use this PC's Wi-Fi" reads the connected SSID through WinRT only
   when clicked (it can trigger Windows 11's location prompt). The 2.4 GHz warning parses
   `netsh wlan show interfaces` (decoded with the OEM code page) and recognizes English

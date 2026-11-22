@@ -62,8 +62,10 @@ pio run -e esp32dev -t upload
 pio device monitor -e esp32dev
 ```
 
-The serial monitor (115200 baud) shows the startup diagnostics. A board without Wi-Fi
-settings goes straight into pairing mode and prints its pairing code:
+The serial monitor (115200 baud) shows the startup diagnostics. They are printed once at
+boot, so press EN/RESET to see them again after opening the monitor. A board without
+Wi-Fi settings goes straight into pairing mode and prints its pairing code (repeated
+every 30 s):
 
 ```text
 Provisioning: name=PROV_RESMON_A1B2C3 pop=ABCDEFGH
@@ -90,20 +92,20 @@ Right-click the tray icon, choose **Pair device…**, pick the
 click **Pair**. When the device has joined Wi-Fi, the wizard saves its IP address and
 the daemon connects; the gauges start moving.
 
+Bluetooth pairing has not yet been tested on real hardware. If it fails for you, the
+[`secrets.h` development fallback](docs/provisioning.md#development-fallback-secretsh)
+puts the Wi-Fi credentials into the firmware build instead.
+
 To re-pair later or switch networks, hold the board's **BOOT** button for 5–15 s while it
 is running, then release it. Details and troubleshooting:
 [docs/provisioning.md](docs/provisioning.md#pairing-a-device).
 
 ## Configuration
 
-Most people only need the tray's **⚙ Settings…** dialog. Settings come from
-these layers, lowest to highest priority:
-
-1. built-in defaults;
-2. `appsettings.json` next to the exe;
-3. `%LocalAppData%\ResourceMonitorDaemon\settings.json`, written by the dialogs and the
-   pairing wizard and holding only the values you changed;
-4. environment variables starting with `RESMON_` (`__` separates sections).
+Most people only need the tray's **⚙ Settings…** dialog. It saves only the values you
+change, to `%LocalAppData%\ResourceMonitorDaemon\settings.json`. Those override the
+shipped `appsettings.json` next to the exe, and `RESMON_` environment variables (`__`
+separates sections) override both ([how the layers work](docs/daemon.md#layers)).
 
 | Setting | Default | |
 | --- | --- | --- |
@@ -189,6 +191,7 @@ dotnet build daemon\ResourceMonitorDaemon.sln
 dotnet run --project daemon\ResourceMonitorDaemon.Tests\ResourceMonitorDaemon.Tests.csproj
 
 # Firmware: build, then compile the tests without a board
+# (each suite is built and then reported as SKIPPED with "0 test cases"; that is expected)
 pio run -e esp32dev
 pio test -e esp32dev --without-uploading --without-testing
 
@@ -217,7 +220,8 @@ before a pull request.
   BOOT re-pairing gesture and the status topic are implemented and unit-tested but have
   not yet been tested on a physical ESP32.**
 - The DAC module, gauges and backlight wiring have not been verified on the bench.
-- Wi-Fi credentials are stored on the ESP32 without flash encryption.
+- Wi-Fi credentials are stored on the ESP32 unencrypted
+  ([security model](docs/provisioning.md#security-model)).
 - The MQTT broker has no authentication; use it on a trusted network.
 - One device per network is the expected setup: with several, `resmon.local` is
   ambiguous and the saved IP address is what identifies yours.

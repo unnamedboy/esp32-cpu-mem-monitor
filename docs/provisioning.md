@@ -292,7 +292,6 @@ before the client can read the result). Implementation notes:
   offers Security0 and Security1.
 - Only the SSID and password are provisioned. The host name, MQTT port and topics are
   compile-time settings in `config.h`, and the wizard does not offer them.
-- Stored credentials are not encrypted on the device.
 - `resmon.local` is ambiguous when several monitors share a network; the saved IP
   address (`FallbackAddress`) is then the reliable way to reach the paired one.
 

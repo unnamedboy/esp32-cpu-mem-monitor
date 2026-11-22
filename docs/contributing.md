@@ -52,7 +52,8 @@ Firmware changes:
 
 1. `pio run -e esp32dev` builds, and the tests compile with
    `pio test -e esp32dev --without-uploading --without-testing` (or run on a board with
-   `pio test -e esp32dev`).
+   `pio test -e esp32dev`). The compile-only run reports each suite as SKIPPED with
+   "0 test cases"; that is expected.
 2. With a board: the startup diagnostics are complete and contain no secrets; valid,
    invalid and stale metrics behave as expected; the firmware runs without the DAC;
    `resmon/status` still arrives every 10 s without SSID, IP, MAC, pairing code or

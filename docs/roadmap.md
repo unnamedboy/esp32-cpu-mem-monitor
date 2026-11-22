@@ -31,10 +31,10 @@ What already works is listed under [Features](../README.md#features) and
 
 ## Open software decisions
 
-- **Encrypting stored credentials.** Wi-Fi credentials are currently stored without NVS
-  or flash encryption. Enabling encryption on real devices is a deliberate production
-  step: key handling, recovery, firmware updates and factory reset have to be designed
-  first.
+- **Encrypting stored credentials** (currently unencrypted, see the
+  [security model](provisioning.md#security-model)). Enabling encryption on real
+  devices is a deliberate production step: key handling, recovery, firmware updates and
+  factory reset have to be designed first.
 - **Disk gauge semantics**: active-time percentage or normalised throughput.
 - **Provisioning more than Wi-Fi.** The device name, MQTT port and topics are compile-time
   settings. Provisioning them would need a custom provisioning endpoint with versioned,
