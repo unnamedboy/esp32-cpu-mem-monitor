@@ -409,7 +409,9 @@ The UI is available in English (neutral language) and Simplified Chinese
     `AuthMode Basic needs a Username.`), the dialog the label in either language
     (`CPU 主题和内存主题不能相同。`, `Auth mode Basic needs a Username.`). Range
     errors read `<field>: <value> is outside <min>..<max>.` because a label may
-    contain parentheses ("Sample interval (ms): 100 …");
+    contain parentheses ("Sample interval (ms): 100 …"). The start-up sanitize
+    warnings use the same shape: `SampleIntervalMs: 100 is outside 250..60000;
+    clamped to 250.` and `Observability:Loki:<Name>: <value> is outside …; clamped to …`;
   - MQTT notifications are built as `UiMessage`s and formatted with one snapshot
     of `Strings.Culture` when shown, so title and text never mix languages; the
     endpoint text is also logged, in English;
@@ -441,9 +443,15 @@ The UI is available in English (neutral language) and Simplified Chinese
   other one; an untouched language drop-down applying nothing; and a source scan
   of `daemon/ResourceMonitorDaemon/**/*.cs` outside `Resources/` that fails on any
   CJK character, bilingual label, or string literal with words passed to a UI
-  sink (`MessageBox.Show`, `ShowBalloon`/`ShowBalloonTip`, `ShowResult`, `SetStep`,
-  `new ToolStripMenuItem`, `Items.Add`, `Columns.Add`, or a `Text`/`PlaceholderText`
-  assignment). Interpolation holes are ignored, so "-" or `$"{glyph}  {text}"` pass,
+  sink: `MessageBox.Show`, `ShowBalloon`/`ShowBalloonTip`, `ShowNotification`,
+  `ShowResult`, `ShowTestResult`, `SetStep`, `SetToolTip`, the dialogs' label helpers
+  (`AddRow`, `AddField`, `AddGridRow`, `AddNote`, `NewLabel`, `NewGroup`),
+  `new PairingOutcome`, `new ToolStripMenuItem`, `Items.Add`, `Columns.Add`, or a
+  `Text`/`PlaceholderText` (and similar) `=` or `+=` assignment. The whole argument
+  list or right-hand side is read (up to the closing bracket, `;`, or an initializer
+  comma, over at most 4 more lines), so concatenations, ternaries and
+  `string.Format("…")` are caught; `$"…"`, `@"…"`, `$@"…"` and `@$"…"` literals are
+  recognized. Interpolation holes are ignored, so "-" or `$"{glyph}  {text}"` pass,
   and `dBm` is allow-listed. Lines marked `i18n-allow`, such as the `netsh` labels in
   `CurrentWifiNetwork`, are exempt.
 
