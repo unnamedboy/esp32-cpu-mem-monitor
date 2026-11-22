@@ -1,0 +1,93 @@
+namespace ResourceMonitorDaemon.Observability
+{
+    /// <summary>URL rules for the Loki push endpoint. Nothing here ever returns credentials.</summary>
+    public static class LokiUrl
+    {
+        public const int MaxLength = 2048;
+
+        /// <summary>
+        /// Returns null when <paramref name="url"/> is an absolute http(s) URL without user info
+        /// or fragment; otherwise a message that does not repeat the URL.
+        /// </summary>
+        public static string? Validate(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return "Url must not be empty.";
+            }
+
+            var trimmed = url.Trim();
+            if (trimmed.Length > MaxLength)
+            {
+                return $"Url is longer than {MaxLength} characters.";
+            }
+
+            if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+                || string.IsNullOrEmpty(uri.Host))
+            {
+                return "Url must be an absolute http:// or https:// URL.";
+            }
+
+            if (uri.UserInfo.Length > 0)
+            {
+                return "Url must not contain a user name or password; use AuthMode, Username and the token instead.";
+            }
+
+            if (uri.Fragment.Length > 0)
+            {
+                return "Url must not contain a fragment (#...).";
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Removes <c>user:password@</c> from an absolute URL. Returns the input unchanged when
+        /// it has no user info or cannot be parsed.
+        /// </summary>
+        public static string StripUserInfo(string url)
+        {
+            if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) || uri.UserInfo.Length == 0)
+            {
+                return url;
+            }
+
+            return new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty }.Uri.AbsoluteUri;
+        }
+
+        /// <summary>True when the absolute URL carries user info.</summary>
+        public static bool HasUserInfo(string url) =>
+            Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) && uri.UserInfo.Length > 0;
+
+        /// <summary>
+        /// The push endpoint: <see cref="LokiSettings.PushPath"/> is appended only when the URL has
+        /// no path (or just "/"); an explicit path (reverse proxy, full push URL) is kept as is.
+        /// User info is always removed.
+        /// </summary>
+        public static Uri BuildPushUri(string url)
+        {
+            var uri = new Uri(StripUserInfo(url.Trim()), UriKind.Absolute);
+            if (uri.AbsolutePath is "" or "/")
+            {
+                uri = new UriBuilder(uri) { Path = LokiSettings.PushPath }.Uri;
+            }
+
+            return uri;
+        }
+
+        /// <summary>Host and non-default port only, e.g. <c>logs.example.net</c> or <c>loki:3100</c>; "(none)" when unset.</summary>
+        public static string DescribeHost(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return "(none)";
+            }
+
+            // Uri.Authority never includes user info.
+            return Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) && uri.Host.Length > 0
+                ? uri.Authority
+                : "(invalid)";
+        }
+    }
+}
