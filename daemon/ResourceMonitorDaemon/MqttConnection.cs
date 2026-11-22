@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Windows.Forms;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Protocol;
+using ResourceMonitorDaemon.Localization;
 
 namespace ResourceMonitorDaemon
 {
@@ -460,9 +462,8 @@ namespace ResourceMonitorDaemon
                 _connectionGeneration++;
                 _backoff!.RecordConnected();
 
-                var via = string.Equals(address, settings.Host, StringComparison.OrdinalIgnoreCase)
-                    ? string.Empty
-                    : $" (fallback for {settings.Host})";
+                var viaFallback = !string.Equals(address, settings.Host, StringComparison.OrdinalIgnoreCase);
+                var via = viaFallback ? $" (fallback for {settings.Host})" : string.Empty;
                 if (_outageStartedAt is { } started)
                 {
                     _logger.LogInformation(
@@ -476,7 +477,10 @@ namespace ResourceMonitorDaemon
 
                 if (_outageNotified)
                 {
-                    reconnectedMessage = $"Connected to ESP32 MQTT broker {address}:{settings.Port}{via}.";
+                    // User-visible balloon text: UI language (the log lines above stay English).
+                    reconnectedMessage = viaFallback
+                        ? Strings.Tray_MqttReconnectedViaFallback(address, settings.Port, settings.Host)
+                        : Strings.Tray_MqttReconnectedText(address, settings.Port);
                     _outageNotified = false;
                 }
 
@@ -486,7 +490,7 @@ namespace ResourceMonitorDaemon
 
             if (reconnectedMessage != null)
             {
-                Notify("MQTT reconnected", reconnectedMessage, ToolTipIcon.Info);
+                Notify(Strings.Tray_MqttReconnectedTitle, reconnectedMessage, ToolTipIcon.Info);
             }
 
             return true;
@@ -522,9 +526,8 @@ namespace ResourceMonitorDaemon
             }
 
             if (notify && Notify(
-                    "MQTT connection failed",
-                    $"Unable to connect to ESP32 MQTT broker ({DescribeEndpoint(settings)}).\n" +
-                    "Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the background.",
+                    Strings.Tray_MqttFailedTitle,
+                    Strings.Tray_MqttFailedText(DescribeEndpoint(settings)),
                     ToolTipIcon.Error))
             {
                 lock (_gate)
@@ -580,10 +583,11 @@ namespace ResourceMonitorDaemon
             }
         }
 
+        /// <summary>The endpoint(s) named in the failure balloon, in the UI language.</summary>
         private static string DescribeEndpoint(DeviceSettings settings) =>
             string.IsNullOrWhiteSpace(settings.FallbackAddress)
-                ? $"{settings.Host}:{settings.Port}"
-                : $"{settings.Host}:{settings.Port}, fallback {settings.FallbackAddress}";
+                ? string.Create(CultureInfo.InvariantCulture, $"{settings.Host}:{settings.Port}")
+                : Strings.Tray_MqttEndpointWithFallback(settings.Host, settings.Port, settings.FallbackAddress);
 
         private static string Describe(Exception ex, int timeoutMs) =>
             ex is OperationCanceledException or TimeoutException or MQTTnet.Exceptions.MqttCommunicationTimedOutException
