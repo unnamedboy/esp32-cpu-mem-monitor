@@ -74,7 +74,7 @@ namespace ResourceMonitorDaemon.Observability
     }
 
     /// <summary>
-    /// Validates <c>resmon/status</c> payloads (see COMMUNICATION.md): a UTF-8 JSON object of at
+    /// Validates <c>resmon/status</c> payloads (see docs/protocol.md): a UTF-8 JSON object of at
     /// most <see cref="MaxPayloadBytes"/> bytes with an integer <c>v</c> between 1 and
     /// <see cref="SupportedVersion"/>. Unknown fields are accepted but never forwarded: the result is
     /// re-serialized from the contract fields only, with type checks and capped string lengths, so a

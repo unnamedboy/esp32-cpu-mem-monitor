@@ -3,7 +3,7 @@
 
 // Pure formatter for the `resmon/status` device status payload. No Arduino
 // dependencies so it can be unit-tested on the host. Contract:
-// COMMUNICATION.md ("Device status").
+// docs/protocol.md ("Device status").
 //
 // Never put SSID, IP/MAC addresses, the PoP or passwords into this struct or
 // payload.
@@ -15,7 +15,7 @@
 
 constexpr int STATUS_SCHEMA_VERSION = 1;
 // Largest escaped `build` value accepted (bytes, without quotes/NUL). The
-// daemon keeps at most 64 characters of `build` (COMMUNICATION.md).
+// daemon keeps at most 64 characters of `build` (docs/protocol.md).
 constexpr size_t STATUS_BUILD_ESCAPED_MAX = 64;
 
 enum class StatusWifi {

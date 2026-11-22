@@ -328,7 +328,7 @@ void printProvisioningHint() {
         printDebugFormatted("Provisioning: name=%s pop=unavailable (NVS error)", provServiceName);
         return;
     }
-    // Physical USB access is trusted (see PROVISIONING.md).
+    // Physical USB access is trusted (see docs/provisioning.md).
     printDebugFormatted("Provisioning: name=%s pop=%s", provServiceName, provPop);
 }
 
@@ -460,7 +460,7 @@ void handleProvisioningStartFailure(const char* step, esp_err_t err, uint32_t no
 
 // Provisioning manager calls are made directly (instead of
 // WiFiProv.beginProvision) so that auto-stop can be disabled between init and
-// start; see PROVISIONING.md.
+// start; see docs/provisioning.md.
 void startProvisioning(bool resetStoredCredentials, uint32_t now) {
     credentialSource = CredentialSource::None;
     networkState = NetworkState::Provisioning;
@@ -1075,7 +1075,8 @@ void setup() {
 
     initProvisioningFailureCounter();
 
-    // GPIO0 is only read after boot; the board pull-up keeps it high.
+    // GPIO0 is only read after boot. The internal pull-up keeps it high when
+    // BOOT is not pressed (any on-board pull-up is unverified).
     pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
 
     initDac();

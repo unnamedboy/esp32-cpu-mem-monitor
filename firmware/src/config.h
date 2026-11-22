@@ -23,7 +23,7 @@ const char* FIRMWARE_BUILD_ID = "phase4-ble-prov-status";
 
 // Optional development fallback credentials (ignored firmware/src/secrets.h).
 // Used only when no BLE-provisioned credentials are stored and no
-// provisioning was requested. See PROVISIONING.md for the boot order.
+// provisioning was requested. See docs/provisioning.md for the boot order.
 #if __has_include("secrets.h")
 #include "secrets.h"
 #define RESMON_HAS_SECRETS_H 1
@@ -46,13 +46,14 @@ const int STALE_DECAY_INTERVAL_MS = 50;
 const int STALE_DECAY_STEP = 1;
 
 // On-board BOOT button (GPIO0, boot-strapping pin). Input only, read only
-// after boot has finished; the dev board already has a pull-up and the
-// button pulls the pin to GND. No external wiring. Holding it while the
+// after boot has finished. The firmware enables the internal pull-up
+// (INPUT_PULLUP); any on-board pull-up is unverified. The button pulls the
+// pin to GND. No external wiring. Holding it while the
 // board resets enters the ROM serial download mode instead of the firmware.
 // Reset Wi-Fi + reopen provisioning: hold BOOT for MIN..MAX, then RELEASE.
 // Holds longer than MAX are ignored (stuck button, or a serial tool holding
 // DTR asserted, which pulls GPIO0 low via the auto-program circuit).
-// See HARDWARE.md.
+// See docs/hardware.md.
 const int BOOT_BUTTON_PIN = 0;
 const bool BOOT_BUTTON_ACTIVE_LOW = true;
 const uint32_t BOOT_BUTTON_DEBOUNCE_MS = 50;
@@ -68,7 +69,7 @@ const uint32_t WIFI_STATUS_LOG_INTERVAL_MS = 10000;   // "still connecting" log 
 const uint32_t STATUS_DIAGNOSTIC_INTERVAL_MS = 60000; // periodic health line
 
 // ================= 4. BLE provisioning 配置 =================
-// Contract: PROVISIONING.md. Security1 + PoP, BLE scheme, BT memory freed
+// Contract: docs/provisioning.md. Security1 + PoP, BLE scheme, BT memory freed
 // after provisioning.
 const char* PROV_NVS_NAMESPACE = "resmon";
 const char* PROV_NVS_KEY_POP = "pop";
@@ -99,7 +100,7 @@ const int MQTT_BROKER_PORT = 1883;
 const char* CPU_TOPIC = "resmon/cpu";
 const char* MEM_TOPIC = "resmon/mem";
 
-// Device status topic (COMMUNICATION.md "Device status"). The firmware
+// Device status topic (docs/protocol.md "Device status"). The firmware
 // publishes a compact JSON health snapshot into its own broker: QoS 0, not
 // retained, every STATUS_INTERVAL_MS while Wi-Fi is connected (the first one
 // STATUS_INTERVAL_MS after the broker starts). Build with

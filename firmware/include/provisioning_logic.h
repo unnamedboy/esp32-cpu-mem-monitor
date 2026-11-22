@@ -2,7 +2,7 @@
 #define PROVISIONING_LOGIC_H
 
 // Pure boot/connection decision logic for Wi-Fi provisioning. No Arduino
-// dependencies so it can be unit-tested on the host. See PROVISIONING.md.
+// dependencies so it can be unit-tested on the host. See docs/provisioning.md.
 
 #include <stdint.h>
 
