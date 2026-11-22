@@ -1,0 +1,627 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" msdata:Ordinal="1" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Common_ProductName" xml:space="preserve">
+    <value>Resource Monitor Daemon</value>
+  </data>
+  <data name="Common_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Common_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Common_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="Common_None" xml:space="preserve">
+    <value>(none)</value>
+  </data>
+  <data name="Common_FieldLabel" xml:space="preserve">
+    <value>{0}:</value>
+    <comment>{0} = label</comment>
+  </data>
+  <data name="Common_EnvFieldLabel" xml:space="preserve">
+    <value>{0} (env):</value>
+    <comment>{0} = label</comment>
+  </data>
+  <data name="Common_SavedTo" xml:space="preserve">
+    <value>Saved to: {0}</value>
+    <comment>{0} = path</comment>
+  </data>
+  <data name="Common_EnvironmentFieldsNote" xml:space="preserve">
+    <value>Fields marked (env) come from RESMON_ environment variables; they are read-only and not saved: {0}</value>
+    <comment>{0} = fields</comment>
+  </data>
+  <data name="Common_InvalidSettingsCaption" xml:space="preserve">
+    <value>Invalid settings</value>
+  </data>
+  <data name="Common_SaveFailed" xml:space="preserve">
+    <value>Unable to save settings:
+{0}</value>
+    <comment>{0} = error</comment>
+  </data>
+  <data name="Common_StartupFailed" xml:space="preserve">
+    <value>Resource Monitor Daemon failed to start:
+{0}
+
+Log file: {1}</value>
+    <comment>{0} = error, {1} = logPath</comment>
+  </data>
+  <data name="Tray_Pause" xml:space="preserve">
+    <value>⏸ Pause sending</value>
+  </data>
+  <data name="Tray_Resume" xml:space="preserve">
+    <value>▶ Resume sending</value>
+  </data>
+  <data name="Tray_Settings" xml:space="preserve">
+    <value>⚙ Settings…</value>
+  </data>
+  <data name="Tray_PairDevice" xml:space="preserve">
+    <value>Pair device…</value>
+  </data>
+  <data name="Tray_ViewLog" xml:space="preserve">
+    <value>View log</value>
+  </data>
+  <data name="Tray_Observability" xml:space="preserve">
+    <value>Observability…</value>
+  </data>
+  <data name="Tray_Exit" xml:space="preserve">
+    <value>Exit</value>
+  </data>
+  <data name="Tray_PausedTitle" xml:space="preserve">
+    <value>Paused</value>
+  </data>
+  <data name="Tray_PausedText" xml:space="preserve">
+    <value>Monitoring data is no longer sent.</value>
+  </data>
+  <data name="Tray_ResumedTitle" xml:space="preserve">
+    <value>Resumed</value>
+  </data>
+  <data name="Tray_ResumedText" xml:space="preserve">
+    <value>Monitoring data is being sent again.</value>
+  </data>
+  <data name="Tray_SettingsSavedTitle" xml:space="preserve">
+    <value>Settings saved</value>
+  </data>
+  <data name="Tray_ObservabilitySavedTitle" xml:space="preserve">
+    <value>Observability saved</value>
+  </data>
+  <data name="Tray_AppliedWithoutRestart" xml:space="preserve">
+    <value>Applied without restart.</value>
+  </data>
+  <data name="Tray_AppliedEnvironmentOverride" xml:space="preserve">
+    <value>Applied; these fields are still set by environment variables: {0}</value>
+    <comment>{0} = fields</comment>
+  </data>
+  <data name="Tray_NoLogYet" xml:space="preserve">
+    <value>No log file yet.</value>
+  </data>
+  <data name="Tray_MqttFailedTitle" xml:space="preserve">
+    <value>MQTT connection failed</value>
+  </data>
+  <data name="Tray_MqttFailedText" xml:space="preserve">
+    <value>Unable to connect to the ESP32 MQTT broker ({0}).
+Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the background.</value>
+    <comment>{0} = endpoint</comment>
+  </data>
+  <data name="Tray_MqttEndpointWithFallback" xml:space="preserve">
+    <value>{0}:{1}, fallback {2}</value>
+    <comment>{0} = host, {1} = port, {2} = fallback</comment>
+  </data>
+  <data name="Tray_MqttReconnectedTitle" xml:space="preserve">
+    <value>MQTT reconnected</value>
+  </data>
+  <data name="Tray_MqttReconnectedText" xml:space="preserve">
+    <value>Connected to the ESP32 MQTT broker {0}:{1}.</value>
+    <comment>{0} = address, {1} = port</comment>
+  </data>
+  <data name="Tray_MqttReconnectedViaFallback" xml:space="preserve">
+    <value>Connected to the ESP32 MQTT broker {0}:{1} (fallback for {2}).</value>
+    <comment>{0} = address, {1} = port, {2} = host</comment>
+  </data>
+  <data name="Settings_WindowTitle" xml:space="preserve">
+    <value>Settings - Resource Monitor</value>
+  </data>
+  <data name="Settings_Host" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="Settings_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="Settings_CpuTopic" xml:space="preserve">
+    <value>CPU topic</value>
+  </data>
+  <data name="Settings_MemTopic" xml:space="preserve">
+    <value>Memory topic</value>
+  </data>
+  <data name="Settings_SampleInterval" xml:space="preserve">
+    <value>Sample interval (ms)</value>
+  </data>
+  <data name="Settings_FallbackAddress" xml:space="preserve">
+    <value>Fallback address</value>
+  </data>
+  <data name="Settings_Language" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="Settings_LanguageAutomatic" xml:space="preserve">
+    <value>Automatic (system)</value>
+  </data>
+  <data name="Settings_LanguageEnglish" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="Settings_LanguageChineseSimplified" xml:space="preserve">
+    <value>简体中文</value>
+  </data>
+  <data name="Settings_LanguageNote" xml:space="preserve">
+    <value>A new language applies to the tray menu at once and to windows opened afterwards.</value>
+  </data>
+  <data name="Settings_ErrorHostEmpty" xml:space="preserve">
+    <value>Host must not be empty.</value>
+  </data>
+  <data name="Settings_ErrorHostInvalid" xml:space="preserve">
+    <value>Host '{0}' is not a valid host name or IP address.</value>
+    <comment>{0} = host</comment>
+  </data>
+  <data name="Settings_ErrorFallbackInvalid" xml:space="preserve">
+    <value>FallbackAddress '{0}' is not a dotted IPv4 address.</value>
+    <comment>{0} = address</comment>
+  </data>
+  <data name="Settings_ErrorPortRange" xml:space="preserve">
+    <value>Port {0} is outside 1..65535.</value>
+    <comment>{0} = port</comment>
+  </data>
+  <data name="Settings_ErrorTopicEmpty" xml:space="preserve">
+    <value>{0} must not be empty.</value>
+    <comment>{0} = name</comment>
+  </data>
+  <data name="Settings_ErrorTopicTooLong" xml:space="preserve">
+    <value>{0} is longer than {1} characters.</value>
+    <comment>{0} = name, {1} = maxLength</comment>
+  </data>
+  <data name="Settings_ErrorTopicWildcard" xml:space="preserve">
+    <value>{0} '{1}' must not contain MQTT wildcards '#' or '+'.</value>
+    <comment>{0} = name, {1} = topic</comment>
+  </data>
+  <data name="Settings_ErrorTopicWhitespace" xml:space="preserve">
+    <value>{0} must not contain control characters or leading/trailing spaces.</value>
+    <comment>{0} = name</comment>
+  </data>
+  <data name="Settings_ErrorRange" xml:space="preserve">
+    <value>{0} {1} is outside {2}..{3}.</value>
+    <comment>{0} = name, {1} = value, {2} = min, {3} = max</comment>
+  </data>
+  <data name="Settings_ErrorTopicsEqual" xml:space="preserve">
+    <value>CpuTopic and MemTopic must be different.</value>
+  </data>
+  <data name="Settings_ErrorStatusTopicCollides" xml:space="preserve">
+    <value>StatusTopic must differ from CpuTopic and MemTopic.</value>
+  </data>
+  <data name="Settings_ErrorBackoffOrder" xml:space="preserve">
+    <value>ReconnectMaxBackoffMs must not be smaller than ReconnectInitialBackoffMs.</value>
+  </data>
+  <data name="Observability_WindowTitle" xml:space="preserve">
+    <value>Observability - Resource Monitor</value>
+  </data>
+  <data name="Observability_MessageBoxCaption" xml:space="preserve">
+    <value>Observability</value>
+  </data>
+  <data name="Observability_EnabledCheckBox" xml:space="preserve">
+    <value>Send to Grafana Loki</value>
+  </data>
+  <data name="Observability_TenantPlaceholder" xml:space="preserve">
+    <value>(optional X-Scope-OrgID)</value>
+  </data>
+  <data name="Observability_HostLabelCheckBox" xml:space="preserve">
+    <value>Add a host=&lt;PC name&gt; label</value>
+  </data>
+  <data name="Observability_Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Observability_Url" xml:space="preserve">
+    <value>URL</value>
+  </data>
+  <data name="Observability_AuthMode" xml:space="preserve">
+    <value>Auth mode</value>
+  </data>
+  <data name="Observability_Username" xml:space="preserve">
+    <value>Username</value>
+  </data>
+  <data name="Observability_Token" xml:space="preserve">
+    <value>Token</value>
+  </data>
+  <data name="Observability_Tenant" xml:space="preserve">
+    <value>Tenant</value>
+  </data>
+  <data name="Observability_HostLabel" xml:space="preserve">
+    <value>Host label</value>
+  </data>
+  <data name="Observability_MetricsInterval" xml:space="preserve">
+    <value>Metrics interval (s, 0 = off)</value>
+  </data>
+  <data name="Observability_TokenFromEnvironment" xml:space="preserve">
+    <value>(env)</value>
+  </data>
+  <data name="Observability_TokenSaved" xml:space="preserve">
+    <value>(saved)</value>
+  </data>
+  <data name="Observability_TokenNotSet" xml:space="preserve">
+    <value>(not set)</value>
+  </data>
+  <data name="Observability_TokenWillBeCleared" xml:space="preserve">
+    <value>(cleared on Save)</value>
+  </data>
+  <data name="Observability_ClearToken" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="Observability_TokenNote" xml:space="preserve">
+    <value>The token is stored DPAPI-encrypted for this Windows user only and is never logged. Leave the box empty to keep the saved token.</value>
+  </data>
+  <data name="Observability_Test" xml:space="preserve">
+    <value>Test</value>
+  </data>
+  <data name="Observability_Testing" xml:space="preserve">
+    <value>Testing…</value>
+  </data>
+  <data name="Observability_TestCancelled" xml:space="preserve">
+    <value>Cancelled or timed out</value>
+  </data>
+  <data name="Observability_TestNotSent" xml:space="preserve">
+    <value>Not sent</value>
+  </data>
+  <data name="Observability_TestSucceeded" xml:space="preserve">
+    <value>OK: {0}</value>
+    <comment>{0} = detail</comment>
+  </data>
+  <data name="Observability_TestFailed" xml:space="preserve">
+    <value>Failed: {0}</value>
+    <comment>{0} = detail</comment>
+  </data>
+  <data name="Observability_RequestTimedOut" xml:space="preserve">
+    <value>timed out after {0} s</value>
+    <comment>{0} = seconds</comment>
+  </data>
+  <data name="Observability_InsecureSaveQuestion" xml:space="preserve">
+    <value>Credentials would be sent over unencrypted HTTP. Save anyway?</value>
+  </data>
+  <data name="Observability_InsecureTestQuestion" xml:space="preserve">
+    <value>The test would send the token over unencrypted HTTP. Continue?</value>
+  </data>
+  <data name="Observability_ErrorUrlEmpty" xml:space="preserve">
+    <value>Url must not be empty.</value>
+  </data>
+  <data name="Observability_ErrorUrlTooLong" xml:space="preserve">
+    <value>Url is longer than {0} characters.</value>
+    <comment>{0} = maxLength</comment>
+  </data>
+  <data name="Observability_ErrorUrlNotHttp" xml:space="preserve">
+    <value>Url must be an absolute http:// or https:// URL.</value>
+  </data>
+  <data name="Observability_ErrorUrlUserInfo" xml:space="preserve">
+    <value>Url must not contain a user name or password; use AuthMode, Username and the token instead.</value>
+  </data>
+  <data name="Observability_ErrorUrlFragment" xml:space="preserve">
+    <value>Url must not contain a fragment (#...).</value>
+  </data>
+  <data name="Observability_ErrorUsername" xml:space="preserve">
+    <value>Username must be at most {0} characters without ':', control characters or surrounding spaces.</value>
+    <comment>{0} = maxLength</comment>
+  </data>
+  <data name="Observability_ErrorToken" xml:space="preserve">
+    <value>Token must be printable ASCII without spaces (at most {0} characters).</value>
+    <comment>{0} = maxLength</comment>
+  </data>
+  <data name="Observability_ErrorTenantId" xml:space="preserve">
+    <value>TenantId may contain only letters, digits and ! - _ . * ' ( ) (at most {0} characters).</value>
+    <comment>{0} = maxLength</comment>
+  </data>
+  <data name="Observability_ErrorAuthMode" xml:space="preserve">
+    <value>AuthMode must be None, Basic or Bearer.</value>
+  </data>
+  <data name="Observability_ErrorBasicNeedsUsername" xml:space="preserve">
+    <value>AuthMode Basic needs a Username.</value>
+  </data>
+  <data name="Pairing_ReprovisionInstruction" xml:space="preserve">
+    <value>hold its BOOT button for 5–15 seconds, then release it</value>
+  </data>
+  <data name="Pairing_FirstRunBalloonText" xml:space="preserve">
+    <value>Cannot reach the device. No device found — click to pair.
+You can also use the tray menu → Pair device.</value>
+  </data>
+  <data name="Pairing_WindowTitle" xml:space="preserve">
+    <value>Pair device - Resource Monitor</value>
+  </data>
+  <data name="Pairing_Intro" xml:space="preserve">
+    <value>Set up the device's Wi-Fi over Bluetooth. The device must be in pairing mode (first start, or {0}).</value>
+    <comment>{0} = reprovisionInstruction</comment>
+  </data>
+  <data name="Pairing_PairButton" xml:space="preserve">
+    <value>Pair</value>
+  </data>
+  <data name="Pairing_DeviceGroup" xml:space="preserve">
+    <value>1. Select device</value>
+  </data>
+  <data name="Pairing_DeviceColumn" xml:space="preserve">
+    <value>Device</value>
+  </data>
+  <data name="Pairing_SignalColumn" xml:space="preserve">
+    <value>Signal</value>
+  </data>
+  <data name="Pairing_RescanButton" xml:space="preserve">
+    <value>Rescan</value>
+  </data>
+  <data name="Pairing_Scanning" xml:space="preserve">
+    <value>Scanning for devices…</value>
+  </data>
+  <data name="Pairing_CodeGroup" xml:space="preserve">
+    <value>2. Pairing code</value>
+  </data>
+  <data name="Pairing_SelectDeviceFirst" xml:space="preserve">
+    <value>Select a device first.</value>
+  </data>
+  <data name="Pairing_CodeReadingUsb" xml:space="preserve">
+    <value>Looking for the pairing code over USB…</value>
+  </data>
+  <data name="Pairing_CodeReadOverUsb" xml:space="preserve">
+    <value>Read automatically over USB.</value>
+  </data>
+  <data name="Pairing_CodeNotFoundOverUsb" xml:space="preserve">
+    <value>Not found over USB; enter it manually.</value>
+  </data>
+  <data name="Pairing_CodeUsbQueryStopped" xml:space="preserve">
+    <value>Pairing code not read over USB.</value>
+  </data>
+  <data name="Pairing_CodeEnterManually" xml:space="preserve">
+    <value>Enter manually</value>
+  </data>
+  <data name="Pairing_CodeUseUsb" xml:space="preserve">
+    <value>Use the code read over USB</value>
+  </data>
+  <data name="Pairing_CodeHint" xml:space="preserve">
+    <value>The 8-character code is in the device's USB serial log (115200 baud), in the line "Provisioning: name=... pop=...".</value>
+  </data>
+  <data name="Pairing_WifiGroup" xml:space="preserve">
+    <value>3. Wi-Fi</value>
+  </data>
+  <data name="Pairing_SsidLabel" xml:space="preserve">
+    <value>Network name (SSID):</value>
+  </data>
+  <data name="Pairing_PasswordLabel" xml:space="preserve">
+    <value>Password:</value>
+  </data>
+  <data name="Pairing_ShowPassword" xml:space="preserve">
+    <value>Show</value>
+  </data>
+  <data name="Pairing_WifiNote" xml:space="preserve">
+    <value>The ESP32 supports 2.4 GHz Wi-Fi only. The password is used for this attempt only and is never saved.</value>
+  </data>
+  <data name="Pairing_UseThisPcWifi" xml:space="preserve">
+    <value>Use this PC's Wi-Fi</value>
+  </data>
+  <data name="Pairing_ReadingThisPcWifi" xml:space="preserve">
+    <value>Reading this PC's Wi-Fi…</value>
+  </data>
+  <data name="Pairing_ThisPcWifiUnavailable" xml:space="preserve">
+    <value>Could not read this PC's Wi-Fi (not connected, or Windows did not grant location access). Type the network name.</value>
+  </data>
+  <data name="Pairing_SsidPrefilled" xml:space="preserve">
+    <value>Prefilled with this PC's current Wi-Fi.</value>
+  </data>
+  <data name="Pairing_SsidPrefilledNot24GHz" xml:space="preserve">
+    <value>Prefilled with this PC's Wi-Fi, which it uses on 5/6 GHz. The ESP32 needs 2.4 GHz: make sure the router also offers it.</value>
+  </data>
+  <data name="Pairing_ProgressGroup" xml:space="preserve">
+    <value>4. Pair</value>
+  </data>
+  <data name="Pairing_InProgress" xml:space="preserve">
+    <value>Pairing…</value>
+  </data>
+  <data name="Pairing_StepConnect" xml:space="preserve">
+    <value>Connect to device</value>
+  </data>
+  <data name="Pairing_StepSecure" xml:space="preserve">
+    <value>Secure session</value>
+  </data>
+  <data name="Pairing_StepSend" xml:space="preserve">
+    <value>Send Wi-Fi settings</value>
+  </data>
+  <data name="Pairing_StepWifi" xml:space="preserve">
+    <value>Wait for Wi-Fi</value>
+  </data>
+  <data name="Pairing_StepSave" xml:space="preserve">
+    <value>Save device address</value>
+  </data>
+  <data name="Pairing_StepDaemon" xml:space="preserve">
+    <value>Daemon connects</value>
+  </data>
+  <data name="Pairing_StepCheckNetwork" xml:space="preserve">
+    <value>Check network connection</value>
+  </data>
+  <data name="Pairing_StepNoAddress" xml:space="preserve">
+    <value>Save device address: no IP reported, nothing saved</value>
+  </data>
+  <data name="Pairing_StepSaved" xml:space="preserve">
+    <value>Saved device address {0}</value>
+    <comment>{0} = address</comment>
+  </data>
+  <data name="Pairing_SaveFailed" xml:space="preserve">
+    <value>Could not save the device address: {0}</value>
+    <comment>{0} = error</comment>
+  </data>
+  <data name="Pairing_FallbackOverriddenByEnvironment" xml:space="preserve">
+    <value>Note: FallbackAddress is set by the RESMON_Device__FallbackAddress environment variable; the saved value is not used.</value>
+  </data>
+  <data name="Pairing_Succeeded" xml:space="preserve">
+    <value>Paired: the device joined Wi-Fi at {0} (saved as the fallback address).</value>
+    <comment>{0} = address</comment>
+  </data>
+  <data name="Pairing_SucceededNoAddress" xml:space="preserve">
+    <value>Paired: the device joined Wi-Fi but reported no IP address; connecting via {0} (no fallback address saved).</value>
+    <comment>{0} = host</comment>
+  </data>
+  <data name="Pairing_AlreadyConnected" xml:space="preserve">
+    <value>The device had already joined Wi-Fi after an earlier attempt; the settings were not sent again.</value>
+  </data>
+  <data name="Pairing_WrongPassword" xml:space="preserve">
+    <value>Wrong Wi-Fi password. Re-enter it and try again.</value>
+  </data>
+  <data name="Pairing_NetworkNotFound" xml:space="preserve">
+    <value>Wi-Fi network not found (the ESP32 supports 2.4 GHz only). Check the network name and that the router offers 2.4 GHz.</value>
+  </data>
+  <data name="Pairing_WifiFailed" xml:space="preserve">
+    <value>The device could not join Wi-Fi (reason {0}). Check the network name and password, then try again.</value>
+    <comment>{0} = reason</comment>
+  </data>
+  <data name="Pairing_WifiTimeout" xml:space="preserve">
+    <value>The device did not report a Wi-Fi result within {0} s. Check the network name, the password and that the network is 2.4 GHz, then try again.</value>
+    <comment>{0} = seconds</comment>
+  </data>
+  <data name="Pairing_ConnectionLost" xml:space="preserve">
+    <value>Lost the Bluetooth link; checking whether the device joined the network (up to {0} s)…</value>
+    <comment>{0} = seconds</comment>
+  </data>
+  <data name="Pairing_Failed" xml:space="preserve">
+    <value>Pairing failed; see the log for details.</value>
+  </data>
+  <data name="Pairing_BrokerReachable" xml:space="preserve">
+    <value>Paired: the device joined the network and is reachable at {0}:{1} (no IP reported; no fallback address saved).</value>
+    <comment>{0} = host, {1} = port</comment>
+  </data>
+  <data name="Pairing_BrokerUnreachable" xml:space="preserve">
+    <value>Lost the Bluetooth link and {0}:{1} did not answer within {2} s. The device may not have joined Wi-Fi: rescan and try again. If the device no longer appears, power-cycle it or {3}.</value>
+    <comment>{0} = host, {1} = port, {2} = seconds, {3} = reprovisionInstruction</comment>
+  </data>
+  <data name="Pairing_Cancelled" xml:space="preserve">
+    <value>Cancelled.</value>
+  </data>
+  <data name="Pairing_ScanNone" xml:space="preserve">
+    <value>No device in pairing mode found. Check that it is powered and in pairing mode (first start, or {0}), then click Rescan.</value>
+    <comment>{0} = reprovisionInstruction</comment>
+  </data>
+  <data name="Pairing_ScanOne" xml:space="preserve">
+    <value>Found 1 device (selected).</value>
+  </data>
+  <data name="Pairing_ScanMany" xml:space="preserve">
+    <value>Found {0} devices; select the one to pair.</value>
+    <comment>{0} = count</comment>
+  </data>
+  <data name="Pairing_ScanBluetoothOff" xml:space="preserve">
+    <value>Bluetooth is off. Turn it on in Windows Settings, then click Rescan.</value>
+  </data>
+  <data name="Pairing_ScanBluetoothUnavailable" xml:space="preserve">
+    <value>This PC has no usable Bluetooth Low Energy (BLE) adapter, so it cannot scan for devices.</value>
+  </data>
+  <data name="Pairing_ScanFailedRescan" xml:space="preserve">
+    <value>Bluetooth scan failed. Click Rescan.</value>
+  </data>
+  <data name="Pairing_ScanFailed" xml:space="preserve">
+    <value>Bluetooth scan failed; see the log for details.</value>
+  </data>
+  <data name="Pairing_DaemonConnected" xml:space="preserve">
+    <value>Connected, publishing</value>
+  </data>
+  <data name="Pairing_DaemonPaused" xml:space="preserve">
+    <value>Sending is paused; resume it to connect.</value>
+  </data>
+  <data name="Pairing_DaemonRetrying" xml:space="preserve">
+    <value>The daemon keeps retrying {0} in the background.</value>
+    <comment>{0} = host</comment>
+  </data>
+  <data name="Provisioning_CodeRejected" xml:space="preserve">
+    <value>Wrong pairing code: the device rejected it. Check the code (serial log line "Provisioning: name=... pop=...") and try again.</value>
+  </data>
+  <data name="Provisioning_CodeNotVerified" xml:space="preserve">
+    <value>Pairing code rejected: the device could not prove it knows the same pairing code. Check the code (serial log line "Provisioning: name=... pop=...") and try again.</value>
+  </data>
+  <data name="Provisioning_RetryRejectedAfterFailure" xml:space="preserve">
+    <value>The device did not accept another attempt after the previous one failed. Power-cycle the device or {0}, then rescan and try again.</value>
+    <comment>{0} = reprovisionInstruction</comment>
+  </data>
+  <data name="Provisioning_RetryRejected" xml:space="preserve">
+    <value>The device could not accept the Wi-Fi settings. Power-cycle the device or {0}, then rescan and try again.</value>
+    <comment>{0} = reprovisionInstruction</comment>
+  </data>
+  <data name="Provisioning_BluetoothOff" xml:space="preserve">
+    <value>Bluetooth is turned off. Turn it on in Windows Settings and try again.</value>
+  </data>
+  <data name="Provisioning_BluetoothUnavailable" xml:space="preserve">
+    <value>This PC has no usable Bluetooth Low Energy (BLE) adapter.</value>
+  </data>
+  <data name="Provisioning_DeviceNotFound" xml:space="preserve">
+    <value>The device could not be found; it may have left pairing mode. Rescan.</value>
+  </data>
+  <data name="Provisioning_DeviceDisconnected" xml:space="preserve">
+    <value>The device closed the Bluetooth connection. Move closer to the device, rescan and try again.</value>
+  </data>
+  <data name="Provisioning_Timeout" xml:space="preserve">
+    <value>The device did not respond in time. Move closer to the device, rescan and try again.</value>
+  </data>
+  <data name="Provisioning_ServiceNotFound" xml:space="preserve">
+    <value>The device does not offer the pairing service (it may not be in pairing mode, or its firmware is incompatible). To enter pairing mode, {0}.</value>
+    <comment>{0} = reprovisionInstruction</comment>
+  </data>
+  <data name="Provisioning_GattError" xml:space="preserve">
+    <value>Bluetooth communication error. Rescan and try again.</value>
+  </data>
+  <data name="Provisioning_TransportFailed" xml:space="preserve">
+    <value>Bluetooth communication failed. Rescan and try again.</value>
+  </data>
+  <data name="Provisioning_UnexpectedAnswer" xml:space="preserve">
+    <value>The device sent an unexpected answer (details in the log). Rescan and try again.</value>
+  </data>
+  <data name="Provisioning_SsidLength" xml:space="preserve">
+    <value>The Wi-Fi network name must be 1–{0} bytes long.</value>
+    <comment>{0} = maxBytes</comment>
+  </data>
+  <data name="Provisioning_PasswordLength" xml:space="preserve">
+    <value>The Wi-Fi password must be at most {0} bytes long.</value>
+    <comment>{0} = maxBytes</comment>
+  </data>
+  <data name="Provisioning_PairingCodeFormat" xml:space="preserve">
+    <value>The pairing code is 8 characters (letters and digits 2–9; no 0, O, 1 or I).</value>
+  </data>
+  <data name="Provisioning_InvalidInput" xml:space="preserve">
+    <value>Invalid input.</value>
+  </data>
+  <data name="Provisioning_FailedWithType" xml:space="preserve">
+    <value>Pairing failed ({0}); see the log for details.</value>
+    <comment>{0} = exceptionType</comment>
+  </data>
+</root>

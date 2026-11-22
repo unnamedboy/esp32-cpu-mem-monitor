@@ -1,0 +1,582 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" msdata:Ordinal="1" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Common_ProductName" xml:space="preserve">
+    <value>Resource Monitor Daemon</value>
+  </data>
+  <data name="Common_Save" xml:space="preserve">
+    <value>保存</value>
+  </data>
+  <data name="Common_Cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
+  <data name="Common_Close" xml:space="preserve">
+    <value>关闭</value>
+  </data>
+  <data name="Common_None" xml:space="preserve">
+    <value>（无）</value>
+  </data>
+  <data name="Common_FieldLabel" xml:space="preserve">
+    <value>{0}：</value>
+  </data>
+  <data name="Common_EnvFieldLabel" xml:space="preserve">
+    <value>{0} (env)：</value>
+  </data>
+  <data name="Common_SavedTo" xml:space="preserve">
+    <value>保存到：{0}</value>
+  </data>
+  <data name="Common_EnvironmentFieldsNote" xml:space="preserve">
+    <value>标记 (env) 的字段由 RESMON_ 环境变量决定，只读且不会保存：{0}</value>
+  </data>
+  <data name="Common_InvalidSettingsCaption" xml:space="preserve">
+    <value>设置无效</value>
+  </data>
+  <data name="Common_SaveFailed" xml:space="preserve">
+    <value>无法保存设置：
+{0}</value>
+  </data>
+  <data name="Common_StartupFailed" xml:space="preserve">
+    <value>Resource Monitor Daemon 启动失败：
+{0}
+
+日志文件：{1}</value>
+  </data>
+  <data name="Tray_Pause" xml:space="preserve">
+    <value>⏸ 暂停发送</value>
+  </data>
+  <data name="Tray_Resume" xml:space="preserve">
+    <value>▶ 恢复发送</value>
+  </data>
+  <data name="Tray_Settings" xml:space="preserve">
+    <value>⚙ 设置…</value>
+  </data>
+  <data name="Tray_PairDevice" xml:space="preserve">
+    <value>配对设备…</value>
+  </data>
+  <data name="Tray_ViewLog" xml:space="preserve">
+    <value>查看日志</value>
+  </data>
+  <data name="Tray_Observability" xml:space="preserve">
+    <value>可观测性…</value>
+  </data>
+  <data name="Tray_Exit" xml:space="preserve">
+    <value>退出</value>
+  </data>
+  <data name="Tray_PausedTitle" xml:space="preserve">
+    <value>已暂停</value>
+  </data>
+  <data name="Tray_PausedText" xml:space="preserve">
+    <value>监控数据已暂停发送。</value>
+  </data>
+  <data name="Tray_ResumedTitle" xml:space="preserve">
+    <value>已恢复</value>
+  </data>
+  <data name="Tray_ResumedText" xml:space="preserve">
+    <value>监控数据已恢复发送。</value>
+  </data>
+  <data name="Tray_SettingsSavedTitle" xml:space="preserve">
+    <value>设置已保存</value>
+  </data>
+  <data name="Tray_ObservabilitySavedTitle" xml:space="preserve">
+    <value>可观测性设置已保存</value>
+  </data>
+  <data name="Tray_AppliedWithoutRestart" xml:space="preserve">
+    <value>新设置已生效，无需重启。</value>
+  </data>
+  <data name="Tray_AppliedEnvironmentOverride" xml:space="preserve">
+    <value>已应用；以下字段仍由环境变量决定：{0}</value>
+  </data>
+  <data name="Tray_NoLogYet" xml:space="preserve">
+    <value>暂无日志记录。</value>
+  </data>
+  <data name="Tray_MqttFailedTitle" xml:space="preserve">
+    <value>MQTT 连接失败</value>
+  </data>
+  <data name="Tray_MqttFailedText" xml:space="preserve">
+    <value>无法连接 ESP32 的 MQTT 服务（{0}）。
+请确认 ESP32 已通电，并与本机处于同一 Wi-Fi。正在后台重试。</value>
+  </data>
+  <data name="Tray_MqttEndpointWithFallback" xml:space="preserve">
+    <value>{0}:{1}，备用地址 {2}</value>
+  </data>
+  <data name="Tray_MqttReconnectedTitle" xml:space="preserve">
+    <value>MQTT 已重新连接</value>
+  </data>
+  <data name="Tray_MqttReconnectedText" xml:space="preserve">
+    <value>已连接 ESP32 的 MQTT 服务 {0}:{1}。</value>
+  </data>
+  <data name="Tray_MqttReconnectedViaFallback" xml:space="preserve">
+    <value>已通过备用地址连接 ESP32 的 MQTT 服务 {0}:{1}（替代 {2}）。</value>
+  </data>
+  <data name="Settings_WindowTitle" xml:space="preserve">
+    <value>设置 - Resource Monitor</value>
+  </data>
+  <data name="Settings_Host" xml:space="preserve">
+    <value>主机</value>
+  </data>
+  <data name="Settings_Port" xml:space="preserve">
+    <value>端口</value>
+  </data>
+  <data name="Settings_CpuTopic" xml:space="preserve">
+    <value>CPU 主题</value>
+  </data>
+  <data name="Settings_MemTopic" xml:space="preserve">
+    <value>内存主题</value>
+  </data>
+  <data name="Settings_SampleInterval" xml:space="preserve">
+    <value>采样间隔（毫秒）</value>
+  </data>
+  <data name="Settings_FallbackAddress" xml:space="preserve">
+    <value>备用地址</value>
+  </data>
+  <data name="Settings_Language" xml:space="preserve">
+    <value>语言</value>
+  </data>
+  <data name="Settings_LanguageAutomatic" xml:space="preserve">
+    <value>自动（跟随系统）</value>
+  </data>
+  <data name="Settings_LanguageEnglish" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="Settings_LanguageChineseSimplified" xml:space="preserve">
+    <value>简体中文</value>
+  </data>
+  <data name="Settings_LanguageNote" xml:space="preserve">
+    <value>更改语言后，托盘菜单立即切换，之后打开的窗口使用新语言。</value>
+  </data>
+  <data name="Settings_ErrorHostEmpty" xml:space="preserve">
+    <value>主机不能为空。</value>
+  </data>
+  <data name="Settings_ErrorHostInvalid" xml:space="preserve">
+    <value>主机“{0}”不是有效的主机名或 IP 地址。</value>
+  </data>
+  <data name="Settings_ErrorFallbackInvalid" xml:space="preserve">
+    <value>备用地址（FallbackAddress）“{0}”不是点分十进制的 IPv4 地址。</value>
+  </data>
+  <data name="Settings_ErrorPortRange" xml:space="preserve">
+    <value>端口 {0} 超出范围 1..65535。</value>
+  </data>
+  <data name="Settings_ErrorTopicEmpty" xml:space="preserve">
+    <value>{0} 不能为空。</value>
+  </data>
+  <data name="Settings_ErrorTopicTooLong" xml:space="preserve">
+    <value>{0} 超过 {1} 个字符。</value>
+  </data>
+  <data name="Settings_ErrorTopicWildcard" xml:space="preserve">
+    <value>{0}“{1}”不能包含 MQTT 通配符“#”或“+”。</value>
+  </data>
+  <data name="Settings_ErrorTopicWhitespace" xml:space="preserve">
+    <value>{0} 不能包含控制字符或首尾空格。</value>
+  </data>
+  <data name="Settings_ErrorRange" xml:space="preserve">
+    <value>{0} 的值 {1} 超出范围 {2}..{3}。</value>
+  </data>
+  <data name="Settings_ErrorTopicsEqual" xml:space="preserve">
+    <value>CpuTopic 和 MemTopic 不能相同。</value>
+  </data>
+  <data name="Settings_ErrorStatusTopicCollides" xml:space="preserve">
+    <value>StatusTopic 必须与 CpuTopic 和 MemTopic 不同。</value>
+  </data>
+  <data name="Settings_ErrorBackoffOrder" xml:space="preserve">
+    <value>ReconnectMaxBackoffMs 不能小于 ReconnectInitialBackoffMs。</value>
+  </data>
+  <data name="Observability_WindowTitle" xml:space="preserve">
+    <value>可观测性 - Resource Monitor</value>
+  </data>
+  <data name="Observability_MessageBoxCaption" xml:space="preserve">
+    <value>可观测性</value>
+  </data>
+  <data name="Observability_EnabledCheckBox" xml:space="preserve">
+    <value>发送到 Grafana Loki</value>
+  </data>
+  <data name="Observability_TenantPlaceholder" xml:space="preserve">
+    <value>（可选，X-Scope-OrgID）</value>
+  </data>
+  <data name="Observability_HostLabelCheckBox" xml:space="preserve">
+    <value>添加 host=&lt;计算机名&gt; 标签</value>
+  </data>
+  <data name="Observability_Enabled" xml:space="preserve">
+    <value>启用</value>
+  </data>
+  <data name="Observability_Url" xml:space="preserve">
+    <value>地址</value>
+  </data>
+  <data name="Observability_AuthMode" xml:space="preserve">
+    <value>认证方式</value>
+  </data>
+  <data name="Observability_Username" xml:space="preserve">
+    <value>用户名</value>
+  </data>
+  <data name="Observability_Token" xml:space="preserve">
+    <value>令牌</value>
+  </data>
+  <data name="Observability_Tenant" xml:space="preserve">
+    <value>租户</value>
+  </data>
+  <data name="Observability_HostLabel" xml:space="preserve">
+    <value>主机标签</value>
+  </data>
+  <data name="Observability_MetricsInterval" xml:space="preserve">
+    <value>指标间隔（秒，0 = 关闭）</value>
+  </data>
+  <data name="Observability_TokenFromEnvironment" xml:space="preserve">
+    <value>(env)</value>
+  </data>
+  <data name="Observability_TokenSaved" xml:space="preserve">
+    <value>（已保存）</value>
+  </data>
+  <data name="Observability_TokenNotSet" xml:space="preserve">
+    <value>（未设置）</value>
+  </data>
+  <data name="Observability_TokenWillBeCleared" xml:space="preserve">
+    <value>（保存时清除）</value>
+  </data>
+  <data name="Observability_ClearToken" xml:space="preserve">
+    <value>清除</value>
+  </data>
+  <data name="Observability_TokenNote" xml:space="preserve">
+    <value>令牌只以 DPAPI 加密形式保存（仅当前 Windows 用户可解密），不会写入日志；留空则保留已保存的令牌。</value>
+  </data>
+  <data name="Observability_Test" xml:space="preserve">
+    <value>测试连接</value>
+  </data>
+  <data name="Observability_Testing" xml:space="preserve">
+    <value>测试中…</value>
+  </data>
+  <data name="Observability_TestCancelled" xml:space="preserve">
+    <value>已取消或超时</value>
+  </data>
+  <data name="Observability_TestNotSent" xml:space="preserve">
+    <value>未发送</value>
+  </data>
+  <data name="Observability_TestSucceeded" xml:space="preserve">
+    <value>成功：{0}</value>
+  </data>
+  <data name="Observability_TestFailed" xml:space="preserve">
+    <value>失败：{0}</value>
+  </data>
+  <data name="Observability_RequestTimedOut" xml:space="preserve">
+    <value>{0} 秒后超时</value>
+  </data>
+  <data name="Observability_InsecureSaveQuestion" xml:space="preserve">
+    <value>凭据将通过未加密的 HTTP 发送。仍要保存吗？</value>
+  </data>
+  <data name="Observability_InsecureTestQuestion" xml:space="preserve">
+    <value>测试会通过未加密的 HTTP 发送令牌。要继续吗？</value>
+  </data>
+  <data name="Observability_ErrorUrlEmpty" xml:space="preserve">
+    <value>地址不能为空。</value>
+  </data>
+  <data name="Observability_ErrorUrlTooLong" xml:space="preserve">
+    <value>地址超过 {0} 个字符。</value>
+  </data>
+  <data name="Observability_ErrorUrlNotHttp" xml:space="preserve">
+    <value>地址必须是以 http:// 或 https:// 开头的完整 URL。</value>
+  </data>
+  <data name="Observability_ErrorUrlUserInfo" xml:space="preserve">
+    <value>地址中不能包含用户名或密码；请改用认证方式、用户名和令牌。</value>
+  </data>
+  <data name="Observability_ErrorUrlFragment" xml:space="preserve">
+    <value>地址中不能包含片段（#...）。</value>
+  </data>
+  <data name="Observability_ErrorUsername" xml:space="preserve">
+    <value>用户名最多 {0} 个字符，且不能包含“:”、控制字符或首尾空格。</value>
+  </data>
+  <data name="Observability_ErrorToken" xml:space="preserve">
+    <value>令牌只能包含不含空格的可打印 ASCII 字符（最多 {0} 个字符）。</value>
+  </data>
+  <data name="Observability_ErrorTenantId" xml:space="preserve">
+    <value>租户 ID 只能包含字母、数字和 ! - _ . * ' ( )（最多 {0} 个字符）。</value>
+  </data>
+  <data name="Observability_ErrorAuthMode" xml:space="preserve">
+    <value>认证方式必须是 None、Basic 或 Bearer。</value>
+  </data>
+  <data name="Observability_ErrorBasicNeedsUsername" xml:space="preserve">
+    <value>认证方式为 Basic 时需要填写用户名。</value>
+  </data>
+  <data name="Pairing_ReprovisionInstruction" xml:space="preserve">
+    <value>按住设备上的 BOOT 键 5–15 秒后松开</value>
+  </data>
+  <data name="Pairing_FirstRunBalloonText" xml:space="preserve">
+    <value>无法连接设备。未找到设备，点击进行配对。
+也可以右键托盘图标 → 配对设备。</value>
+  </data>
+  <data name="Pairing_WindowTitle" xml:space="preserve">
+    <value>配对设备 - Resource Monitor</value>
+  </data>
+  <data name="Pairing_Intro" xml:space="preserve">
+    <value>通过蓝牙为设备配置 Wi-Fi。设备需处于配对模式（首次启动，或{0}）。</value>
+  </data>
+  <data name="Pairing_PairButton" xml:space="preserve">
+    <value>开始配对</value>
+  </data>
+  <data name="Pairing_DeviceGroup" xml:space="preserve">
+    <value>1. 选择设备</value>
+  </data>
+  <data name="Pairing_DeviceColumn" xml:space="preserve">
+    <value>设备</value>
+  </data>
+  <data name="Pairing_SignalColumn" xml:space="preserve">
+    <value>信号</value>
+  </data>
+  <data name="Pairing_RescanButton" xml:space="preserve">
+    <value>重新扫描</value>
+  </data>
+  <data name="Pairing_Scanning" xml:space="preserve">
+    <value>正在扫描蓝牙设备…</value>
+  </data>
+  <data name="Pairing_CodeGroup" xml:space="preserve">
+    <value>2. 配对码</value>
+  </data>
+  <data name="Pairing_SelectDeviceFirst" xml:space="preserve">
+    <value>请先选择设备。</value>
+  </data>
+  <data name="Pairing_CodeReadingUsb" xml:space="preserve">
+    <value>正在通过 USB 查找配对码…</value>
+  </data>
+  <data name="Pairing_CodeReadOverUsb" xml:space="preserve">
+    <value>已通过 USB 自动读取配对码。</value>
+  </data>
+  <data name="Pairing_CodeNotFoundOverUsb" xml:space="preserve">
+    <value>未能通过 USB 读取，请手动输入。</value>
+  </data>
+  <data name="Pairing_CodeUsbQueryStopped" xml:space="preserve">
+    <value>未通过 USB 读取配对码。</value>
+  </data>
+  <data name="Pairing_CodeEnterManually" xml:space="preserve">
+    <value>手动输入</value>
+  </data>
+  <data name="Pairing_CodeUseUsb" xml:space="preserve">
+    <value>使用 USB 读取的配对码</value>
+  </data>
+  <data name="Pairing_CodeHint" xml:space="preserve">
+    <value>配对码共 8 位，在设备的 USB 串口日志中（115200 波特）：Provisioning: name=PROV_RESMON_… pop=…</value>
+  </data>
+  <data name="Pairing_WifiGroup" xml:space="preserve">
+    <value>3. Wi-Fi</value>
+  </data>
+  <data name="Pairing_SsidLabel" xml:space="preserve">
+    <value>网络名称 (SSID)：</value>
+  </data>
+  <data name="Pairing_PasswordLabel" xml:space="preserve">
+    <value>密码：</value>
+  </data>
+  <data name="Pairing_ShowPassword" xml:space="preserve">
+    <value>显示</value>
+  </data>
+  <data name="Pairing_WifiNote" xml:space="preserve">
+    <value>ESP32 仅支持 2.4 GHz Wi-Fi。密码只用于本次配对，不会保存。</value>
+  </data>
+  <data name="Pairing_UseThisPcWifi" xml:space="preserve">
+    <value>使用本机当前 Wi-Fi</value>
+  </data>
+  <data name="Pairing_ReadingThisPcWifi" xml:space="preserve">
+    <value>正在读取本机 Wi-Fi…</value>
+  </data>
+  <data name="Pairing_ThisPcWifiUnavailable" xml:space="preserve">
+    <value>无法读取本机当前 Wi-Fi（未连接，或 Windows 未授予位置权限），请手动输入。</value>
+  </data>
+  <data name="Pairing_SsidPrefilled" xml:space="preserve">
+    <value>已填入此电脑当前连接的 Wi-Fi。</value>
+  </data>
+  <data name="Pairing_SsidPrefilledNot24GHz" xml:space="preserve">
+    <value>已填入此电脑当前的 Wi-Fi；此电脑通过 5/6 GHz 连接。ESP32 只能连接 2.4 GHz，请确认路由器同时提供 2.4 GHz。</value>
+  </data>
+  <data name="Pairing_ProgressGroup" xml:space="preserve">
+    <value>4. 配对</value>
+  </data>
+  <data name="Pairing_InProgress" xml:space="preserve">
+    <value>正在配对…</value>
+  </data>
+  <data name="Pairing_StepConnect" xml:space="preserve">
+    <value>连接设备</value>
+  </data>
+  <data name="Pairing_StepSecure" xml:space="preserve">
+    <value>建立加密会话</value>
+  </data>
+  <data name="Pairing_StepSend" xml:space="preserve">
+    <value>发送 Wi-Fi 设置</value>
+  </data>
+  <data name="Pairing_StepWifi" xml:space="preserve">
+    <value>等待设备连接 Wi-Fi</value>
+  </data>
+  <data name="Pairing_StepSave" xml:space="preserve">
+    <value>保存设备地址</value>
+  </data>
+  <data name="Pairing_StepDaemon" xml:space="preserve">
+    <value>守护进程连接设备</value>
+  </data>
+  <data name="Pairing_StepCheckNetwork" xml:space="preserve">
+    <value>检查网络连接</value>
+  </data>
+  <data name="Pairing_StepNoAddress" xml:space="preserve">
+    <value>保存设备地址：设备未报告 IP，未保存</value>
+  </data>
+  <data name="Pairing_StepSaved" xml:space="preserve">
+    <value>已保存设备地址 {0}</value>
+  </data>
+  <data name="Pairing_SaveFailed" xml:space="preserve">
+    <value>无法保存设备地址：{0}</value>
+  </data>
+  <data name="Pairing_FallbackOverriddenByEnvironment" xml:space="preserve">
+    <value>注意：FallbackAddress 由环境变量 RESMON_Device__FallbackAddress 决定，保存的值不会生效。</value>
+  </data>
+  <data name="Pairing_Succeeded" xml:space="preserve">
+    <value>配对成功：设备已连接 Wi-Fi，IP 地址 {0}（已保存为备用地址）。</value>
+  </data>
+  <data name="Pairing_SucceededNoAddress" xml:space="preserve">
+    <value>配对成功：设备已连接 Wi-Fi，但没有报告 IP 地址，将通过 {0} 连接（未保存备用地址）。</value>
+  </data>
+  <data name="Pairing_AlreadyConnected" xml:space="preserve">
+    <value>设备已在之前的尝试中连接 Wi-Fi，本次没有重新发送设置。</value>
+  </data>
+  <data name="Pairing_WrongPassword" xml:space="preserve">
+    <value>Wi-Fi 密码错误，请重新输入密码后重试。</value>
+  </data>
+  <data name="Pairing_NetworkNotFound" xml:space="preserve">
+    <value>找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）。请检查网络名称，并确认路由器开启了 2.4 GHz。</value>
+  </data>
+  <data name="Pairing_WifiFailed" xml:space="preserve">
+    <value>设备无法连接 Wi-Fi（原因 {0}）。请检查网络名称和密码后重试。</value>
+  </data>
+  <data name="Pairing_WifiTimeout" xml:space="preserve">
+    <value>设备在 {0} 秒内没有报告 Wi-Fi 连接结果。请检查网络名称、密码，并确认是 2.4 GHz 网络，然后重试。</value>
+  </data>
+  <data name="Pairing_ConnectionLost" xml:space="preserve">
+    <value>与设备的蓝牙连接已断开，正在检查设备是否已加入网络（最多 {0} 秒）…</value>
+  </data>
+  <data name="Pairing_Failed" xml:space="preserve">
+    <value>配对失败，详情见日志。</value>
+  </data>
+  <data name="Pairing_BrokerReachable" xml:space="preserve">
+    <value>配对成功：设备已加入网络，可通过 {0}:{1} 连接（设备没有报告 IP，未保存备用地址）。</value>
+  </data>
+  <data name="Pairing_BrokerUnreachable" xml:space="preserve">
+    <value>蓝牙连接已断开，且 {2} 秒内无法连接 {0}:{1}。设备可能没有加入 Wi-Fi：请重新扫描后重试；如果设备不再出现，请重启设备或{3}。</value>
+  </data>
+  <data name="Pairing_Cancelled" xml:space="preserve">
+    <value>已取消。</value>
+  </data>
+  <data name="Pairing_ScanNone" xml:space="preserve">
+    <value>未找到处于配对模式的设备。请确认设备已通电并处于配对模式（首次启动，或{0}），然后点击“重新扫描”。</value>
+  </data>
+  <data name="Pairing_ScanOne" xml:space="preserve">
+    <value>找到 1 台设备，已自动选择。</value>
+  </data>
+  <data name="Pairing_ScanMany" xml:space="preserve">
+    <value>找到 {0} 台设备，请选择要配对的设备。</value>
+  </data>
+  <data name="Pairing_ScanBluetoothOff" xml:space="preserve">
+    <value>蓝牙已关闭。请在 Windows 设置中打开蓝牙，然后点击“重新扫描”。</value>
+  </data>
+  <data name="Pairing_ScanBluetoothUnavailable" xml:space="preserve">
+    <value>此电脑没有可用的低功耗蓝牙 (BLE)，无法扫描设备。</value>
+  </data>
+  <data name="Pairing_ScanFailedRescan" xml:space="preserve">
+    <value>蓝牙扫描失败，请点击“重新扫描”。</value>
+  </data>
+  <data name="Pairing_ScanFailed" xml:space="preserve">
+    <value>蓝牙扫描失败，详情见日志。</value>
+  </data>
+  <data name="Pairing_DaemonConnected" xml:space="preserve">
+    <value>已连接，正在发送数据</value>
+  </data>
+  <data name="Pairing_DaemonPaused" xml:space="preserve">
+    <value>发送已暂停，恢复发送后会自动连接设备。</value>
+  </data>
+  <data name="Pairing_DaemonRetrying" xml:space="preserve">
+    <value>守护进程仍在后台重试连接 {0}。</value>
+  </data>
+  <data name="Provisioning_CodeRejected" xml:space="preserve">
+    <value>配对码错误：设备拒绝了该配对码。请核对配对码（串口日志 "Provisioning: name=... pop=..."）后重试。</value>
+  </data>
+  <data name="Provisioning_CodeNotVerified" xml:space="preserve">
+    <value>配对码校验失败：设备无法证明它使用相同的配对码。请核对配对码（串口日志 "Provisioning: name=... pop=..."）后重试。</value>
+  </data>
+  <data name="Provisioning_RetryRejectedAfterFailure" xml:space="preserve">
+    <value>上一次尝试失败后，设备不再接受新的尝试。请重启设备或{0}，然后重新扫描并重试。</value>
+  </data>
+  <data name="Provisioning_RetryRejected" xml:space="preserve">
+    <value>设备无法接受 Wi-Fi 设置。请重启设备或{0}，然后重新扫描并重试。</value>
+  </data>
+  <data name="Provisioning_BluetoothOff" xml:space="preserve">
+    <value>蓝牙已关闭，请在 Windows 设置中打开蓝牙后重试。</value>
+  </data>
+  <data name="Provisioning_BluetoothUnavailable" xml:space="preserve">
+    <value>此电脑没有可用的低功耗蓝牙 (BLE)。</value>
+  </data>
+  <data name="Provisioning_DeviceNotFound" xml:space="preserve">
+    <value>找不到该设备，它可能已退出配对模式。请重新扫描。</value>
+  </data>
+  <data name="Provisioning_DeviceDisconnected" xml:space="preserve">
+    <value>设备断开了蓝牙连接。请靠近设备，重新扫描后重试。</value>
+  </data>
+  <data name="Provisioning_Timeout" xml:space="preserve">
+    <value>设备响应超时。请靠近设备，重新扫描后重试。</value>
+  </data>
+  <data name="Provisioning_ServiceNotFound" xml:space="preserve">
+    <value>该设备没有提供配对服务（可能不在配对模式，或固件不兼容）。如需进入配对模式，请{0}。</value>
+  </data>
+  <data name="Provisioning_GattError" xml:space="preserve">
+    <value>蓝牙通信错误，请重新扫描后重试。</value>
+  </data>
+  <data name="Provisioning_TransportFailed" xml:space="preserve">
+    <value>蓝牙通信失败，请重新扫描后重试。</value>
+  </data>
+  <data name="Provisioning_UnexpectedAnswer" xml:space="preserve">
+    <value>设备返回了意外的应答（详情见日志），请重新扫描后重试。</value>
+  </data>
+  <data name="Provisioning_SsidLength" xml:space="preserve">
+    <value>Wi-Fi 名称需为 1–{0} 字节。</value>
+  </data>
+  <data name="Provisioning_PasswordLength" xml:space="preserve">
+    <value>Wi-Fi 密码最多 {0} 字节。</value>
+  </data>
+  <data name="Provisioning_PairingCodeFormat" xml:space="preserve">
+    <value>配对码为 8 位（字母和数字 2–9，不含 0、O、1、I）。</value>
+  </data>
+  <data name="Provisioning_InvalidInput" xml:space="preserve">
+    <value>输入无效。</value>
+  </data>
+  <data name="Provisioning_FailedWithType" xml:space="preserve">
+    <value>配对失败（{0}），详情见日志。</value>
+  </data>
+</root>
