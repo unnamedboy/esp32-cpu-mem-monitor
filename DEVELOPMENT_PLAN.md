@@ -12,8 +12,9 @@ Status as of 2026-11-22:
 
 - Phase 1: Complete
 - Phase 2: Complete
-- Phase 3: In progress (settings module done; first-run wizard pending)
-- Phase 4: Planned
+- Phase 3: Complete (settings module and pairing wizard)
+- Phase 4: In progress (Windows client side done but not yet verified on
+  hardware; firmware provisioning on the firmware branch)
 - Phase 5: Planned
 
 Completed implementation summary:
@@ -33,6 +34,10 @@ Completed implementation summary:
   `%LocalAppData%\ResourceMonitorDaemon\settings.json` < `RESMON_*`
   environment variables, applies changes live, and reconnects in the
   background without blocking sampling.
+- The tray's "配对设备 (Pair device)…" wizard provisions Wi-Fi over BLE
+  (Security1 with an 8-character pairing code) and saves the reported IPv4
+  address as `FallbackAddress`. It does not store the Wi-Fi password. It has
+  not been tested against a physical ESP32 yet.
 
 See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
 See [HARDWARE.md](HARDWARE.md) for the current hardware design and open
@@ -79,9 +84,9 @@ reproducible configuration path for development.
 
 ## Phase 3: Windows Configuration Module
 
-Status: In progress — steps 1–3 and the tray settings entry are complete; the
-first-run wizard (step 4, part 1) and provisioning steps 5–6 are pending in a
-later branch.
+Status: Complete. Steps 1–6 are implemented. The pairing wizard (step 4) has
+been tested with unit tests and a start-up smoke test only; it has not run
+against a physical ESP32 yet (see Phase 4).
 
 ### Goal
 
@@ -107,12 +112,15 @@ setup wizard without making the real-time sampling path more complex.
    (`RESMON_` prefix, e.g. `RESMON_Device__Host`).
 3. Done: Replace hard-coded daemon constants with `DeviceSettings`
    (validated, sanitized to defaults, applied live via `IOptionsMonitor`).
-4. Partly done: tray-menu entry "⚙ 设置 (Settings)…" edits and saves settings
-   through `UserSettingsStore`. Pending: first-run wizard, which should write
+4. Done: tray-menu entry "⚙ 设置 (Settings)…" edits and saves settings
+   through `UserSettingsStore`. Done: the "配对设备 (Pair device)…" wizard
+   (`Pairing/PairingWizardForm`), opened from the tray or once from a
+   first-run "click to pair" balloon. After a successful pairing it writes only
    `FallbackAddress` with `ISettingsStore.Update(p => p.FallbackAddress = ip)`.
-5. Keep Wi-Fi passwords in memory only while a provisioning operation is in
-   progress.
-6. Do not persist Wi-Fi passwords on the Windows PC by default.
+5. Done: the Wi-Fi password exists only in the wizard's password box and the
+   `ProvisionAsync` call. The box is cleared after every attempt, and the
+   password is never logged.
+6. Done: Wi-Fi passwords are not stored on the Windows PC (no DPAPI recall).
 
 ### Optional Windows Password Recall
 
@@ -123,7 +131,13 @@ opt-in feature, not a prerequisite for the wizard.
 
 ## Phase 4: ESP32 Provisioning and Secure Storage
 
-Status: Planned
+Status: In progress. The Windows client side is done but **unverified on
+hardware**. The BLE provisioning client (`daemon/ResourceMonitorDaemon/Provisioning`)
+and the pairing wizard implement steps 4–6 and 8 of the desired user flow, per
+the pairing contract (`PROVISIONING.md` on the firmware branch). Nothing has
+been run against a physical ESP32 yet. Steps 1–3 and 7 belong to the firmware.
+The optional fields in step 5 (device name, MQTT port and topics) are not
+offered: the BLE provisioning contract carries only the SSID and password.
 
 ### Goal
 
@@ -137,17 +151,22 @@ credentials at rest and in transit.
 3. The ESP32 enters an explicit provisioning mode and advertises itself as a
    setup target.
 4. The Windows client discovers the setup target and opens a setup wizard.
+   (Client: done. Tray menu or one-time first-run balloon; BLE scan for
+   `PROV_RESMON_*`.)
 5. The wizard asks for:
    - Wi-Fi SSID;
    - Wi-Fi password;
    - optional device name, defaulting to `resmon`;
    - optional MQTT port and topics, using current defaults.
+   (Client: SSID and password done, plus the pairing code, read over USB or
+   typed. The optional fields are not part of the BLE contract.)
 6. The client sends the configuration to the ESP32 over an authenticated and
-   encrypted provisioning channel.
+   encrypted provisioning channel. (Client: done; Security1 + pairing code.)
 7. The ESP32 stores the credential, exits provisioning mode, joins Wi-Fi, starts
    mDNS, and starts the MQTT broker.
 8. The client forgets the Wi-Fi password by default and switches into normal
-   metric publishing mode.
+   metric publishing mode. (Client: done. It saves the reported IPv4 as
+   `FallbackAddress`, reconnects live and shows "已连接，正在发送数据".)
 
 ### Client-to-ESP32 Configuration Payload
 

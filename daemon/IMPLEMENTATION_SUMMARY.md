@@ -50,7 +50,7 @@ Sources, lowest to highest priority:
 
 1. built-in defaults (`DeviceSettings`);
 2. `appsettings.json` next to the executable (copied to the build output, non-secret);
-3. user settings `%LocalAppData%\ResourceMonitorDaemon\settings.json` (written by the tray dialog and the future pairing wizard; contains **only the fields explicitly set there**, so values not set keep coming from `appsettings.json`/defaults);
+3. user settings `%LocalAppData%\ResourceMonitorDaemon\settings.json` (written by the tray dialog and the pairing wizard; contains **only the fields explicitly set there**, so values not set keep coming from `appsettings.json`/defaults);
 4. environment variables prefixed `RESMON_`, e.g. `RESMON_Device__Host=192.168.1.50`.
 
 Invalid values never crash the daemon: `DeviceSettingsLoader` parses
@@ -149,6 +149,10 @@ schedule, and never blocks the sampling loop:
   (e.g. FallbackAddress) untouched; the change is
   applied live, and the confirmation balloon names any field still overridden by
   an environment variable.
+- "配对设备 (Pair device)…" opens the pairing wizard (one instance at a time; see
+  "Pairing wizard"). On the first connection failure of an unconfigured PC, the
+  failure balloon is replaced once by "未找到设备，点击进行配对 (No device found — click to
+  pair)", and clicking it opens the wizard.
 - "查看日志 (Log)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
 - Exit hides the icon and disables the menu first (re-entry guarded), then stops
   the hosted service within 3 s and disposes the tray icon.
@@ -171,6 +175,8 @@ schedule, and never blocks the sampling loop:
 - `DaemonLogger.cs`: rotating file logger provider.
 - `SettingsForm.cs`, `TrayContext.cs`: Windows tray menu and settings dialog.
 - `Provisioning/`: BLE Wi-Fi provisioning client library (see "Provisioning client" below).
+- `Pairing/`: pairing wizard form, `PairingOutcomePresenter` (pure decisions), `BrokerProbe`,
+  `CurrentWifiNetwork` (SSID prefill) and `FirstRunPairingPrompt` (see "Pairing wizard").
 - `ResourceMonitorDaemon.Tests`: zero-dependency test runner.
 
 The daemon targets `net9.0-windows10.0.19041.0` (Windows 10 2004 or later)
@@ -181,8 +187,8 @@ because the BLE client uses the WinRT `Windows.Devices.Bluetooth` APIs.
 Namespace `ResourceMonitorDaemon.Provisioning`. It is the Windows side of the
 pairing contract (`PROVISIONING.md` on the firmware branch): Arduino-ESP32
 `WiFiProv` BLE provisioning with protocomm **Security1** and a proof of
-possession (the 8-character pairing code). It is a library only; there is no
-wizard UI yet and nothing in `Program.cs` uses it.
+possession (the 8-character pairing code). The pairing wizard (see "Pairing
+wizard") is its only user.
 
 Wire formats and behaviour were taken from ESP-IDF **v4.4.7**, the IDF bundled
 with Arduino-ESP32 2.0.17 (`framework-arduinoespressif32` 3.20017):
@@ -333,6 +339,60 @@ a physical ESP32 yet. In particular:
   `wifi_prov_mgr_disable_auto_stop`. The fake device only simulates a link
   drop right after the Connected read, or while still connecting.
 
+## Pairing wizard
+
+Namespace `ResourceMonitorDaemon.Pairing`. A WinForms dialog
+(`PairingWizardForm`), "配对设备 (Pair device)", on top of `ProvisioningService`.
+It has two columns so it still fits a 1080p screen at 150 % scaling. All work
+runs on the UI thread with async/await, so the UI never blocks.
+
+| Section | Behaviour |
+| --- | --- |
+| 1. Device | Starts a 5 s BLE scan when the wizard opens and lists `PROV_RESMON_*` devices live, with signal strength. A Rescan button repeats it. If exactly one device is found, it is selected. Bluetooth off or missing gives a clear message (`ProvisioningTransportException.Error`). |
+| 2. Pairing code | Selecting a device starts `TryReadPopFromUsbAsync(name)` in the background. If found, the code is filled in masked: "已通过 USB 自动读取配对码 (read automatically over USB)". The user can switch to "手动输入 (Enter manually)" and back. Typed codes are normalized with `PairingCode.TryNormalize`. A hint names the serial log line `Provisioning: name=... pop=...` at 115200 baud. |
+| 3. Wi-Fi | SSID and password, with a masked password box and a show/hide checkbox. A note says the ESP32 supports 2.4 GHz only. The SSID is prefilled when `netsh wlan show interfaces` reports exactly one connected network. This is best effort: nothing is installed, no admin is needed, and garbled or ambiguous output is ignored. A 5/6 GHz connection on the PC shows a 2.4 GHz warning. Input is validated with `PairingCode` and `WifiConfigClient.ValidateCredentials` before any Bluetooth traffic. |
+| 4. Pair | `ProvisionAsync` with step progress (connect, secure session, send settings, wait for Wi-Fi), followed by "save address" and "daemon connects". Cancel cancels the attempt. Closing the wizard cancels the scan, USB query, attempt and checks, and `ProvisionAsync` then disposes the BLE connection. |
+
+Results (`PairingOutcomePresenter`, pure and unit-tested):
+
+| Result | Message / action |
+| --- | --- |
+| `Connected(ip)` with a usable unicast IPv4 | Success. `ISettingsStore.Update(p => p.FallbackAddress = ip)` is called, and nothing else is changed. |
+| `Connected(null)`, or an unusable address (0.0.0.0, broadcast, loopback, multicast, 169.254/16) | Success, but nothing is saved; the daemon keeps using `Host` (resmon.local). |
+| `Failed(AuthError)` | "Wi-Fi 密码错误"; focus moves to the password box. |
+| `Failed(NetworkNotFound)` | "找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）"; focus moves to the SSID box. |
+| `Timeout` | No result within 30 s: check the SSID, password and 2.4 GHz support, then retry. A retry detects a device that joined Wi-Fi late. |
+| `ConnectionLost` | `BrokerProbe` tries for up to 15 s: the daemon's own connection, or a TCP connect to the configured `Host:Port`, about once per second. If that works, it is a success, with no address saved. Otherwise a failure with "rescan, or power-cycle / hold BOOT 5–15 s". |
+| `PairingCodeRejectedException` | "配对码错误"; focus moves to the code box. |
+| `ProvisioningRetryRejectedException` | Chinese restart/BOOT instruction plus the library message, which already contains `ReprovisionInstruction`. |
+| `ProvisioningTransportException` | Specific text per `Error` kind (Bluetooth off or unavailable, device gone, disconnected, timeout, not a provisioning device). |
+| `ArgumentException` | Field-specific invalid-input message; the parameter suffix is removed and values are never echoed. |
+| Anything else | Generic "see the log" message. The exception is logged as an error. |
+
+After a save, the configuration file watcher applies the new
+`FallbackAddress`, and `MqttConnection` reconnects (an endpoint change skips
+the backoff). The wizard polls the new read-only `MonitorService.IsConnected`
+for up to 45 s, after the new address has been applied, and then shows
+**"已连接，正在发送数据 (connected, publishing)"**. Otherwise it reports that sending
+is paused or that the daemon keeps retrying. If
+`RESMON_Device__FallbackAddress` overrides the saved value, the wizard says so.
+
+Password hygiene: the password is read from the box only for the
+`ProvisionAsync` call. The local reference is dropped and the box cleared after
+every attempt, on success, failure or cancel. On `AuthError` the focus returns
+to the empty box. The box is also cleared when the wizard closes. The password
+is never logged or persisted. The SSID and pairing code are not logged either:
+log lines name only the device, the result and the saved IPv4 address.
+
+First-run prompt (`FirstRunPairingPrompt`): the prompt is offered only when all
+of these hold: the notification is the MQTT connection-failure one, the
+prompt was never shown, the effective `FallbackAddress` is empty, and the
+daemon has not connected since it started. The tray then shows the "click to
+pair" balloon instead of the failure balloon and writes the marker file
+`%LocalAppData%\ResourceMonitorDaemon\pairing-prompted`, so the prompt
+appears once per user. Delete that file to see it again. No window opens on
+its own at login.
+
 ## Tests
 
 The C# test runner covers:
@@ -357,6 +417,12 @@ The C# test runner covers:
   gets the outage notification.
 - the provisioning client (`ProvisioningTests.cs` and
   `FakeProvisioningDevice.cs`; see "Provisioning client").
+- the pairing wizard's pure parts (`PairingTests.cs`): result and exception
+  messages, which addresses may be saved, input validation without echoing
+  values, scan texts, the first-run rule and marker file, the `netsh` SSID parser,
+  and `BrokerProbe` against a loopback listener and a closed port. The form itself
+  is not unit-tested. Its layout was checked by rendering it with `DrawToBitmap`
+  at 100 % and at a simulated 150 %.
 
 Run it with:
 
@@ -376,9 +442,16 @@ dotnet .tmpbuild\ResourceMonitorDaemon.Tests.dll
 
 ## Current Limitations
 
-- There is no first-run setup / pairing wizard yet; it will write `FallbackAddress`
-  through `ISettingsStore.Update`. The BLE provisioning client library exists, but
-  no UI uses it yet and it has not been tested against real hardware.
+- The pairing wizard and BLE provisioning client have **not been tested against
+  real hardware**. That includes the BLE scan and GATT, the USB code query, and the
+  timing of the `ConnectionLost` path.
+- The first-run balloon opens the wizard only while it is on screen. Windows does
+  not report clicks on notifications that have moved to the Action Center, so
+  use the tray menu then.
+- SSID prefill depends on `netsh` output. Newer Windows builds may require
+  location permission, and in that case the field is simply left empty.
+- The wizard does not set a device name or the MQTT port and topics. The BLE
+  contract only carries the SSID and password.
 - Comments in a hand-edited `settings.json` are not preserved when the file is
   saved from the dialog or wizard.
 - Wi-Fi credentials must not be stored in daemon settings, source code or logs.
