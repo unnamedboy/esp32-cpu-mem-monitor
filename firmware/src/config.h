@@ -19,7 +19,7 @@
 #endif
 
 // ================= 1. Build / Wi-Fi 配置 =================
-const char* FIRMWARE_BUILD_ID = "phase4-ble-prov";
+const char* FIRMWARE_BUILD_ID = "phase4-ble-prov-status";
 
 // Optional development fallback credentials (ignored firmware/src/secrets.h).
 // Used only when no BLE-provisioned credentials are stored and no
@@ -98,5 +98,17 @@ uint8_t PROV_BLE_SERVICE_UUID[16] = {
 const int MQTT_BROKER_PORT = 1883;
 const char* CPU_TOPIC = "resmon/cpu";
 const char* MEM_TOPIC = "resmon/mem";
+
+// Device status topic (COMMUNICATION.md "Device status"). The firmware
+// publishes a compact JSON health snapshot into its own broker: QoS 0, not
+// retained, every STATUS_INTERVAL_MS while Wi-Fi is connected (the first one
+// STATUS_INTERVAL_MS after the broker starts). Build with
+// -DENABLE_STATUS_TOPIC=0 to disable.
+#ifndef ENABLE_STATUS_TOPIC
+#define ENABLE_STATUS_TOPIC 1
+#endif
+const char* STATUS_TOPIC = "resmon/status";
+const uint32_t STATUS_INTERVAL_MS = 10000;
+const size_t STATUS_PAYLOAD_MAX = 256;  // max payload bytes (contract limit)
 
 #endif

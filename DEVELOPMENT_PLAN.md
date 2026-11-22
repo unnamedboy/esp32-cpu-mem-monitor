@@ -29,10 +29,13 @@ Completed implementation summary:
 - A top-level README documents the real project state and local setup flow.
 - C++ PlatformIO tests cover metric payload parsing and DAC value mapping,
   plus the provisioning boot decision, pairing code, serial PoP query
-  parsing, reconnect backoff, provisioning-start retry policy, and the BOOT
-  button hold-and-release window.
+  parsing, reconnect backoff, provisioning-start retry policy, the BOOT
+  button hold-and-release window, and the `resmon/status` payload.
 - Firmware Wi-Fi startup is non-blocking and BLE provisioning is implemented
   per [PROVISIONING.md](PROVISIONING.md) (hardware validation pending).
+- The firmware publishes a `resmon/status` device-health JSON snapshot every
+  10 s into its own broker (see [Observability](#observability); hardware
+  validation pending).
 - C# tests cover MQTT percentage payload formatting and clamping.
 
 See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
@@ -282,6 +285,25 @@ network gauge will require another DAC or a different multi-channel DAC.
 Choose that hardware only when the number and voltage requirements of future
 gauges are known and documented.
 
+## Observability
+
+Status: Firmware side implemented (2026-11-22); not yet validated on hardware
+
+- Firmware: `resmon/status` (QoS 0, not retained, every 10 s while Wi-Fi is
+  connected, the first one 10 s after the broker starts) carries schema version,
+  build id, uptime, free/minimum heap, RSSI, Wi-Fi and provisioning state and
+  DAC presence. Contract: [COMMUNICATION.md](COMMUNICATION.md). Formatting is
+  a pure, unit-tested header (`firmware/include/status_payload.h`); feature
+  flag `ENABLE_STATUS_TOPIC` in `firmware/src/config.h`.
+- Daemon: subscribe to `resmon/status`, treat a missing topic as normal (older
+  firmware), and optionally forward daemon logs, metrics and the device status
+  to Grafana Loki (separate daemon change).
+- Remaining: confirm on hardware that a subscribed client (e.g.
+  `mosquitto_sub -h resmon.local -t resmon/status -v`) receives one message
+  every 10 s and that the CPU/MEM display is unaffected. Also check that a
+  subscriber which stops reading (e.g. a suspended `mosquitto_sub`) is dropped
+  by keep-alive before it can stall `loop()`.
+
 ## Verification Checklist
 
 For every firmware change:
@@ -292,6 +314,8 @@ For every firmware change:
    MQTT state without exposing secrets.
 3. Test valid, invalid, stale, and reconnecting metric messages.
 4. Verify absent optional hardware fails safely.
+5. Verify `resmon/status` still arrives every 10 s and contains no SSID, IP,
+   MAC, PoP or password.
 
 For every daemon change:
 

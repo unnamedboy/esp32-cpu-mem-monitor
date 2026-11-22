@@ -27,6 +27,7 @@
 #include "pop_code.h"
 #include "provisioning_logic.h"
 #include "serial_command.h"
+#include "status_payload.h"
 
 #if !CONFIG_BLUEDROID_ENABLED
 #error "BLE provisioning needs the Bluedroid BLE stack (CONFIG_BLUEDROID_ENABLED)"
@@ -84,6 +85,11 @@ uint32_t nextReconnectAtMs = 0;
 uint32_t reconnectDelayMs = WIFI_RECONNECT_MIN_MS;
 uint32_t seenDisconnectCount = 0;
 uint32_t restartAtMs = 0;
+
+// ---- resmon/status publishing (owned by loop()) ----
+bool statusEverPublished = false;
+bool statusFormatErrorLogged = false;
+uint32_t lastStatusPublishMs = 0;
 
 // ---- Set from the Arduino network event task, consumed in loop() ----
 volatile bool evtProvStarted = false;
@@ -594,7 +600,7 @@ void consumeProvisioningEvents(uint32_t now) {
 // mDNS and the MQTT broker are started once, on the first connection. Both
 // keep working across Wi-Fi reconnects (the broker listens on INADDR_ANY and
 // the mDNS responder follows the STA interface state).
-void startNetworkServicesOnce() {
+void startNetworkServicesOnce(uint32_t now) {
     if (networkServicesStarted) {
         return;
     }
@@ -608,6 +614,10 @@ void startNetworkServicesOnce() {
     }
 
     mqtt.begin();
+    // First status STATUS_INTERVAL_MS after the broker starts: a publish in
+    // this loop pass could not reach any subscriber yet. Uses the loop()
+    // timestamp, not millis(), so serviceStatusTopic(now) sees no "future" time.
+    lastStatusPublishMs = now;
 
     printDebugLine("========== ESP32 CPU Monitor network ready ==========");
     printDebugLine("MQTT broker:");
@@ -615,6 +625,10 @@ void startNetworkServicesOnce() {
     printDebugFormatted("   - Port: %d", MQTT_BROKER_PORT);
     printDebugFormatted("   - CPU topic: %s", CPU_TOPIC);
     printDebugFormatted("   - MEM topic: %s", MEM_TOPIC);
+#if ENABLE_STATUS_TOPIC
+    printDebugFormatted("   - Status topic: %s (published every %u s)", STATUS_TOPIC,
+                        (unsigned)(STATUS_INTERVAL_MS / 1000UL));
+#endif
     printDebugLine("=====================================================");
 }
 
@@ -679,7 +693,7 @@ bool onWifiConnected(uint32_t now) {
     // SSID is printed once per connection for diagnosis; never the password.
     printDebugFormatted("Wi-Fi connected: ssid=%s ip=%s rssi=%d source=%s", ssid, ip, rssi,
                         credentialSourceName(credentialSource));
-    startNetworkServicesOnce();
+    startNetworkServicesOnce(now);
     return true;
 }
 
@@ -772,6 +786,73 @@ void serviceNetwork(uint32_t now) {
         case NetworkState::Starting:
         case NetworkState::Connected:
             break;
+    }
+}
+
+// ======================= Device status topic =======================
+
+// RSSI of the current AP, read from the driver (see readApInfo()).
+bool readStaRssi(int32_t* rssi) {
+    wifi_ap_record_t ap;
+    memset(&ap, 0, sizeof(ap));
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        return false;
+    }
+    *rssi = ap.rssi;
+    return true;
+}
+
+// Publishes resmon/status into the hosted broker (delivered to subscribed
+// clients only; QoS 0, not retained) every STATUS_INTERVAL_MS while Wi-Fi
+// is connected; the first one STATUS_INTERVAL_MS after the broker starts. No
+// serial output per publish; the periodic Status line reports the last
+// publish.
+void serviceStatusTopic(uint32_t now) {
+#if ENABLE_STATUS_TOPIC
+    if (!networkServicesStarted || networkState != NetworkState::Connected) {
+        return;
+    }
+    if (!isStatusPublishDue(now, lastStatusPublishMs, STATUS_INTERVAL_MS)) {
+        return;
+    }
+    lastStatusPublishMs = now;
+
+    StatusSnapshot snapshot;
+    snapshot.build = FIRMWARE_BUILD_ID;
+    snapshot.uptimeS = now / 1000UL;
+    snapshot.heapFree = ESP.getFreeHeap();
+    snapshot.heapMin = ESP.getMinFreeHeap();
+    snapshot.rssi = 0;
+    snapshot.hasRssi = readStaRssi(&snapshot.rssi);
+    snapshot.wifi = statusWifiFromNetwork(networkState);
+    snapshot.prov = statusProvFromNetwork(networkState, credentialSource);
+    snapshot.dacPresent = dacPresent;
+
+    char payload[STATUS_PAYLOAD_MAX + 1];
+    const size_t length = formatStatusPayload(payload, sizeof(payload), snapshot);
+    if (length == 0) {
+        if (!statusFormatErrorLogged) {
+            statusFormatErrorLogged = true;
+            printDebugFormatted("Status topic: ERROR payload does not fit %u bytes; %s not published",
+                                (unsigned)STATUS_PAYLOAD_MAX, STATUS_TOPIC);
+        }
+        return;
+    }
+    mqtt.publish(STATUS_TOPIC, (const void*)payload, length, (uint8_t)0, false);
+    statusEverPublished = true;
+#else
+    (void)now;
+#endif
+}
+
+// "off", "never" or "<seconds>s" (since the last status publish).
+void formatStatusPublishAge(char* out, size_t outSize, uint32_t now) {
+    if (ENABLE_STATUS_TOPIC == 0) {
+        snprintf(out, outSize, "off");
+    } else if (!statusEverPublished) {
+        snprintf(out, outSize, "never");
+    } else {
+        snprintf(out, outSize, "%lus", (unsigned long)((uint32_t)(now - lastStatusPublishMs) / 1000UL));
     }
 }
 
@@ -869,6 +950,12 @@ void printStartupDiagnostics() {
     printDebugFormatted("Wi-Fi: boot=%s state=%s source=%s", bootReasonName(bootReason),
                         networkStateName(networkState), credentialSourceName(credentialSource));
     printDebugFormatted("MQTT: %s", networkServicesStarted ? "listening" : "starts after Wi-Fi connects");
+#if ENABLE_STATUS_TOPIC
+    printDebugFormatted("Status topic: enabled (%s every %u s while Wi-Fi is connected)", STATUS_TOPIC,
+                        (unsigned)(STATUS_INTERVAL_MS / 1000UL));
+#else
+    printDebugLine("Status topic: disabled (ENABLE_STATUS_TOPIC=0)");
+#endif
     printDebugFormatted("Free heap: %u bytes", ESP.getFreeHeap());
 }
 
@@ -878,22 +965,26 @@ void printPeriodicDiagnostics(uint32_t now) {
     }
     lastStatusDiagnosticMs = now;
 
+    char statusAge[16];
+    formatStatusPublishAge(statusAge, sizeof(statusAge), now);
+
     if (networkState == NetworkState::Connected) {
         char ip[16];
         char ssid[33];
         int rssi = 0;
         formatStaIp(ip, sizeof(ip));
         readApInfo(ssid, sizeof(ssid), &rssi);
-        printDebugFormatted("Status: wifi=connected ip=%s rssi=%d source=%s mqtt=%s dac=%s cpu=%d mem=%d heap=%u min_heap=%u",
+        printDebugFormatted("Status: wifi=connected ip=%s rssi=%d source=%s mqtt=%s dac=%s cpu=%d mem=%d heap=%u min_heap=%u status_last=%s",
                             ip, rssi, credentialSourceName(credentialSource),
                             networkServicesStarted ? "listening" : "stopped", dacPresent ? "present" : "absent",
-                            currentCpuDacValue, currentMemDacValue, ESP.getFreeHeap(), ESP.getMinFreeHeap());
+                            currentCpuDacValue, currentMemDacValue, ESP.getFreeHeap(), ESP.getMinFreeHeap(),
+                            statusAge);
     } else {
-        printDebugFormatted("Status: wifi=%s source=%s last_reason=%u mqtt=%s dac=%s cpu=%d mem=%d heap=%u min_heap=%u",
+        printDebugFormatted("Status: wifi=%s source=%s last_reason=%u mqtt=%s dac=%s cpu=%d mem=%d heap=%u min_heap=%u status_last=%s",
                             networkStateName(networkState), credentialSourceName(credentialSource),
                             (unsigned)lastDisconnectReason, networkServicesStarted ? "listening" : "not started",
                             dacPresent ? "present" : "absent", currentCpuDacValue, currentMemDacValue,
-                            ESP.getFreeHeap(), ESP.getMinFreeHeap());
+                            ESP.getFreeHeap(), ESP.getMinFreeHeap(), statusAge);
     }
 }
 
@@ -987,6 +1078,7 @@ void loop() {
     if (networkServicesStarted) {
         mqtt.loop();
     }
+    serviceStatusTopic(now);
     decayStaleMetrics();
     updateDacOutput();
     printPeriodicDiagnostics(now);
