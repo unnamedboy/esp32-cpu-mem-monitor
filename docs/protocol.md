@@ -49,7 +49,7 @@ Only clients subscribed to the topic receive it.
 - Enabled by default; build with `-DENABLE_STATUS_TOPIC=0` to turn it off.
 
 ```json
-{"v":1,"build":"phase4-ble-prov-status","uptime_s":1234,"heap_free":182344,"heap_min":150000,"rssi":-61,"wifi":"connected","prov":"provisioned","dac":true}
+{"v":1,"build":"example-build","uptime_s":1234,"heap_free":182344,"heap_min":150000,"rssi":-61,"wifi":"connected","prov":"provisioned","dac":true}
 ```
 
 | Field | Type | Meaning |
@@ -82,11 +82,12 @@ Rules for consumers:
 The daemon subscribes to `Device:StatusTopic` after every connect (it uses a clean
 session, so each reconnect needs a new subscription). It accepts a message only if it
 is valid UTF-8, at most 1 KB, a JSON object, and has an integer `v` of 1. Valid
-messages are logged at Debug level. If the optional [Loki sink](loki.md) is enabled,
-the daemon forwards only the fields listed above, type-checked and re-serialized in
-that order, and rate-limited to a burst of 3 followed by one message per 5 s. The
-broker is unauthenticated, so the rate limit stops another client on the LAN from
-flooding your Loki.
+messages are rate-limited to a burst of 3 followed by one message per 5 s; messages
+over the limit are only counted, with a warning at most once a minute. A message
+within the limit is logged at Debug level and, if the optional [Loki sink](loki.md)
+is enabled, forwarded with only the fields listed above, type-checked and
+re-serialized in that order. The broker is unauthenticated, so the rate limit stops
+another client on the LAN from flooding the log or your Loki.
 
 ### Known limitation
 

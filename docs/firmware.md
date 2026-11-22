@@ -15,12 +15,15 @@ pins and wiring in [hardware.md](hardware.md).
 - `mlesniew/PicoMQTT @ 1.3.0` for the broker.
 - `DFRobot_GP8XXX` at a fixed 2023 commit; later commits need core 3.x.
 - Partition table `min_spiffs.csv`: the Bluetooth + Wi-Fi image (about 1.6 MB) does not
-  fit the default 1.25 MB app slot.
-- `-DCORE_DEBUG_LEVEL=1` (errors only). `config.h` refuses to build at level 3 or
-  higher: level 5 logs the provisioned Wi-Fi password, and levels 3–4 flood the serial
-  port that also carries the pairing-code query.
-- `-Wl,-u,btStarted` keeps Arduino from releasing the Bluetooth memory before
-  `setup()`, which would make BLE pairing impossible.
+  fit the default 1.25 MB app slot. `min_spiffs.csv` has two 1.875 MB app slots and
+  128 KB SPIFFS, and keeps NVS where the default table has it, so stored Wi-Fi
+  credentials and the pairing code survive a switch between the two tables.
+- `-DCORE_DEBUG_LEVEL=1` (errors only). Levels 1 and 2 are accepted; `config.h` stops
+  the build at level 3 or higher. At level 5 the Arduino core logs the Wi-Fi password
+  received during pairing; levels 3 and 4 leak no secrets but flood the serial port
+  that also carries the pairing-code query.
+- `-Wl,-u,btStarted` links in the Arduino Bluetooth support code. Without it, Arduino
+  releases the Bluetooth memory before `setup()` and BLE pairing can never start.
 
 ## Source layout
 
@@ -80,10 +83,17 @@ Events from the Arduino network task only set flags; all decisions happen in `lo
 
 ### Wi-Fi and reconnects
 
-The firmware owns the reconnect policy; the Arduino core's auto-reconnect is turned off.
-After a disconnect, or when an attempt has produced no result for 30 s, the next attempt
-waits 5 s, doubling up to 60 s, and the delay resets once connected. While connecting it
-logs a line at most every 10 s with the last disconnect reason. The DAC decay and the
+The firmware owns the reconnect policy; the Arduino core's auto-reconnect is turned off,
+and only one connection attempt runs at a time:
+
+- When a disconnect event ends an attempt, the next one waits the current backoff
+  delay. The delay starts at 5 s and doubles with every attempt, up to 60 s.
+- An attempt that produces no result within 30 s is abandoned, and the next one starts
+  immediately.
+- Once connected, the delay goes back to 5 s.
+
+While connecting, the firmware logs a line at most every 10 s with the last disconnect
+reason and the time to the next attempt. The DAC decay and the
 BOOT button keep working while Wi-Fi is down.
 
 On the first successful connection the firmware starts mDNS (`resmon.local`, service
@@ -112,9 +122,11 @@ The serial port (UART0, 115200 baud) carries human-readable diagnostics and the
 pairing-code query. Output is rate-limited so the query stays usable:
 
 - `DAC values: cpu=… mem=…` only when the values change, at most every 10 s;
-- `Status: wifi=… ip=… rssi=… source=… mqtt=… dac=… heap=… min_heap=… status_last=…`
-  every 60 s (`status_last` is the time since the last status publish attempt, which
-  does not confirm delivery);
+- a `Status:` line every 60 s. While connected it reads
+  `Status: wifi=connected ip=… rssi=… source=… mqtt=… dac=… cpu=… mem=… heap=… min_heap=… status_last=…`;
+  otherwise `Status: wifi=<state> source=… last_reason=… mqtt=… dac=… cpu=… mem=… heap=… min_heap=… status_last=…`.
+  `cpu` and `mem` are the current 0–255 output values; `status_last` is the time since
+  the last status publish attempt, which does not confirm delivery;
 - the pairing hint line every 30 s while in pairing mode.
 
 The SSID is printed once per connection; passwords are never printed.
