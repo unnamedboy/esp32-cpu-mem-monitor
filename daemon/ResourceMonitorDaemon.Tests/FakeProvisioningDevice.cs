@@ -1,0 +1,334 @@
+using System.Security.Cryptography;
+using System.Text;
+using Org.BouncyCastle.Crypto.Agreement;
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Modes;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Security;
+using ResourceMonitorDaemon.Provisioning;
+
+namespace ResourceMonitorDaemon.Tests
+{
+    /// <summary>
+    /// In-memory model of the device side of ESP-IDF v4.4.7 protocomm Security1 + wifi_config, modelled
+    /// on components/protocomm/src/security/security1.c and wifi_provisioning/src/wifi_config.c.
+    /// It deliberately uses different crypto code paths from the client: BouncyCastle's
+    /// X25519PrivateKeyParameters/X25519Agreement for the key exchange and BouncyCastle's
+    /// SicBlockCipher (CTR) for its own keystream, and parses requests with field numbers written out
+    /// here rather than the client's message helpers.
+    /// </summary>
+    internal sealed class FakeProvisioningDevice : IProvisioningTransport
+    {
+        private readonly string _pop;
+        private DeviceCtrStream? _stream;
+        private byte[]? _devicePubkey;
+        private byte[]? _clientPubkey;
+        private bool _sessionEstablished;
+        private bool _connectionClosed;
+
+        public FakeProvisioningDevice(string pop)
+        {
+            _pop = pop;
+        }
+
+        // Behaviour knobs
+        public bool SupportsVersionEndpoint { get; set; } = true;
+        public bool ForgeDeviceVerifyData { get; set; }
+        public int ConnectingPolls { get; set; } = 2;
+        public WifiStationState FinalState { get; set; } = WifiStationState.Connected;
+        public WifiConnectFailedReason FinalFailReason { get; set; } = WifiConnectFailedReason.AuthError;
+        public string Ip4Address { get; set; } = "192.168.1.50";
+        public ProtocommStatus SetConfigStatus { get; set; } = ProtocommStatus.Success;
+        public bool FailNextConfigExchange { get; set; }
+
+        // Observations
+        public string? ReceivedSsid { get; private set; }
+        public string? ReceivedPassphrase { get; private set; }
+        public bool Applied { get; private set; }
+        public int StatusPolls { get; private set; }
+        public List<string> EndpointLog { get; } = new();
+        public List<byte[]> ConfigCiphertexts { get; } = new();
+        public bool Disposed { get; private set; }
+
+        public Task<byte[]> SendAsync(string endpoint, byte[] data, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EndpointLog.Add(endpoint);
+            if (_connectionClosed)
+            {
+                throw new ProvisioningTransportException(ProvisioningTransportError.DeviceDisconnected, "Device disconnected.");
+            }
+
+            return Task.FromResult(endpoint switch
+            {
+                "proto-ver" when SupportsVersionEndpoint =>
+                    Encoding.UTF8.GetBytes("{\"prov\":{\"ver\":\"v1.1\",\"cap\":[\"wifi_scan\"]}}"),
+                "prov-session" => HandleSession(data),
+                "prov-config" when _sessionEstablished => HandleConfig(data),
+                _ => throw new ProvisioningTransportException(ProvisioningTransportError.EndpointNotFound, $"No endpoint {endpoint}."),
+            });
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
+
+        // ---- prov-session -----------------------------------------------------------------
+
+        private byte[] HandleSession(byte[] request)
+        {
+            // SessionData{sec_ver=2, sec1=11{msg=1, sc0=20{client_pubkey=1}, sc1=22{client_verify_data=2}}}
+            var secVer = 0;
+            var msg = 0;
+            byte[]? clientPubkey = null;
+            byte[]? clientVerify = null;
+            var reader = new ProtoReader(request);
+            while (reader.TryReadTag(out var f, out var w))
+            {
+                if (f == 2) { secVer = reader.ReadInt32(); }
+                else if (f == 11)
+                {
+                    var sec1 = new ProtoReader(reader.ReadLengthDelimited());
+                    while (sec1.TryReadTag(out var f1, out var w1))
+                    {
+                        if (f1 == 1) { msg = sec1.ReadInt32(); }
+                        else if (f1 == 20) { clientPubkey = ReadSingleBytesField(sec1.ReadLengthDelimited(), 1); }
+                        else if (f1 == 22) { clientVerify = ReadSingleBytesField(sec1.ReadLengthDelimited(), 2); }
+                        else { sec1.SkipField(w1); }
+                    }
+                }
+                else { reader.SkipField(w); }
+            }
+
+            if (secVer != 1)
+            {
+                return CloseConnection();
+            }
+
+            return msg switch
+            {
+                0 => HandleCommand0(clientPubkey),
+                2 => HandleCommand1(clientVerify),
+                _ => CloseConnection(),
+            };
+        }
+
+        private byte[] HandleCommand0(byte[]? clientPubkey)
+        {
+            if (clientPubkey is null || clientPubkey.Length != 32)
+            {
+                return CloseConnection();
+            }
+
+            var random = new SecureRandom();
+            var devicePrivate = new X25519PrivateKeyParameters(random);
+            _devicePubkey = devicePrivate.GeneratePublicKey().GetEncoded();
+            _clientPubkey = clientPubkey;
+
+            var agreement = new X25519Agreement();
+            agreement.Init(devicePrivate);
+            var key = new byte[agreement.AgreementSize];
+            agreement.CalculateAgreement(new X25519PublicKeyParameters(clientPubkey, 0), key, 0);
+            var popHash = SHA256.HashData(Encoding.ASCII.GetBytes(_pop));
+            for (var i = 0; i < key.Length; i++)
+            {
+                key[i] ^= popHash[i];
+            }
+
+            var deviceRandom = new byte[16];
+            random.NextBytes(deviceRandom);
+            _stream = new DeviceCtrStream(key, deviceRandom);
+
+            // SessionData{sec_ver=1, sec1{msg=Session_Response0(1), sr0(21){status omitted, device_pubkey(2), device_random(3)}}}
+            using var writer = new ProtoWriter();
+            writer.WriteVarintField(2, 1);
+            writer.WriteMessageField(11, sec1 =>
+            {
+                sec1.WriteVarintField(1, 1);
+                sec1.WriteMessageField(21, sr0 =>
+                {
+                    sr0.WriteBytesField(2, _devicePubkey);
+                    sr0.WriteBytesField(3, deviceRandom);
+                });
+            });
+            return writer.ToArray();
+        }
+
+        private byte[] HandleCommand1(byte[]? clientVerify)
+        {
+            if (_stream is null || _devicePubkey is null || _clientPubkey is null || clientVerify is null)
+            {
+                return CloseConnection();
+            }
+
+            var check = _stream.Transform(clientVerify);
+            byte[] deviceVerify;
+            if (!check.AsSpan().SequenceEqual(_devicePubkey))
+            {
+                if (!ForgeDeviceVerifyData)
+                {
+                    // security1.c returns ESP_FAIL; protocomm_ble.c then calls esp_ble_gatts_close().
+                    return CloseConnection();
+                }
+
+                deviceVerify = RandomNumberGenerator.GetBytes(32);
+            }
+            else
+            {
+                deviceVerify = _stream.Transform(_clientPubkey);
+                _sessionEstablished = true;
+            }
+
+            // SessionData{sec_ver=1, sec1{msg=Session_Response1(3), sr1(23){status omitted, device_verify_data(3)}}}
+            using var writer = new ProtoWriter();
+            writer.WriteVarintField(2, 1);
+            writer.WriteMessageField(11, sec1 =>
+            {
+                sec1.WriteVarintField(1, 3);
+                sec1.WriteMessageField(23, sr1 => sr1.WriteBytesField(3, deviceVerify));
+            });
+            return writer.ToArray();
+        }
+
+        private byte[] CloseConnection()
+        {
+            _connectionClosed = true;
+            throw new ProvisioningTransportException(ProvisioningTransportError.DeviceDisconnected, "Device closed the connection.");
+        }
+
+        // ---- prov-config ------------------------------------------------------------------
+
+        private byte[] HandleConfig(byte[] ciphertext)
+        {
+            ConfigCiphertexts.Add(ciphertext);
+            if (FailNextConfigExchange)
+            {
+                // The device consumed the request (advancing its keystream) but the reply was lost.
+                FailNextConfigExchange = false;
+                _stream!.Transform(ciphertext);
+                throw new ProvisioningTransportException(ProvisioningTransportError.Timeout, "Response lost.");
+            }
+
+            var request = _stream!.Transform(ciphertext);
+            var msg = 0;
+            var reader = new ProtoReader(request);
+            while (reader.TryReadTag(out var f, out var w))
+            {
+                if (f == 1) { msg = reader.ReadInt32(); }
+                else if (f == 12)
+                {
+                    var cmd = new ProtoReader(reader.ReadLengthDelimited());
+                    while (cmd.TryReadTag(out var f1, out var w1))
+                    {
+                        if (f1 == 1) { ReceivedSsid = Encoding.UTF8.GetString(cmd.ReadLengthDelimited()); }
+                        else if (f1 == 2) { ReceivedPassphrase = Encoding.UTF8.GetString(cmd.ReadLengthDelimited()); }
+                        else { cmd.SkipField(w1); }
+                    }
+                }
+                else { reader.SkipField(w); }
+            }
+
+            using var writer = new ProtoWriter();
+            switch (msg)
+            {
+                case 2: // TypeCmdSetConfig -> TypeRespSetConfig(3), resp_set_config(13)
+                    writer.WriteVarintField(1, 3);
+                    writer.WriteMessageField(13, r => WriteStatus(r, SetConfigStatus));
+                    break;
+                case 4: // TypeCmdApplyConfig -> TypeRespApplyConfig(5), resp_apply_config(15)
+                    Applied = true;
+                    writer.WriteVarintField(1, 5);
+                    writer.WriteMessageField(15, r => WriteStatus(r, ProtocommStatus.Success));
+                    break;
+                case 0: // TypeCmdGetStatus -> TypeRespGetStatus(1), resp_get_status(11)
+                    StatusPolls++;
+                    var state = !Applied ? WifiStationState.Disconnected
+                        : StatusPolls <= ConnectingPolls ? WifiStationState.Connecting
+                        : FinalState;
+                    writer.WriteVarintField(1, 1);
+                    writer.WriteMessageField(11, r =>
+                    {
+                        if (state != WifiStationState.Connected)
+                        {
+                            r.WriteVarintField(2, (ulong)state);
+                        }
+
+                        if (state == WifiStationState.Connected)
+                        {
+                            // connected(11){ip4_addr(1), auth_mode(2)=WPA2_PSK, channel(5)}
+                            r.WriteMessageField(11, c =>
+                            {
+                                c.WriteBytesField(1, Encoding.ASCII.GetBytes(Ip4Address));
+                                c.WriteVarintField(2, 3);
+                                c.WriteVarintField(5, 6);
+                            });
+                        }
+                        else if (state == WifiStationState.ConnectionFailed)
+                        {
+                            // protobuf-c emits the selected oneof member even when it is 0 (AuthError).
+                            r.WriteVarintField(10, (ulong)FinalFailReason);
+                        }
+                    });
+                    break;
+                default:
+                    return CloseConnection();
+            }
+
+            return _stream.Transform(writer.ToArray());
+        }
+
+        private static void WriteStatus(ProtoWriter writer, ProtocommStatus status)
+        {
+            if (status != ProtocommStatus.Success)
+            {
+                writer.WriteVarintField(1, (ulong)status);
+            }
+        }
+
+        private static byte[]? ReadSingleBytesField(ReadOnlySpan<byte> message, int fieldNumber)
+        {
+            byte[]? value = null;
+            var reader = new ProtoReader(message);
+            while (reader.TryReadTag(out var f, out var w))
+            {
+                if (f == fieldNumber) { value = reader.ReadLengthDelimited().ToArray(); }
+                else { reader.SkipField(w); }
+            }
+
+            return value;
+        }
+
+        /// <summary>Device-side running CTR keystream built on BouncyCastle's SicBlockCipher.</summary>
+        private sealed class DeviceCtrStream
+        {
+            private readonly SicBlockCipher _ctr = new(new AesEngine());
+            private readonly byte[] _block = new byte[16];
+            private int _offset = 16;
+
+            public DeviceCtrStream(byte[] key, byte[] iv)
+            {
+                _ctr.Init(true, new ParametersWithIV(new KeyParameter(key), iv));
+            }
+
+            public byte[] Transform(byte[] input)
+            {
+                var output = new byte[input.Length];
+                for (var i = 0; i < input.Length; i++)
+                {
+                    if (_offset == 16)
+                    {
+                        // Encrypting a zero block yields E(counter) and advances SicBlockCipher's counter.
+                        _ctr.ProcessBlock(new byte[16], 0, _block, 0);
+                        _offset = 0;
+                    }
+
+                    output[i] = (byte)(input[i] ^ _block[_offset++]);
+                }
+
+                return output;
+            }
+        }
+    }
+}

@@ -147,7 +147,177 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual(WifiConfigMsgType.RespSetConfig, decoded.MsgType);
                 AssertEqual(ProtocommStatus.InvalidArgument, decoded.Status);
             }),
+
+            // ---- crypto primitives -------------------------------------------------------------
+
+            ("X25519 matches RFC 7748 section 6.1 test vectors", () =>
+            {
+                using var alice = X25519KeyPair.FromPrivateKey(Hex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"));
+                using var bob = X25519KeyPair.FromPrivateKey(Hex("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb"));
+                AssertBytes("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a", alice.PublicKey);
+                AssertBytes("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f", bob.PublicKey);
+                const string shared = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
+                AssertBytes(shared, alice.DeriveSharedSecret(bob.PublicKey));
+                AssertBytes(shared, bob.DeriveSharedSecret(alice.PublicKey));
+            }),
+            ("X25519 rejects small-order device public keys", () =>
+            {
+                using var key = X25519KeyPair.Generate();
+                AssertThrows<ProvisioningProtocolException>(() => key.DeriveSharedSecret(new byte[32]));
+                AssertThrows<ProvisioningProtocolException>(() => key.DeriveSharedSecret(new byte[31]));
+            }),
+            ("AES-256-CTR matches NIST SP 800-38A F.5.5 and F.5.6", () =>
+            {
+                using var encrypt = new AesCtrStream(Hex(NistCtrKey), Hex(NistCtrCounter));
+                AssertBytes(NistCtrCiphertext, encrypt.Transform(Hex(NistCtrPlaintext)));
+                using var decrypt = new AesCtrStream(Hex(NistCtrKey), Hex(NistCtrCounter));
+                AssertBytes(NistCtrPlaintext, decrypt.Transform(Hex(NistCtrCiphertext)));
+            }),
+            ("AES-CTR keystream continues across calls of arbitrary length", () =>
+            {
+                using var stream = new AesCtrStream(Hex(NistCtrKey), Hex(NistCtrCounter));
+                var plaintext = Hex(NistCtrPlaintext);
+                var output = new List<byte>();
+                var offset = 0;
+                foreach (var size in new[] { 1, 15, 17, 3, 28 }) // 64 bytes total, crossing block boundaries
+                {
+                    output.AddRange(stream.Transform(plaintext.AsSpan(offset, size)));
+                    offset += size;
+                }
+
+                AssertBytes(NistCtrCiphertext, output.ToArray());
+            }),
+            ("AES-CTR counter increments as a 128-bit big-endian integer", () =>
+            {
+                var counter = Hex("000000000000000000000000000000FF");
+                AesCtrStream.IncrementCounter(counter);
+                AssertBytes("00000000000000000000000000000100", counter);
+                var wrap = Hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+                AesCtrStream.IncrementCounter(wrap);
+                AssertBytes("00000000000000000000000000000000", wrap);
+            }),
+
+            // ---- Security1 + wifi_config against the in-memory fake device ------------------
+
+            ("Fake device round trip: handshake, set config, apply, status Connected", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 2 };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+
+                var result = await client.ConfigureAsync("home-network", "correct horse battery", CancellationToken.None);
+
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertEqual("home-network", device.ReceivedSsid);
+                AssertEqual("correct horse battery", device.ReceivedPassphrase);
+                AssertTrue(device.Applied, "ApplyConfig was not sent");
+                AssertEqual(3, device.StatusPolls); // 2 x Connecting, then Connected: keystream stays aligned
+                foreach (var ciphertext in device.ConfigCiphertexts)
+                {
+                    AssertTrue(!Encoding.UTF8.GetString(ciphertext).Contains("correct horse"), "passphrase sent in clear");
+                }
+            })),
+            ("Fake device: wrong pairing code -> PairingCodeRejectedException", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH");
+                var ex = await AssertThrowsAsync<PairingCodeRejectedException>(
+                    () => Security1Session.EstablishAsync(device, "ABCDEFGX", CancellationToken.None));
+                AssertEqual(PairingCodeRejectionReason.DeviceClosedConnection, ex.Reason);
+                AssertTrue(!ex.Message.Contains("ABCDEFG"), "pairing code leaked into message");
+            })),
+            ("Fake device: mismatched device verify data -> PairingCodeRejectedException", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { ForgeDeviceVerifyData = true };
+                var ex = await AssertThrowsAsync<PairingCodeRejectedException>(
+                    () => Security1Session.EstablishAsync(device, "ZZZZZZZZ", CancellationToken.None));
+                AssertEqual(PairingCodeRejectionReason.VerificationMismatch, ex.Reason);
+            })),
+            ("Fake device: AuthError -> Failed(AuthError)", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH")
+                {
+                    FinalState = WifiStationState.ConnectionFailed,
+                    FinalFailReason = WifiConnectFailedReason.AuthError,
+                };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var result = await new WifiConfigClient(session, FastPoll, FastTimeout)
+                    .ConfigureAsync("home-network", "wrong password", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), result);
+            })),
+            ("Fake device: NetworkNotFound -> Failed(NetworkNotFound)", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH")
+                {
+                    FinalState = WifiStationState.ConnectionFailed,
+                    FinalFailReason = WifiConnectFailedReason.NetworkNotFound,
+                };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var result = await new WifiConfigClient(session, FastPoll, FastTimeout)
+                    .ConfigureAsync("missing", "password1", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Failed(WifiConnectFailedReason.NetworkNotFound), result);
+            })),
+            ("Fake device: never leaves Connecting -> Timeout", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = int.MaxValue };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var result = await new WifiConfigClient(session, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(120))
+                    .ConfigureAsync("home-network", "password1", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Timeout(WifiStationState.Connecting), result);
+                AssertTrue(device.StatusPolls is >= 2 and <= 13, $"unexpected poll count {device.StatusPolls}");
+            })),
+            ("Fake device: rejected SetConfig error does not leak the passphrase", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { SetConfigStatus = ProtocommStatus.InvalidArgument };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var ex = await AssertThrowsAsync<ProvisioningProtocolException>(
+                    () => new WifiConfigClient(session, FastPoll, FastTimeout).SetConfigAsync("home-network", "s3cret-pass", CancellationToken.None));
+                AssertTrue(!ex.ToString().Contains("s3cret-pass"), "passphrase leaked into exception");
+            })),
+            ("WifiConfigClient validates SSID/passphrase length without echoing them", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH");
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+                var longPass = new string('p', 64);
+                var ex = await AssertThrowsAsync<ArgumentException>(() => client.SetConfigAsync("home", longPass, CancellationToken.None));
+                AssertTrue(!ex.Message.Contains(longPass), "passphrase leaked into exception");
+                await AssertThrowsAsync<ArgumentException>(() => client.SetConfigAsync(new string('s', 33), "password1", CancellationToken.None));
+                await AssertThrowsAsync<ArgumentException>(() => client.SetConfigAsync("", "password1", CancellationToken.None));
+                AssertEqual(0, device.ConfigCiphertexts.Count);
+            })),
+            ("Security1Session refuses further use after a half-completed exchange", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { FailNextConfigExchange = true };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+                await AssertThrowsAsync<ProvisioningTransportException>(() => client.GetStatusAsync(CancellationToken.None));
+                var ex = await AssertThrowsAsync<ProvisioningException>(() => client.GetStatusAsync(CancellationToken.None));
+                AssertTrue(ex is not ProvisioningTransportException, "expected session-interrupted error");
+            })),
+            ("WifiConfigClient normalizes reported IPv4 addresses", () =>
+            {
+                AssertEqual("192.168.1.50", WifiConfigClient.NormalizeIp4("192.168.1.50"));
+                AssertEqual("10.0.0.7", WifiConfigClient.NormalizeIp4(" 10.0.0.7\0"));
+                AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4(""));
+                AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4("fe80::1"));
+                AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4("12345"));
+            }),
         };
+
+        // NIST SP 800-38A, F.5.5 CTR-AES256.Encrypt / F.5.6 CTR-AES256.Decrypt
+        private const string NistCtrKey = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
+        private const string NistCtrCounter = "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
+        private const string NistCtrPlaintext =
+            "6bc1bee22e409f96e93d7e117393172a" + "ae2d8a571e03ac9c9eb76fac45af8e51" +
+            "30c81c46a35ce411e5fbc1191a0a52ef" + "f69f2445df4f9b17ad2b417be66c3710";
+        private const string NistCtrCiphertext =
+            "601ec313775789a5b7a7f504bbf3d228" + "f443e3ca4d62b59aca84e990cacaf5c5" +
+            "2b0930daa23de94ce87017ba2d84988d" + "dfc9c58db67aada613c2dd08457941a6";
+
+        private static readonly TimeSpan FastPoll = TimeSpan.FromMilliseconds(5);
+        private static readonly TimeSpan FastTimeout = TimeSpan.FromSeconds(5);
+
+        private static void RunAsync(Func<Task> test) => test().GetAwaiter().GetResult();
 
         // ---- assertion helpers -------------------------------------------------------------
 
