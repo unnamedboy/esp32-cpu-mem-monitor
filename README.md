@@ -127,13 +127,17 @@ The tray's **配对设备 (Pair device)…** wizard sends your Wi-Fi name and pa
 
 > Status: the wizard and the Bluetooth client are implemented and unit-tested, but they have **not yet been tested with a physical ESP32**.
 
-1. **Put the device in pairing mode.** A device without Wi-Fi settings enters pairing mode on its own at start-up. To pair a device that is already configured, hold its **BOOT** button for 5–15 seconds, then release it. Holds longer than 15 s are ignored.
-2. **Open the wizard.** Right-click the tray icon and choose **配对设备 (Pair device)…**. On the first start of a PC that has never connected to a device, the daemon shows its first "MQTT connection failed" notification once as **无法连接设备。未找到设备，点击进行配对 (Cannot reach the device. No device found — click to pair)**. Click it while it is on screen. The wizard never opens by itself.
+1. **Put the device in pairing mode.** A device without Wi-Fi settings enters pairing mode on its own at start-up. The exceptions are firmware built with a `secrets.h` development fallback, and a board that ran older firmware which stored Wi-Fi credentials. For those, and for any device that is already configured, hold the **BOOT** button for 5–15 seconds, then release it. Holds longer than 15 s are ignored.
+2. **Open the wizard.** Right-click the tray icon and choose **配对设备 (Pair device)…**. On the very first run of the daemon on a PC, the first "MQTT connection failed" notification is shown once as **无法连接设备。未找到设备，点击进行配对 (Cannot reach the device. No device found — click to pair)**. This happens only if `Host` is the default `resmon.local` and no fallback address is set. It never happens once the daemon has connected to a device, or on PCs where the daemon ran before. Click it while it is on screen. The wizard never opens by itself.
 3. **Select the device.** The wizard scans for 5 seconds and lists devices named `PROV_RESMON_XXXXXX` with their signal strength. If exactly one device is found, it is selected for you. Use **重新扫描 (Rescan)** if the device was not in pairing mode yet. If Bluetooth is off, the wizard says so; turn it on in Windows Settings and rescan.
 4. **Pairing code.** If the device is connected to this PC by USB, the wizard reads the code automatically and shows **已通过 USB 自动读取配对码 (read automatically over USB)**, with the code masked. Close any serial monitor first, because a COM port can only be open in one program. Otherwise, type the code. It is printed in the device's serial log at 115200 baud, in a line like `Provisioning: name=PROV_RESMON_XXXXXX pop=ABCDEFGH`. Codes use letters and the digits 2–9 (no 0, O, 1 or I), and case, spaces and dashes are ignored.
-5. **Wi-Fi.** Enter the network name (SSID) and password. To copy the network this PC is connected to, click **使用本机当前 Wi-Fi (Use this PC's Wi-Fi)**. The first time, Windows 11 may ask whether apps may use your location, because Windows treats Wi-Fi details as location data. If you decline, type the name instead. The ESP32 supports **2.4 GHz only**. If your PC is connected on 5 GHz, the wizard warns you; make sure the router also offers the network on 2.4 GHz.
+5. **Wi-Fi.** Enter the network name (SSID) and password. To copy the network this PC is connected to, click **使用本机当前 Wi-Fi (Use this PC's Wi-Fi)**. The first time, Windows 11 may ask whether apps may use your location, because Windows treats Wi-Fi details as location data. If you decline, type the name instead. The ESP32 supports **2.4 GHz only**. After you click **Use this PC's Wi-Fi**, the wizard warns you if your PC is connected on 5 GHz; make sure the router also offers the network on 2.4 GHz.
 6. **Click 开始配对 (Pair).** The wizard shows each step: connect, secure session, send Wi-Fi settings, wait for Wi-Fi. **取消 (Cancel)** stops the attempt, and closing the wizard cancels everything.
-7. **Done.** When the device reports its IP address, the wizard saves it as `FallbackAddress` in `%LocalAppData%\ResourceMonitorDaemon\settings.json`; no other setting is changed. The daemon then reconnects without a restart. The wizard finishes with **已连接，正在发送数据 (connected, publishing)** once metrics are being sent.
+7. **Done.** When the device reports its IP address, the wizard saves it as `FallbackAddress` in `%LocalAppData%\ResourceMonitorDaemon\settings.json`; no other setting is changed. The daemon then reconnects without a restart. The wizard waits up to 45 s for a new daemon MQTT connection to the device, without waiting for a published message. It then ends with one of three states:
+
+   - **已连接，正在发送数据 (connected, publishing)**: the daemon is connected.
+   - **sending is paused**: resume sending from the tray menu to connect.
+   - **the daemon keeps retrying in the background**: the connection was not up yet when the wizard stopped waiting.
 
 The Wi-Fi password is used only for that attempt. The password box is cleared afterwards, and the password is never written to disk or to the log. If an attempt fails, the wizard tells you what to fix:
 
@@ -143,7 +147,7 @@ The Wi-Fi password is used only for that attempt. The password box is cleared af
 | 找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz） (network not found) | Check the SSID and that the router offers 2.4 GHz. |
 | 配对码错误 (pairing code rejected) | Check the code in the serial log and try again. |
 | No result within 30 s | Check the SSID, password and 2.4 GHz, then try again. A retry also detects a device that joined Wi-Fi late. |
-| Lost the Bluetooth link | The wizard checks `resmon.local` for 15 s first. If the device is unreachable, rescan, or power-cycle the device or hold BOOT for 5–15 s, then pair again. |
+| Lost the Bluetooth link | The wizard first tries the configured `Host:Port` (default `resmon.local:1883`) for 15 s. If the device is unreachable, rescan, or power-cycle the device or hold BOOT for 5–15 s, then pair again. |
 | The device did not accept another attempt | Power-cycle the device or hold BOOT for 5–15 s and release, then rescan and pair. |
 
 ### Build and test

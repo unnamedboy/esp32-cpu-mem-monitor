@@ -150,7 +150,8 @@ schedule, and never blocks the sampling loop:
   applied live, and the confirmation balloon names any field still overridden by
   an environment variable.
 - "配对设备 (Pair device)…" opens the pairing wizard (one instance at a time; see
-  "Pairing wizard"). On the first connection failure of an unconfigured PC, the
+  "Pairing wizard"). On the first connection failure during the daemon's first
+  run on a PC that never connected to a device (rule under "Pairing wizard"), the
   failure balloon is shown once as a "click to pair" balloon instead. It keeps
   the "MQTT connection failed" title, says the device cannot be reached and "未找到设备，点击进行配对
   (No device found — click to pair)", and clicking it opens the wizard.
@@ -405,16 +406,31 @@ to the empty box. The box is also cleared when the wizard closes. The password
 is never logged or persisted. The SSID and pairing code are not logged either:
 log lines name only the device, the result and the saved IPv4 address.
 
-First-run prompt (`FirstRunPairingPrompt`): the prompt is offered only when all
-of these hold: the notification is the MQTT connection-failure one, the
-prompt was never shown, the effective `FallbackAddress` is empty, and the
-daemon has not connected since it started. The tray then shows the failure as
-the "click to pair" balloon, which keeps the failure title and states the failure,
-and writes the marker file `%LocalAppData%\ResourceMonitorDaemon\pairing-prompted`.
-The prompt therefore appears at most once per user. The marker is written as soon as the balloon is
-requested, so if Windows suppresses it (Focus Assist, notifications off), the prompt
-is not repeated; the tray menu entry always works. Delete that file to see the
-prompt again. No window opens on its own at login.
+First-run prompt (`FirstRunPairingPrompt`, rule in
+`PairingOutcomePresenter.ShouldOfferFirstRunPairing`). The prompt is offered
+only when all of these hold:
+
+- the notification is the MQTT connection-failure one;
+- the marker file `%LocalAppData%\ResourceMonitorDaemon\pairing-prompted` does
+  not exist. It is written when the prompt is shown, and also the first time
+  the daemon connects to a broker, so a PC that has ever connected (with this
+  version) never gets the prompt;
+- the effective `FallbackAddress` is empty;
+- the effective `Host` is the default `resmon.local`. A custom host means the
+  connection was configured by hand;
+- the daemon has not connected since this process started;
+- the daemon did not run on this PC before this process: no `daemon.log`
+  created before the process started, and no rotated `daemon.log.1`. This
+  covers installations that worked before the marker existed and start
+  while the device is off.
+
+In practice, the prompt can only appear during the first run of the daemon
+on a PC. The tray then shows the failure as the "click to pair" balloon,
+which keeps the failure title and states the failure. The marker is written
+as soon as the balloon is requested, so if Windows suppresses it (Focus
+Assist, notifications off), the prompt is not repeated; the tray menu entry
+always works. To see the prompt again, delete the marker and the daemon logs.
+No window opens on its own at login.
 
 User-visible texts: fixed wizard and tray-prompt texts are in `PairingText`;
 outcome-dependent messages are built in `PairingOutcomePresenter`. Both are
@@ -446,7 +462,7 @@ The C# test runner covers:
   `FakeProvisioningDevice.cs`; see "Provisioning client").
 - the pairing wizard's pure parts (`PairingTests.cs`): result and exception
   messages, which addresses may be saved, input validation without echoing
-  values, scan texts, the first-run rule and marker file, SSID selection, the
+  values, scan texts, the first-run rule, marker file (prompt and first connection) and earlier-run detection, SSID selection, the
   `netsh` band parser (English labels, and Chinese output encoded as CP936 bytes),
   and `BrokerProbe` against a loopback listener and a closed port. The
   `MqttConnection` scenario also checks that `ConnectionGeneration` advances on
