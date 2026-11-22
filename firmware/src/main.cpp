@@ -67,7 +67,9 @@ bool provSucceeded = false;
 bool provStopRequested = false;
 bool networkServicesStarted = false;
 bool wasWifiConnected = false;
-bool deferredConnectLogged = false;
+bool deferredConnectActive = false;   // IP while provisioning, no accepted credentials yet
+bool deferredConnectWarned = false;
+uint32_t deferredConnectSinceMs = 0;
 bool bluetoothMemoryReleased = false;
 bool connectAttemptInFlight = false;
 bool restartPending = false;
@@ -640,13 +642,22 @@ bool readApInfo(char* ssid, size_t ssidSize, int* rssi) {
 
 // Returns false when the transition is deferred (still provisioning without
 // accepted credentials); the caller then re-evaluates on the next loop().
-bool onWifiConnected() {
+bool onWifiConnected(uint32_t now) {
     switch (decideConnectedTransition(networkState, provSucceeded)) {
         case ConnectedTransition::StayProvisioning:
-            if (!deferredConnectLogged) {
-                deferredConnectLogged = true;
-                printDebugLine("Wi-Fi: got an IP while provisioning, but no credentials were accepted; "
-                               "staying in provisioning mode");
+            // Expected for a few ms on every successful pairing (GOT_IP
+            // arrives before CRED_SUCCESS): stay silent unless it persists.
+            if (!deferredConnectActive) {
+                deferredConnectActive = true;
+                deferredConnectWarned = false;
+                deferredConnectSinceMs = now;
+            }
+            if (shouldWarnDeferredConnect(deferredConnectSinceMs, now, PROV_DEFERRED_CONNECT_WARN_MS,
+                                          deferredConnectWarned)) {
+                deferredConnectWarned = true;
+                printDebugFormatted("Wi-Fi: got an IP while provisioning, but no credentials were accepted after %u s; "
+                                    "staying in provisioning mode",
+                                    (unsigned)(PROV_DEFERRED_CONNECT_WARN_MS / 1000UL));
             }
             return false;
         case ConnectedTransition::BecomeConnectedStored:
@@ -655,7 +666,7 @@ bool onWifiConnected() {
         case ConnectedTransition::BecomeConnected:
             break;
     }
-    deferredConnectLogged = false;
+    deferredConnectActive = false;
     networkState = NetworkState::Connected;
     connectAttemptInFlight = false;
     reconnectDelayMs = WIFI_RECONNECT_MIN_MS;
@@ -698,12 +709,12 @@ void serviceNetwork(uint32_t now) {
     if (connected && !wasWifiConnected) {
         // A deferred transition leaves wasWifiConnected false so it is
         // re-evaluated, e.g. once CRED_SUCCESS has been consumed.
-        wasWifiConnected = onWifiConnected();
+        wasWifiConnected = onWifiConnected(now);
     } else if (!connected && wasWifiConnected) {
         onWifiDisconnected(now);
         wasWifiConnected = false;
     } else if (!connected) {
-        deferredConnectLogged = false;
+        deferredConnectActive = false;
     }
 
     if (restartPending && (int32_t)(now - restartAtMs) >= 0) {

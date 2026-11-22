@@ -138,12 +138,20 @@ Other calls and events:
   grace period ...; credentials kept`, and calls
   `wifi_prov_mgr_stop_provisioning()` immediately so only the firmware's
   reconnect policy runs.
-- After that reset the firmware calls `esp_wifi_disconnect()` to cancel the
-  Arduino core's single automatic retry, which would otherwise still use the
-  rejected credentials. If the STA nevertheless gets an IP while provisioning
-  and no credentials have been accepted, the firmware stays in provisioning
-  mode (BLE up, PoP served) instead of reporting `source=stored`
-  (`decideConnectedTransition()`), and re-evaluates once provisioning succeeds.
+- When that reset succeeds, the firmware calls `esp_wifi_disconnect()` to
+  cancel the Arduino core's single automatic retry, which would otherwise still
+  use the rejected credentials. (When the reset fails, the manager may already
+  be in SUCCESS because that retry worked, so the STA is left connected.)
+- If the STA gets an IP while provisioning and no credentials have been
+  accepted, the firmware stays in provisioning mode (BLE up, PoP served)
+  instead of reporting `source=stored` (`decideConnectedTransition()`), and
+  re-evaluates on every `loop()` until provisioning succeeds. This deferral
+  happens briefly on **every** normal pairing, because `GOT_IP` reaches the
+  firmware just before `CRED_SUCCESS` (the manager posts `CRED_SUCCESS` from its
+  own `GOT_IP` handler), so it is silent at first. Only if it lasts
+  `PROV_DEFERRED_CONNECT_WARN_MS` (5 s) does the firmware log, once,
+  `Wi-Fi: got an IP while provisioning, but no credentials were accepted after
+  5 s; staying in provisioning mode` (`shouldWarnDeferredConnect()`).
 - `wifi_prov_mgr_stop_provisioning()` 30 s after `PROV_CRED_SUCCESS`.
 - `wifi_prov_mgr_reset_provisioning()` (= `esp_wifi_restore()`) when the BOOT
   gesture requests re-provisioning.
@@ -346,8 +354,9 @@ full erase, see "First boot") or item 1 fails by design.
       after the firmware already reset the provisioning state. The firmware now
       cancels that retry (`esp_wifi_disconnect()` after the reset), and if the
       device still gets an IP before any credentials were accepted it stays in
-      provisioning mode (`Wi-Fi: got an IP while provisioning ...`), not
-      `source=stored`. Confirm the client reports the failure and that a retry
+      provisioning mode, not `source=stored`, and after 5 s logs
+      `Wi-Fi: got an IP while provisioning, but no credentials were accepted
+      after 5 s ...`. A normal successful pairing must **not** print that line. Confirm the client reports the failure and that a retry
       from the wizard re-provisions it.
 - [ ] Timeout (failure other than AuthError / NetworkNotFound, e.g. AP refuses
       association): the client times out after 30 s; a wizard retry gets

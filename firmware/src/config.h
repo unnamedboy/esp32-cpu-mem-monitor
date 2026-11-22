@@ -75,6 +75,9 @@ const char* PROV_NVS_KEY_POP = "pop";
 const char* PROV_NVS_KEY_REQUEST = "prov_req";
 const uint32_t PROV_HINT_INTERVAL_MS = 30000;   // serial "Provisioning: name=.. pop=.." rate
 const uint32_t PROV_START_TIMEOUT_MS = 5000;    // no PROV_START by then -> start failure
+// An IP while provisioning normally precedes CRED_SUCCESS by milliseconds;
+// warn only if no credentials were accepted after this long.
+const uint32_t PROV_DEFERRED_CONNECT_WARN_MS = 5000;
 const uint32_t PROV_START_MAX_ATTEMPTS = 3;     // consecutive failed starts before giving up
 const uint32_t PROV_RETRY_RESTART_DELAY_MS = 3000; // log visible before the retry restart
 // Auto-stop is disabled so BLE outlives the client's Connected status read.

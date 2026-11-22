@@ -142,6 +142,15 @@ inline ConnectedTransition decideConnectedTransition(NetworkState state, bool pr
     return provisioningSucceeded ? ConnectedTransition::BecomeConnectedStored : ConnectedTransition::StayProvisioning;
 }
 
+// On a normal successful pairing GOT_IP reaches the firmware a moment before
+// CRED_SUCCESS (the manager posts CRED_SUCCESS from its own GOT_IP handler),
+// so a short StayProvisioning deferral is expected. Warn only when the
+// deferral has lasted at least `graceMs` (wrap-safe), and only once.
+inline bool shouldWarnDeferredConnect(uint32_t deferredSinceMs, uint32_t nowMs, uint32_t graceMs,
+                                      bool alreadyWarned) {
+    return !alreadyWarned && (uint32_t)(nowMs - deferredSinceMs) >= graceMs;
+}
+
 // What to do on WIFI_PROV_CRED_FAIL.
 enum class CredentialFailureAction {
     // Before success: the client's credentials were rejected. Clear them
