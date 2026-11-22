@@ -178,8 +178,28 @@ namespace ResourceMonitorDaemon.Observability
             }
         }
 
-        /// <summary>Uncompressed JSON size of one value: the UTF-8 line plus timestamp and punctuation.</summary>
-        public static long EstimateBytes(in LokiEntry entry) => Encoding.UTF8.GetByteCount(entry.Line) + 32;
+        /// <summary>
+        /// Uncompressed JSON size of one value as <see cref="LokiPushPayload"/> writes it: the raw
+        /// UTF-8 line, plus escapes (1 extra byte for a quote or backslash, 5 for a control character
+        /// written as \uXXXX), plus timestamp and punctuation.
+        /// </summary>
+        public static long EstimateBytes(in LokiEntry entry)
+        {
+            long escapes = 0;
+            foreach (var c in entry.Line)
+            {
+                if (c is '"' or '\\')
+                {
+                    escapes += 1;
+                }
+                else if (c < ' ' || c == '\u007F')
+                {
+                    escapes += 5;
+                }
+            }
+
+            return Encoding.UTF8.GetByteCount(entry.Line) + escapes + 32;
+        }
 
         /// <summary>Returns the drops since the previous call and resets that counter.</summary>
         public long TakeDroppedCount() => Interlocked.Exchange(ref _dropped, 0);

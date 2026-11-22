@@ -317,13 +317,23 @@ internal static class ObservabilityTests
             AssertEqual("2,4,8,16,32,60", string.Join(",", delays));
             AssertEqual(1, sink.PendingCount);
 
-            // The 8th failed attempt gives the batch up: counted as dropped, logged once.
+            // 5xx is the server's problem: no attempt limit, the batch is kept until it is accepted.
+            for (var i = 0; i < 10; i++)
+            {
+                now = sink.RetryAt;
+                statuses.Enqueue(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
+                AssertEqual(now + TimeSpan.FromSeconds(60), sink.RetryAt);
+            }
+
+            AssertEqual(1, sink.PendingCount);
             now = sink.RetryAt;
-            statuses.Enqueue(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
-            sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
+            statuses.Enqueue(new HttpResponseMessage(HttpStatusCode.NoContent));
+            AssertEqual(LokiPushOutcome.Success, sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult()!.Outcome);
+            AssertTrue(bodies[^1].Contains("throttled"), "the retried batch was not delivered");
             AssertEqual(0, sink.PendingCount);
-            AssertEqual(4L, sink.DroppedByServer);
-            AssertEqual(1, logs.Entries.Count(e => e.Level == LogLevel.Warning && e.Message.Contains("gave up on 1 entries after 8 attempt")));
+            AssertEqual(3L, sink.DroppedByServer);
+            AssertTrue(logs.Messages.All(m => !m.Contains("gave up")), "a 5xx batch was given up");
         }),
         ("Loki logger provider: level filter, disabled sink, and no recursion from the sink or HttpClient", () =>
         {
@@ -641,23 +651,119 @@ internal static class ObservabilityTests
             queue.TryEnqueue(LokiStreamKind.Log, "info", new string('y', 50_000));
             AssertTrue(queue.DequeueBatch(10, maxBytes: 100).Single().Line.Length <= LokiEntryQueue.MaxLineLength + 20, "oversized entry not truncated / not returned alone");
         }),
-        ("Loki gives a failing batch up after 10 minutes", () =>
+        ("A 15-minute network outage loses nothing that is still queued: 100% delivered after recovery", () =>
+        {
+            var now = DateTimeOffset.UnixEpoch;
+            var outageEnds = now + TimeSpan.FromMinutes(15);
+            var delivered = new List<string>();
+            var failures = 0;
+            var sink = new LokiSink(new LokiEntryQueue(), NullLogger<LokiSink>.Instance, new FakeHandler(request =>
+            {
+                if (now < outageEnds)
+                {
+                    failures++;
+                    if (failures % 3 == 0)
+                    {
+                        return new HttpResponseMessage(HttpStatusCode.BadGateway);   // mix in 5xx
+                    }
+
+                    throw new HttpRequestException("No connection could be made because the target machine actively refused it.");
+                }
+
+                delivered.AddRange(Lines(request));
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }), () => now);
+            sink.Configure(new LokiSettings { Enabled = true, Url = "http://loki.test", FlushIntervalMs = 2000, Gzip = false });
+
+            // 6 entries per minute for 20 minutes, driven like the sender loop in 1 s steps.
+            var produced = new List<string>();
+            for (var second = 0; second < 20 * 60; second++)
+            {
+                if (second % 10 == 0)
+                {
+                    var line = "entry " + second;
+                    produced.Add(line);
+                    sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", line);
+                }
+
+                while (sink.IsFlushDue(now))
+                {
+                    sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
+                }
+
+                now += TimeSpan.FromSeconds(1);
+            }
+
+            while (sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult() != null)
+            {
+            }
+
+            AssertTrue(failures > 10, "outage not exercised: " + failures);
+            AssertEqual(0L, sink.DroppedByServer);
+            AssertEqual(0L, sink.Queue.TotalDropped);
+            AssertEqual(string.Join(",", produced), string.Join(",", delivered));   // all, once, in order
+        }),
+        ("Only a single entry still throttled (429 without Retry-After) after splitting is given up", () =>
         {
             var now = DateTimeOffset.UnixEpoch;
             var logs = new CapturingLogs();
             using var factory = logs.Factory();
-            var sink = new LokiSink(new LokiEntryQueue(), factory.CreateLogger<LokiSink>(),
-                new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)), () => now);
+            var withRetryAfter = 0;
+            var sink = new LokiSink(new LokiEntryQueue(), factory.CreateLogger<LokiSink>(), new FakeHandler(_ =>
+                withRetryAfter-- > 0
+                    ? new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Headers = { RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(5)) } }
+                    : new HttpResponseMessage(HttpStatusCode.TooManyRequests)), () => now);
             sink.Configure(new LokiSettings { Enabled = true, Url = "http://loki.test" });
-            sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", "a");
-            sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", "b");
-            sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
-            AssertEqual(2, sink.PendingCount);
-            now += TimeSpan.FromMinutes(11);
-            sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+            // With Retry-After the server is just pacing us: retried, never given up.
+            withRetryAfter = 20;
+            sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", "paced");
+            for (var i = 0; i < 20; i++)
+            {
+                sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+
+            AssertEqual(1, sink.PendingCount);
+            AssertEqual(0L, sink.DroppedByServer);
+
+            // Without Retry-After: the single entry is given up after the third throttle.
+            for (var i = 0; i < 3; i++)
+            {
+                sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+
             AssertEqual(0, sink.PendingCount);
-            AssertEqual(2L, sink.DroppedByServer);
-            AssertEqual(1, logs.Entries.Count(e => e.Level == LogLevel.Warning && e.Message.Contains("gave up on 2 entries after 2 attempt")));
+            AssertEqual(1L, sink.DroppedByServer);
+            AssertEqual(1, logs.Entries.Count(e => e.Level == LogLevel.Warning && e.Message.Contains("gave up on 1 entry")));
+        }),
+        ("Batch byte cap holds for CJK text, which is sent as raw UTF-8 with valid escaping", () =>
+        {
+            var bodies = new List<byte[]>();
+            var sink = new LokiSink(new LokiEntryQueue(), NullLogger<LokiSink>.Instance, new FakeHandler(request =>
+            {
+                bodies.Add(request.Content!.ReadAsByteArrayAsync().GetAwaiter().GetResult());
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }));
+            sink.Configure(new LokiSettings { Enabled = true, Url = "http://loki.test", BatchMaxEntries = 5000, Gzip = false });
+            var originals = new List<string>();
+            for (var i = 0; i < 200; i++)
+            {
+                var line = $"{i:D3} 设备状态 \"quoted\" back\\slash \u0001\n" + string.Concat(Enumerable.Repeat("资源监视器日志", 700));
+                originals.Add(line);
+                sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", line);
+            }
+
+            while (sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult() != null)
+            {
+            }
+
+            AssertTrue(bodies.Count >= 3, "expected several batches, got " + bodies.Count);
+            AssertTrue(bodies.All(b => b.Length <= LokiSink.MaxBatchBytes + 4096), "CJK batch over the cap: " + string.Join(",", bodies.Select(b => b.Length)));
+            var text = Encoding.UTF8.GetString(bodies[0]);
+            AssertTrue(text.Contains("资源监视器日志") && !text.Contains("\\u8d44"), "CJK text not sent as raw UTF-8");
+            AssertTrue(text.Contains("\\\"quoted\\\"") && text.Contains("\\u0001") && text.Contains("\\n"), "quotes/control characters not escaped");
+            var received = bodies.SelectMany(b => JsonNode.Parse(b)!["streams"]!.AsArray().SelectMany(s => s!["values"]!.AsArray().Select(v => v![1]!.GetValue<string>()))).ToList();
+            AssertEqual(string.Join("|", originals), string.Join("|", received));
         }),
         ("Loki splits a batch on 413 and after repeated 429, keeping entry order", () =>
         {
@@ -753,6 +859,15 @@ internal static class ObservabilityTests
             AssertEqual("on <host>.", redactor.Redact("on desktop-42.", false));
             AssertEqual("on desktop-42.", redactor.Redact("on desktop-42.", keepHostName: true));
             AssertEqual("bo was here", new LokiLogRedactor(Array.Empty<(string, string)>(), "bo", null).Redact("bo was here", false));
+
+            // 8.3 short forms: registered folders, plus the generic \Users\<name>\ fallback.
+            var withShort = new LokiLogRedactor(new[] { (@"C:\Users\Alice Smith\AppData\Local", "%LOCALAPPDATA%"), (@"C:\Users\ALICES~1\AppData\Local", "%LOCALAPPDATA%") }, "Alice Smith", null);
+            AssertEqual(@"temp=%LOCALAPPDATA%\Temp\x.tmp", withShort.Redact(@"temp=C:\Users\ALICES~1\AppData\Local\Temp\x.tmp", false));
+            AssertEqual(@"C:\Users\<user>\Documents and /Users/<user>/logs", redactor.Redact(@"C:\Users\JDOEXA~1\Documents and /Users/someone/logs", false));
+
+            // The real TEMP path (often reported in 8.3 form) keeps no part of the user folder name.
+            var temp = LokiLogRedactor.ForCurrentUser().Redact(Path.GetTempPath(), false);
+            AssertTrue(!System.Text.RegularExpressions.Regex.IsMatch(temp, @"[\\/]Users[\\/](?!<user>)", System.Text.RegularExpressions.RegexOptions.IgnoreCase), "user folder leaked: " + temp);
         }),
         ("End to end: Loki never receives the Windows user name, user folders or (by default) the PC name", () =>
         {

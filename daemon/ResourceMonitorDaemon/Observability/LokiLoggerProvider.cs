@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -97,8 +98,11 @@ namespace ResourceMonitorDaemon.Observability
     /// <item>per-user folders are replaced by <c>%LOCALAPPDATA%</c>, <c>%APPDATA%</c> or
     /// <c>%USERPROFILE%</c> (longest match first, case-insensitive);</item>
     /// <item>the Windows user name is replaced by <c>&lt;user&gt;</c> (whole word, case-insensitive);</item>
-    /// <item>the machine name is replaced by <c>&lt;host&gt;</c> unless the user opted into the host label.</item>
+    /// <item>the machine name is replaced by <c>&lt;host&gt;</c> unless the user opted into the host label;</item>
+    /// <item>as a fallback, the folder name after any <c>\Users\</c> or <c>/Users/</c> in a path
+    /// (including 8.3 short forms such as <c>C:\Users\ABCDEF~1</c>) becomes <c>&lt;user&gt;</c>.</item>
     /// </list>
+    /// The current user's folders are registered in their long and short (8.3) forms.
     /// Names shorter than <see cref="MinNameLength"/> characters are not replaced as words (that
     /// would mangle ordinary text); paths containing them are still covered by the folder rules.
     /// </summary>
@@ -109,6 +113,13 @@ namespace ResourceMonitorDaemon.Observability
         public const int MinNameLength = 3;
 
         private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
+
+        // The path segment after \Users\ or /Users/ (no spaces: an 8.3 name never has any).
+        private static readonly Regex UsersSegment = new(
+            @"(?<=[\\/]Users[\\/])[^\\/:*?""<>|\s]+",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            MatchTimeout);
+
         private readonly (string Prefix, string Token)[] _prefixes;
         private readonly Regex? _user;
         private readonly Regex? _host;
@@ -125,15 +136,49 @@ namespace ResourceMonitorDaemon.Observability
         }
 
         /// <summary>Redactor for the current Windows user and PC.</summary>
-        public static LokiLogRedactor ForCurrentUser() => new(
-            new[]
+        public static LokiLogRedactor ForCurrentUser()
+        {
+            var folders = new List<(string, string)>();
+            foreach (var (folder, token) in new[]
             {
-                (Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "%LOCALAPPDATA%"),
-                (Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "%APPDATA%"),
-                (Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "%USERPROFILE%"),
-            },
-            Environment.UserName,
-            Environment.MachineName);
+                (Environment.SpecialFolder.LocalApplicationData, "%LOCALAPPDATA%"),
+                (Environment.SpecialFolder.ApplicationData, "%APPDATA%"),
+                (Environment.SpecialFolder.UserProfile, "%USERPROFILE%"),
+            })
+            {
+                var path = Environment.GetFolderPath(folder);
+                folders.Add((path, token));
+                if (ShortPath(path) is { } shortPath && !string.Equals(shortPath, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    folders.Add((shortPath, token));   // e.g. TEMP is usually reported as C:\Users\ABCDEF~1\...
+                }
+            }
+
+            return new LokiLogRedactor(folders, Environment.UserName, Environment.MachineName);
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint bufferLength);
+
+        /// <summary>The 8.3 form of an existing path, or null.</summary>
+        internal static string? ShortPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                var buffer = new StringBuilder(path.Length + 16);
+                var length = GetShortPathName(path, buffer, (uint)buffer.Capacity);
+                return length > 0 && length < buffer.Capacity ? buffer.ToString() : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
 
         public string Redact(string text, bool keepHostName)
         {
@@ -143,6 +188,7 @@ namespace ResourceMonitorDaemon.Observability
             }
 
             text = Replace(_user, text, UserPlaceholder);
+            text = Replace(UsersSegment, text, UserPlaceholder);
             return keepHostName ? text : Replace(_host, text, HostPlaceholder);
         }
 

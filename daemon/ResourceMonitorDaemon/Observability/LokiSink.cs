@@ -12,10 +12,13 @@ namespace ResourceMonitorDaemon.Observability
     /// <item>A batch is also capped at <see cref="MaxBatchBytes"/> of uncompressed line data.</item>
     /// <item>429, 5xx, timeouts and network errors keep the batch and retry it with exponential
     /// backoff (1 s doubling to 60 s, <see cref="ReconnectBackoff"/>), honouring Retry-After up to
-    /// 60 s; new entries keep queueing (bounded, drop-oldest) meanwhile. After
-    /// <see cref="SplitAfterThrottles"/> throttled (429) attempts a batch is split in half. A batch is
-    /// given up after <see cref="MaxAttempts"/> attempts or <see cref="MaxBatchAge"/> since its
-    /// first failure (Loki rejects old entries anyway); given-up entries count as dropped.</item>
+    /// 60 s; new entries keep queueing (bounded, drop-oldest) meanwhile. Network errors, timeouts
+    /// and 5xx are retried without an attempt or age limit, so an outage of any length loses only
+    /// what the bounded queue itself drops; Loki rejects entries that are too old with a 400, which
+    /// drops that batch.</item>
+    /// <item>A batch throttled (429 without Retry-After) <see cref="SplitAfterThrottles"/> times is
+    /// split in half; a single entry throttled that often is given up (counted as dropped). 429 with
+    /// Retry-After is retried as long as the server asks.</item>
     /// <item>413 (payload too large) splits the batch in half and retries at once; a single entry
     /// that is still too large is dropped.</item>
     /// <item>Other 4xx (and 3xx) drop the batch; logged once per status until a push succeeds.
@@ -33,9 +36,7 @@ namespace ResourceMonitorDaemon.Observability
         public static readonly TimeSpan InitialRetryDelay = TimeSpan.FromSeconds(1);
         public static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(60);
         public static readonly TimeSpan DropReportInterval = TimeSpan.FromMinutes(1);
-        public static readonly TimeSpan MaxBatchAge = TimeSpan.FromMinutes(10);
         public const long MaxBatchBytes = 1024 * 1024;
-        public const int MaxAttempts = 8;
         public const int SplitAfterThrottles = 3;
         private const int FailureSummaryInterval = 20;
 
@@ -381,8 +382,8 @@ namespace ResourceMonitorDaemon.Observability
         private void SplitLocked(PendingBatch batch)
         {
             var mid = batch.Entries.Count / 2;
-            _pending.Insert(0, new PendingBatch(batch.Entries.GetRange(mid, batch.Entries.Count - mid)) { Attempts = batch.Attempts, FirstFailure = batch.FirstFailure });
-            _pending.Insert(0, new PendingBatch(batch.Entries.GetRange(0, mid)) { Attempts = batch.Attempts, FirstFailure = batch.FirstFailure });
+            _pending.Insert(0, new PendingBatch(batch.Entries.GetRange(mid, batch.Entries.Count - mid)) { Attempts = batch.Attempts });
+            _pending.Insert(0, new PendingBatch(batch.Entries.GetRange(0, mid)) { Attempts = batch.Attempts });
         }
 
         private void OnSuccess()
@@ -409,19 +410,18 @@ namespace ResourceMonitorDaemon.Observability
             TimeSpan delay;
             int failures;
             bool giveUp = false, warnGiveUp = false, split = false;
-            TimeSpan age;
             lock (_gate)
             {
-                var now = _clock();
                 batch.Attempts++;
-                batch.FirstFailure ??= now;
-                if (result.StatusCode == 429)
+
+                // Only a throttle without Retry-After counts against the batch itself; network
+                // errors, timeouts and 5xx are the server's problem and are retried indefinitely.
+                if (result.StatusCode == 429 && result.RetryAfter == null)
                 {
                     batch.Throttled++;
                 }
 
-                age = now - batch.FirstFailure.Value;
-                if (batch.Attempts >= MaxAttempts || age >= MaxBatchAge)
+                if (batch.Throttled >= SplitAfterThrottles && batch.Entries.Count == 1)
                 {
                     giveUp = true;
                     warnGiveUp = !_giveUpLogged;
@@ -457,8 +457,8 @@ namespace ResourceMonitorDaemon.Observability
                 var level = warnGiveUp ? LogLevel.Warning : LogLevel.Debug;
                 _logger.Log(
                     level,
-                    "Loki: gave up on {Count} entries after {Attempts} attempt(s) over {Minutes:F1} min ({Result}); they are dropped.",
-                    batch.Entries.Count, batch.Attempts, age.TotalMinutes, result);
+                    "Loki: gave up on {Count} entry after {Attempts} attempt(s): still throttled after splitting ({Result}); it is dropped.",
+                    batch.Entries.Count, batch.Attempts, result);
             }
             else if (split)
             {
@@ -622,8 +622,6 @@ namespace ResourceMonitorDaemon.Observability
             public int Attempts { get; set; }
 
             public int Throttled { get; set; }
-
-            public DateTimeOffset? FirstFailure { get; set; }
         }
     }
 }

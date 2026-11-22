@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace ResourceMonitorDaemon.Observability
@@ -21,6 +22,11 @@ namespace ResourceMonitorDaemon.Observability
     /// </remarks>
     public static class LokiPushPayload
     {
+        // Non-ASCII text (e.g. Chinese log lines) is written as raw UTF-8 instead of \uXXXX, which
+        // keeps the body size close to the queue's estimate; quotes, backslashes and control
+        // characters are still escaped, so the body is valid JSON. Loki reads it as plain JSON.
+        private static readonly JsonWriterOptions WriterOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
         public static byte[] BuildJson(IReadOnlyList<LokiEntry> entries, string? hostLabel)
         {
             // Group per stream in first-seen order; OrderBy is stable for equal timestamps.
@@ -29,7 +35,7 @@ namespace ResourceMonitorDaemon.Observability
                 .Select(group => (group.Key, Values: group.OrderBy(entry => entry.TimestampNs).ToList()));
 
             using var buffer = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(buffer))
+            using (var writer = new Utf8JsonWriter(buffer, WriterOptions))
             {
                 writer.WriteStartObject();
                 writer.WriteStartArray("streams");
