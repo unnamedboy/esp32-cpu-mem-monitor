@@ -61,9 +61,11 @@ internal static class MqttConnectionScenario
         var server = await StartBrokerAsync(port, received);
         try
         {
+            Check(connection.ConnectionGeneration == 0, "generation before the first connection");
             connection.MaintainConnection();
             await connection.PendingAttempt;
             Check(connection.IsConnected, "did not connect once the broker was up");
+            Check(connection.ConnectionGeneration == 1, "generation after the first connection");
             Check(connection.FailedAttemptsInOutage == 0, "outage failure count not reset after success");
             CheckNotifications(notifications, Failed, Reconnected);
 
@@ -81,6 +83,7 @@ internal static class MqttConnectionScenario
             connection.MaintainConnection();
             await connection.PendingAttempt;
             Check(connection.IsConnected, "fallback address was not used");
+            Check(connection.ConnectionGeneration == 2, "a reconnect must change the generation");
             CheckNotifications(notifications, Failed, Reconnected);
         }
         finally
