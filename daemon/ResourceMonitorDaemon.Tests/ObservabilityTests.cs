@@ -839,6 +839,10 @@ internal static class ObservabilityTests
         {
             StatusTopicChangeDuringConnect().GetAwaiter().GetResult();
         }),
+        ("MqttConnection.DisposeAsync waits for a just-started resubscribe; nothing faults unobserved", () =>
+        {
+            DisposeDuringResubscribe().GetAwaiter().GetResult();
+        }),
         ("Only a single entry still throttled (429 without Retry-After) after splitting is given up", () =>
         {
             var now = DateTimeOffset.UnixEpoch;
@@ -1270,6 +1274,59 @@ internal static class ObservabilityTests
         listener.Stop();
         await acceptLoop;
         accepted.ForEach(c => c.Dispose());
+    }
+
+    private static async Task DisposeDuringResubscribe()
+    {
+        var unobserved = 0;
+        EventHandler<UnobservedTaskExceptionEventArgs> handler = (_, e) =>
+        {
+            if (e.Exception.Flatten().InnerExceptions.Any(x => x is ObjectDisposedException))
+            {
+                Interlocked.Increment(ref unobserved);
+            }
+
+            e.SetObserved();
+        };
+        TaskScheduler.UnobservedTaskException += handler;
+        try
+        {
+            for (var i = 0; i < 5; i++)
+            {
+                var port = FreePort();
+                var server = await StartBrokerAsync(port);
+                try
+                {
+                    var settings = new DeviceSettings { Host = "127.0.0.1", Port = port, ConnectTimeoutMs = 1000 };
+                    var connection = new MqttConnection(NullLogger<MqttConnection>.Instance);
+                    connection.Configure(settings);
+                    connection.MaintainConnection();
+                    await connection.PendingAttempt;
+                    AssertTrue(connection.IsConnected, "not connected");
+
+                    connection.Configure(settings with { StatusTopic = "lab/status" + i });   // starts a resubscribe
+                    var resubscribe = connection.PendingResubscribe;
+                    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                    await connection.DisposeAsync();
+                    AssertTrue(stopwatch.ElapsedMilliseconds < 1500, $"dispose took {stopwatch.ElapsedMilliseconds} ms");
+                    AssertTrue(resubscribe.IsCompleted && !resubscribe.IsFaulted, "resubscribe still running or faulted after dispose");
+                }
+                finally
+                {
+                    await server.StopAsync();
+                    server.Dispose();
+                }
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            AssertEqual(0, unobserved);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= handler;
+        }
     }
 
     private static async Task StatusTopicChangeDuringConnect()
