@@ -469,6 +469,180 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual("v1.0", ProtocolVersionInfo.Parse(Encoding.UTF8.GetBytes("v1.0")).Version);
                 AssertEqual<string?>(null, ProtocolVersionInfo.Parse(Array.Empty<byte>()).Version);
             }),
+
+            // ---- review follow-ups -----------------------------------------------------------
+
+            ("ProtoWire rejects out-of-range tags with ProvisioningProtocolException", () =>
+            {
+                foreach (var hex in new[]
+                {
+                    "F8FFFFFF7F",           // field number 0xFFFFFFFF (overflowed int before the fix)
+                    "8080808010",           // field number 2^29, one above the maximum
+                    "FFFFFFFFFFFFFFFFFF01", // 64-bit tag
+                    "0E00", "0F00",         // wire types 6 and 7
+                    "0700",                 // field 0
+                })
+                {
+                    AssertThrows<ProvisioningProtocolException>(() =>
+                    {
+                        var reader = new ProtoReader(Hex(hex));
+                        reader.TryReadTag(out _, out _);
+                    });
+                    AssertThrows<ProvisioningProtocolException>(() => Sec1Messages.DecodeResponse(Hex(hex)));
+                    AssertThrows<ProvisioningProtocolException>(() => WifiConfigMessages.DecodeResponse(Hex(hex)));
+                }
+
+                // Largest legal field number still decodes: tag (2^29-1)<<3 | 0 = F8 FF FF FF 0F.
+                var ok = new ProtoReader(Hex("F8FFFFFF0F00"));
+                AssertTrue(ok.TryReadTag(out var field, out _));
+                AssertEqual(0x1FFFFFFF, field);
+            }),
+            ("ProtoWire rejects huge or truncated lengths", () =>
+            {
+                foreach (var hex in new[] { "0AFFFFFFFF0F", "0AFFFFFFFFFFFFFFFF7F", "0A80", "0A02AA" })
+                {
+                    AssertThrows<ProvisioningProtocolException>(() => Sec1Messages.DecodeResponse(Hex(hex)));
+                    AssertThrows<ProvisioningProtocolException>(() => WifiConfigMessages.DecodeResponse(Hex("5A" + hex[2..])));
+                }
+            }),
+            ("Message decoders only ever throw ProvisioningProtocolException on random input", () =>
+            {
+                var random = new Random(7748);
+                var seeds = new[]
+                {
+                    Sec1Messages.EncodeCommand0(Sequence(1, 32)),
+                    Hex("1001" + "5A0B" + "0803" + "BA0106" + "0806" + "1A02BEEF"),
+                    Hex("0801" + "5A04" + "1003" + "5001"),
+                    WifiConfigMessages.EncodeSetConfig(Encoding.UTF8.GetBytes("home"), Encoding.UTF8.GetBytes("password")),
+                };
+                for (var i = 0; i < 20000; i++)
+                {
+                    byte[] input;
+                    if (i % 2 == 0)
+                    {
+                        input = new byte[random.Next(0, 48)];
+                        random.NextBytes(input);
+                    }
+                    else
+                    {
+                        input = (byte[])seeds[random.Next(seeds.Length)].Clone();
+                        for (var m = random.Next(1, 4); m > 0; m--)
+                        {
+                            input[random.Next(input.Length)] = (byte)random.Next(256);
+                        }
+                    }
+
+                    foreach (var decode in new Action<byte[]>[] { b => Sec1Messages.DecodeResponse(b), b => WifiConfigMessages.DecodeResponse(b) })
+                    {
+                        try
+                        {
+                            decode(input);
+                        }
+                        catch (ProvisioningProtocolException)
+                        {
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new InvalidOperationException($"{ex.GetType().Name} for input {ToHex(input)}");
+                        }
+                    }
+                }
+            }),
+            ("Empty RespGetStatus is not mistaken for Connected", () => RunAsync(async () =>
+            {
+                AssertEqual(WifiStationState.Connecting, WifiConfigMessages.DecodeResponse(Hex("0801" + "5A00")).StaState);
+                AssertEqual(WifiStationState.Connecting, WifiConfigMessages.DecodeResponse(Hex("0801")).StaState);
+
+                var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 0, EmptyStatusPolls = 2 };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var result = await new WifiConfigClient(session, FastPoll, FastTimeout).ConfigureAsync("home", "password1", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertEqual(3, device.StatusPolls);
+            })),
+            ("Stale Response0 returned for Command1 -> PairingCodeRejectedException", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { StaleResponse0OnWrongPop = true };
+                var ex = await AssertThrowsAsync<PairingCodeRejectedException>(
+                    () => Security1Session.EstablishAsync(device, "ZZZZZZZZ", CancellationToken.None));
+                AssertEqual(PairingCodeRejectionReason.DeviceClosedConnection, ex.Reason);
+            })),
+            ("Link lost while waiting for Wi-Fi -> ConnectionLost result", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { DisconnectWhileConnecting = true };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var result = await new WifiConfigClient(session, FastPoll, FastTimeout).ConfigureAsync("home", "password1", CancellationToken.None);
+                var lost = result as WifiProvisioningResult.ConnectionLost;
+                AssertTrue(lost is not null, $"expected ConnectionLost, got {result}");
+                AssertTrue(lost!.Reason.Contains("may have joined Wi-Fi"), "reason should tell the user the device may be connected");
+            })),
+            ("Link dropped right after the Connected read still yields Connected", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { CloseLinkAfterConnected = true };
+                var service = new ProvisioningService(null, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
+                var result = await service.ProvisionAsync(TestDevice, "ABCDEFGH", "home", "password1", null, CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+            })),
+            ("Retry after Failed without device reset -> ProvisioningRetryRejectedException", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { FinalState = WifiStationState.ConnectionFailed };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+                var first = await client.ConfigureAsync("home", "wrong-pass", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), first);
+
+                var ex = await AssertThrowsAsync<ProvisioningRetryRejectedException>(
+                    () => client.ConfigureAsync("home", "right-pass", CancellationToken.None));
+                AssertTrue(ex.Message.Contains("BOOT"), "message should explain how to restart provisioning");
+                AssertTrue(!ex.ToString().Contains("right-pass"), "passphrase leaked");
+            })),
+            ("Retry after Failed with device reset_sm_state_on_failure succeeds", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH") { FinalState = WifiStationState.ConnectionFailed, ResetStateOnFailure = true };
+                using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+                await client.ConfigureAsync("home", "wrong-pass", CancellationToken.None);
+                device.FinalState = WifiStationState.Connected;
+                var second = await client.ConfigureAsync("home", "right-pass", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), second);
+                AssertEqual("right-pass", device.ReceivedPassphrase);
+            })),
+            ("WaitForConnectionAsync stays within its budget when GetStatus hangs", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH");
+                var hooked = new HookedTransport(device)
+                {
+                    // 1 = SetConfig, 2 = ApplyConfig, 3+ = GetStatus: the first poll never gets an answer.
+                    BeforeConfig = (n, ct) => n >= 3 ? Task.Delay(Timeout.Infinite, ct) : Task.CompletedTask,
+                };
+                using var session = await Security1Session.EstablishAsync(hooked, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(300));
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var result = await client.ConfigureAsync("home", "password1", CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Timeout(WifiStationState.Connecting), result);
+                AssertTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"overran budget: {stopwatch.Elapsed}");
+            })),
+            ("Security1Session.Dispose during an in-flight exchange is safe", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("ABCDEFGH");
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var hooked = new HookedTransport(device)
+                {
+                    BeforeConfig = (_, _) => { entered.TrySetResult(); return release.Task; },
+                };
+                var session = await Security1Session.EstablishAsync(hooked, "ABCDEFGH", CancellationToken.None);
+                var client = new WifiConfigClient(session, FastPoll, FastTimeout);
+
+                var inFlight = client.GetStatusAsync(CancellationToken.None);
+                await entered.Task;
+                session.Dispose();
+                release.SetResult();
+
+                var status = await inFlight; // must not throw ObjectDisposedException from the semaphore or cipher
+                AssertEqual(WifiStationState.Disconnected, status.State);
+                await AssertThrowsAsync<ObjectDisposedException>(() => client.GetStatusAsync(CancellationToken.None));
+                session.Dispose(); // idempotent
+            })),
         };
 
         /// <summary>IProgress that records synchronously (Progress&lt;T&gt; posts asynchronously).</summary>

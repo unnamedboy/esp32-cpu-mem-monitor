@@ -12,10 +12,12 @@ namespace ResourceMonitorDaemon.Tests
     /// <summary>
     /// In-memory model of the device side of ESP-IDF v4.4.7 protocomm Security1 + wifi_config, modelled
     /// on components/protocomm/src/security/security1.c and wifi_provisioning/src/wifi_config.c.
-    /// It deliberately uses different crypto code paths from the client: BouncyCastle's
+    /// Its crypto deliberately uses different code paths from the client: BouncyCastle's
     /// X25519PrivateKeyParameters/X25519Agreement for the key exchange and BouncyCastle's
-    /// SicBlockCipher (CTR) for its own keystream, and parses requests with field numbers written out
-    /// here rather than the client's message helpers.
+    /// SicBlockCipher (CTR) for its own keystream. Message layouts are written out here with literal
+    /// field numbers rather than the client's Sec1Messages/WifiConfigMessages, but the low-level
+    /// protobuf framing reuses the client's ProtoReader/ProtoWriter, so it does not independently
+    /// verify varint/tag encoding (the byte-level ProtoWire tests cover that).
     /// </summary>
     internal sealed class FakeProvisioningDevice : IProvisioningTransport
     {
@@ -23,6 +25,8 @@ namespace ResourceMonitorDaemon.Tests
         private DeviceCtrStream? _stream;
         private byte[]? _devicePubkey;
         private byte[]? _clientPubkey;
+        private byte[]? _lastResponse0;
+        private bool _failedAttempt;
         private bool _sessionEstablished;
         private bool _connectionClosed;
 
@@ -40,6 +44,11 @@ namespace ResourceMonitorDaemon.Tests
         public string Ip4Address { get; set; } = "192.168.1.50";
         public ProtocommStatus SetConfigStatus { get; set; } = ProtocommStatus.Success;
         public bool FailNextConfigExchange { get; set; }
+        public bool StaleResponse0OnWrongPop { get; set; }
+        public bool ResetStateOnFailure { get; set; }
+        public bool DisconnectWhileConnecting { get; set; }
+        public bool CloseLinkAfterConnected { get; set; }
+        public int EmptyStatusPolls { get; set; }
 
         // Observations
         public string? ReceivedSsid { get; private set; }
@@ -153,7 +162,8 @@ namespace ResourceMonitorDaemon.Tests
                     sr0.WriteBytesField(3, deviceRandom);
                 });
             });
-            return writer.ToArray();
+            _lastResponse0 = writer.ToArray();
+            return _lastResponse0;
         }
 
         private byte[] HandleCommand1(byte[]? clientVerify)
@@ -167,6 +177,14 @@ namespace ResourceMonitorDaemon.Tests
             byte[] deviceVerify;
             if (!check.AsSpan().SequenceEqual(_devicePubkey))
             {
+                if (StaleResponse0OnWrongPop)
+                {
+                    // Prepared-write path: exec_write acknowledges the write even though the handler
+                    // failed, closes the link, and the read returns the attribute's previous value.
+                    _connectionClosed = true;
+                    return _lastResponse0!;
+                }
+
                 if (!ForgeDeviceVerifyData)
                 {
                     // security1.c returns ESP_FAIL; protocomm_ble.c then calls esp_ble_gatts_close().
@@ -238,16 +256,47 @@ namespace ResourceMonitorDaemon.Tests
                     writer.WriteMessageField(13, r => WriteStatus(r, SetConfigStatus));
                     break;
                 case 4: // TypeCmdApplyConfig -> TypeRespApplyConfig(5), resp_apply_config(15)
-                    Applied = true;
+                    // wifi_prov_mgr_configure_sta fails (-> InternalError) after a failed attempt unless the
+                    // firmware called wifi_prov_mgr_reset_sm_state_on_failure().
+                    var applyStatus = _failedAttempt && !ResetStateOnFailure ? ProtocommStatus.InternalError : ProtocommStatus.Success;
+                    if (applyStatus == ProtocommStatus.Success)
+                    {
+                        Applied = true;
+                        _failedAttempt = false;
+                        StatusPolls = 0;
+                    }
+
                     writer.WriteVarintField(1, 5);
-                    writer.WriteMessageField(15, r => WriteStatus(r, ProtocommStatus.Success));
+                    writer.WriteMessageField(15, r => WriteStatus(r, applyStatus));
                     break;
                 case 0: // TypeCmdGetStatus -> TypeRespGetStatus(1), resp_get_status(11)
+                    if (Applied && DisconnectWhileConnecting)
+                    {
+                        return CloseConnection();
+                    }
+
                     StatusPolls++;
                     var state = !Applied ? WifiStationState.Disconnected
                         : StatusPolls <= ConnectingPolls ? WifiStationState.Connecting
                         : FinalState;
+                    if (state == WifiStationState.ConnectionFailed)
+                    {
+                        _failedAttempt = true;
+                    }
+
                     writer.WriteVarintField(1, 1);
+                    if (StatusPolls <= EmptyStatusPolls)
+                    {
+                        writer.WriteBytesField(11, ReadOnlySpan<byte>.Empty); // RespGetStatus with every field defaulted
+                        break;
+                    }
+
+                    if (state == WifiStationState.Connected && CloseLinkAfterConnected)
+                    {
+                        // handlers.c calls wifi_prov_mgr_done() right after reporting Connected.
+                        _connectionClosed = true;
+                    }
+
                     writer.WriteMessageField(11, r =>
                     {
                         if (state != WifiStationState.Connected)
@@ -330,5 +379,32 @@ namespace ResourceMonitorDaemon.Tests
                 return output;
             }
         }
+    }
+
+    /// <summary>Wraps a transport and lets a test hold or stall individual prov-config exchanges.</summary>
+    internal sealed class HookedTransport : IProvisioningTransport
+    {
+        private readonly IProvisioningTransport _inner;
+        private int _configCalls;
+
+        public HookedTransport(IProvisioningTransport inner)
+        {
+            _inner = inner;
+        }
+
+        /// <summary>Called before forwarding the Nth (1-based) prov-config exchange.</summary>
+        public Func<int, CancellationToken, Task>? BeforeConfig { get; set; }
+
+        public async Task<byte[]> SendAsync(string endpoint, byte[] data, CancellationToken cancellationToken)
+        {
+            if (endpoint == "prov-config" && BeforeConfig is not null)
+            {
+                await BeforeConfig(++_configCalls, cancellationToken);
+            }
+
+            return await _inner.SendAsync(endpoint, data, cancellationToken);
+        }
+
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 }
