@@ -12,12 +12,12 @@ namespace ResourceMonitorDaemon
 {
     public class TrayContext : IDisposable
     {
-        private readonly IHost _host;
         private readonly string _logFilePath;
         private readonly NotifyIcon _notifyIcon;
         private readonly MonitorService _monitorService;
         private readonly ISettingsStore _settingsStore;
         private readonly IOptionsMonitor<DeviceSettings> _settingsMonitor;
+        private readonly ILoggerFactory _loggerFactory;
         private readonly SynchronizationContext? _uiContext;
         private readonly System.Windows.Forms.Timer _updateTimer;
         private ToolStripMenuItem? _pauseResumeItem;
@@ -29,14 +29,14 @@ namespace ResourceMonitorDaemon
 
         public TrayContext(IHost host, string logFilePath, MonitorService monitorService, ISettingsStore settingsStore)
         {
-            _host = host;
             _logFilePath = logFilePath;
             _monitorService = monitorService;
             _settingsStore = settingsStore;
             _settingsMonitor = host.Services.GetRequiredService<IOptionsMonitor<DeviceSettings>>();
+            _loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
             _firstRunPrompt = new FirstRunPairingPrompt(
                 FirstRunPairingPrompt.DefaultMarkerPath,
-                host.Services.GetRequiredService<ILoggerFactory>().CreateLogger<FirstRunPairingPrompt>());
+                _loggerFactory.CreateLogger<FirstRunPairingPrompt>());
 
             var contextMenu = new ContextMenuStrip();
 
@@ -56,7 +56,7 @@ namespace ResourceMonitorDaemon
             contextMenu.Items.Add(PairingText.TrayMenuItem, null, (_, _) => OpenPairingWizard());
             contextMenu.Items.Add("查看日志 (Log)", null, OnViewLog);
             contextMenu.Items.Add("-");
-            contextMenu.Items.Add("退出 (Exit)", null, OnExitAsync);
+            contextMenu.Items.Add("退出 (Exit)", null, OnExit);
 
             _notifyIcon = new NotifyIcon
             {
@@ -176,7 +176,7 @@ namespace ResourceMonitorDaemon
                 _settingsStore,
                 _settingsMonitor,
                 _monitorService,
-                _host.Services.GetRequiredService<ILoggerFactory>());
+                _loggerFactory);
             _pairingWizard.FormClosed += (_, _) =>
             {
                 _pairingWizard?.Dispose();
@@ -230,7 +230,10 @@ namespace ResourceMonitorDaemon
             }
         }
 
-        /// <summary>Removes the tray icon without stopping the host (used if start-up fails).</summary>
+        /// <summary>
+        /// Removes the tray icon. Never stops the host: <c>Program.Main</c> owns stopping and
+        /// disposing it.
+        /// </summary>
         public void Dispose()
         {
             _updateTimer.Stop();
@@ -241,14 +244,15 @@ namespace ResourceMonitorDaemon
             _notifyIcon.Dispose();
         }
 
-        private async void OnExitAsync(object? sender, EventArgs e)
+        private void OnExit(object? sender, EventArgs e)
         {
             if (_exiting)
             {
                 return;
             }
 
-            // Hide the icon and disable the menu first so a slow stop cannot be re-triggered.
+            // Hide the icon and disable the menu immediately so Exit feels instant and cannot be
+            // re-triggered; Program.Main stops the host (3 s budget) after the message loop ends.
             _exiting = true;
             _updateTimer.Stop();
             if (_notifyIcon.ContextMenuStrip != null)
@@ -259,19 +263,7 @@ namespace ResourceMonitorDaemon
             _notifyIcon.Visible = false;
             _settingsForm?.Close();
             _pairingWizard?.Close();
-
-            try
-            {
-                await _host.StopAsync(TimeSpan.FromSeconds(3));
-            }
-            catch (Exception)
-            {
-                // Exit regardless; MonitorService logs stop problems itself.
-            }
-
-            _host.Dispose();
-            _notifyIcon.Dispose();
-            Application.Exit();
+            Application.ExitThread();
         }
     }
 }

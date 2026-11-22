@@ -94,6 +94,10 @@ namespace ResourceMonitorDaemon
             var save = new Button { Text = "保存 (Save)", AutoSize = true };
             var cancel = new Button { Text = "取消 (Cancel)", AutoSize = true, DialogResult = DialogResult.Cancel };
             save.Click += OnSave;
+
+            // The dialog is modeless (Show), so DialogResult alone does not close it; Esc
+            // triggers CancelButton, which ends up here as well.
+            cancel.Click += (_, _) => Close();
             var buttons = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.RightToLeft,

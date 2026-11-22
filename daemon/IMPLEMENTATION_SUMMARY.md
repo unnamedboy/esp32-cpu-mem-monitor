@@ -157,8 +157,11 @@ schedule, and never blocks the sampling loop:
 - Pause/resume confirmations use the same balloon helper, so clicking them never
   opens the wizard.
 - "查看日志 (Log)" opens `daemon.log` from `%LocalAppData%\ResourceMonitorDaemon`.
-- Exit hides the icon and disables the menu first (re-entry guarded), then stops
-  the hosted service within 3 s and disposes the tray icon.
+- Exit hides the icon and disables the menu immediately (re-entry guarded) and ends
+  the message loop; `Program.Main` is the single owner of shutdown and stops the
+  host once (3 s budget) before disposing it. `MonitorService.StopAsync` is also
+  idempotent.
+- The settings dialog is modeless; Cancel and Esc close it without saving.
 - If the host fails to start, the tray icon is removed, the error is logged and
   shown in a message box, and the process exits.
 

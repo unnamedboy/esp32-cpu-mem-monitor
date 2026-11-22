@@ -22,6 +22,7 @@ namespace ResourceMonitorDaemon
         private DeviceSettings? _pendingSettings;
         private IDisposable? _settingsSubscription;
         private volatile bool _isPaused;
+        private int _stopRequested;
 
         public MonitorService(
             ILogger<MonitorService> logger,
@@ -176,6 +177,12 @@ namespace ResourceMonitorDaemon
 
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
+            // Idempotent: a second stop (e.g. a duplicate host stop) is a no-op.
+            if (Interlocked.Exchange(ref _stopRequested, 1) == 1)
+            {
+                return;
+            }
+
             _logger.LogInformation("ResourceMonitorDaemon stopping...");
             _settingsSubscription?.Dispose();
 
