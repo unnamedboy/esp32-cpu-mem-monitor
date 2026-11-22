@@ -85,7 +85,7 @@ transport/ble_cli.py}` at
 | `BleProvisioningTransport` | WinRT GATT client. Finds service `021a9004-0382-4aea-bff4-6b3f1c5adfb4`, maps endpoints by their 0x2901 user description, sends each request as write-with-response then reads the response from the same characteristic. |
 | `IProvisioningTransport` | `SendAsync(endpoint, data, ct)` seam; the tests use an in-memory fake device behind it. |
 | `Security1Session` | X25519 key exchange, key = shared secret XOR SHA-256(pairing code), AES-256-CTR with IV = device random and one keystream for all traffic, Command0/1 handshake and verifier check. |
-| `WifiConfigClient` | SetConfig -> ApplyConfig -> GetStatus polling (at most 1 per second, at most 30 s including an in-flight exchange). Result: `Connected(ip4)`, `Failed(AuthError or NetworkNotFound)`, `Timeout`, or `ConnectionLost` (link dropped after the settings were applied; the device may have joined Wi-Fi). |
+| `WifiConfigClient` | GetStatus (earlier-failure check) -> SetConfig -> ApplyConfig -> GetStatus polling (at most 1 per second, at most 30 s including an in-flight exchange). Result: `Connected(ip4)`, `Failed(AuthError or NetworkNotFound)`, `Timeout`, or `ConnectionLost` (lost contact with the device after the settings were applied, through a disconnect, GATT error or timeout; the device may have joined Wi-Fi). |
 | `SerialPopReader`, `PopLineParser`, `PairingCode` | USB serial pairing-code query (`RESMON?POP`), reply parsing and pairing-code validation. |
 | `ProtoWriter` / `ProtoReader`, `Sec1Messages`, `WifiConfigMessages` | Minimal hand-written protobuf codec for just these messages. |
 
@@ -138,15 +138,26 @@ key until it is disposed.
   therefore requires the firmware to call `wifi_prov_mgr_disable_auto_stop(5000)`
   or longer, and the client relies on that. The client also copes when the
   firmware does not: a disconnect right after a Connected read still returns
-  `Connected`. A disconnect while still waiting returns `ConnectionLost`, and
+  `Connected`. Losing contact while still waiting (disconnect, GATT error or
+  timeout) returns `ConnectionLost`, and
   the wizard should then try the normal MQTT connection to `resmon.local`
   before reporting failure.
 - **Retry after a failure.** After a failed attempt, `wifi_prov_mgr` rejects
   new credentials (ApplyConfig returns InternalError) unless the firmware calls
-  `wifi_prov_mgr_reset_sm_state_on_failure()`, which the contract requires. If
-  the device refuses a retry anyway, the client throws
-  `ProvisioningRetryRejectedException` with a "power-cycle or hold BOOT"
-  message.
+  `wifi_prov_mgr_reset_sm_state_on_failure()`, which the contract requires.
+  - A retry usually means a new `ProvisionAsync` call, with a new connection
+    and session. So before sending credentials, the client sends one GetStatus
+    to learn whether the device still reports ConnectionFailed. The reset does
+    not clear the device's `wifi_state` (`manager.c`), so that answer survives
+    across sessions.
+  - In v4.4.7, ApplyConfig only returns InternalError when
+    `wifi_prov_mgr_configure_sta` fails or no config was set. The client
+    therefore always turns it into `ProvisioningRetryRejectedException`.
+    `PreviousAttemptFailed` on the exception says whether an earlier failure
+    was seen.
+  - The message tells the user to power-cycle the device, or hold its BOOT
+    button for 5–15 seconds and then release it (holds longer than 15 s are
+    ignored by the firmware).
 - An empty GetStatus response is not treated as Connected, even though
   Connected is the protobuf default value. The client only reports Connected
   when the `connected` sub-message is present.
