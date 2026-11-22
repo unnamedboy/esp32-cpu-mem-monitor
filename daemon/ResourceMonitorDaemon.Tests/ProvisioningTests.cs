@@ -302,6 +302,44 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4("fe80::1"));
                 AssertEqual<string?>(null, WifiConfigClient.NormalizeIp4("12345"));
             }),
+
+            // ---- BLE helpers (pure logic only; WinRT calls need real hardware) ----------------
+
+            ("Scan aggregator merges scan responses, filters and de-duplicates", () =>
+            {
+                var aggregator = new ScanResultAggregator();
+                const ulong esp = 0x24_0A_C4_12_34_56;
+                const ulong other = 0x11_22_33_44_55_66;
+
+                AssertEqual<ProvisioningDeviceInfo?>(null, aggregator.Observe(esp, null, -70));         // ADV_IND without name
+                var first = aggregator.Observe(esp, "PROV_RESMON_123456", -68);                          // SCAN_RSP with name
+                AssertEqual(new ProvisioningDeviceInfo("PROV_RESMON_123456", esp, -68), first);
+                AssertEqual<ProvisioningDeviceInfo?>(null, aggregator.Observe(esp, "PROV_RESMON_123456", -60)); // repeat
+                AssertEqual<ProvisioningDeviceInfo?>(null, aggregator.Observe(esp, "", -55));            // nameless repeat keeps name
+                AssertEqual<ProvisioningDeviceInfo?>(null, aggregator.Observe(other, "PROV_OTHER_ABCDEF", -40));
+                AssertEqual<ProvisioningDeviceInfo?>(null, aggregator.Observe(other, "prov_resmon_abcdef", -40)); // case-sensitive prefix
+                AssertEqual<ProvisioningDeviceInfo?>(null, aggregator.Observe(0x1, "PROV_RESMON_", -40));         // prefix only
+
+                var snapshot = aggregator.Snapshot();
+                AssertEqual(1, snapshot.Count);
+                AssertEqual(new ProvisioningDeviceInfo("PROV_RESMON_123456", esp, -55), snapshot[0]);
+                AssertEqual("24:0A:C4:12:34:56", snapshot[0].AddressText);
+            }),
+            ("Scan aggregator orders devices by signal strength", () =>
+            {
+                var aggregator = new ScanResultAggregator();
+                aggregator.Observe(1, "PROV_RESMON_AAAAAA", -80);
+                aggregator.Observe(2, "PROV_RESMON_BBBBBB", -50);
+                var snapshot = aggregator.Snapshot();
+                AssertEqual("PROV_RESMON_BBBBBB", snapshot[0].Name);
+                AssertEqual("PROV_RESMON_AAAAAA", snapshot[1].Name);
+            }),
+            ("0x2901 user description text maps to lower-case endpoint names", () =>
+            {
+                AssertEqual("prov-session", BleProvisioningTransport.ParseUserDescription(Encoding.UTF8.GetBytes("prov-session")));
+                AssertEqual("prov-config", BleProvisioningTransport.ParseUserDescription(Encoding.UTF8.GetBytes("Prov-Config\0")));
+                AssertEqual("proto-ver", BleProvisioningTransport.ParseUserDescription(Encoding.UTF8.GetBytes(" proto-ver \n")));
+            }),
         };
 
         // NIST SP 800-38A, F.5.5 CTR-AES256.Encrypt / F.5.6 CTR-AES256.Decrypt
