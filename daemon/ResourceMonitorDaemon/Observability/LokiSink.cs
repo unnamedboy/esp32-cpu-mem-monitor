@@ -16,9 +16,10 @@ namespace ResourceMonitorDaemon.Observability
     /// and 5xx are retried without an attempt or age limit, so an outage of any length loses only
     /// what the bounded queue itself drops; Loki rejects entries that are too old with a 400, which
     /// drops that batch.</item>
-    /// <item>A batch throttled (429 without Retry-After) <see cref="SplitAfterThrottles"/> times is
-    /// split in half; a single entry throttled that often is given up (counted as dropped). 429 with
-    /// Retry-After is retried as long as the server asks.</item>
+    /// <item>A batch throttled (429, with or without Retry-After) <see cref="SplitAfterThrottles"/>
+    /// times is split in half, which never loses data. A single entry throttled that often without
+    /// Retry-After is given up (counted as dropped); with Retry-After it is retried as long as the
+    /// server asks.</item>
     /// <item>413 (payload too large) splits the batch in half and retries at once; a single entry
     /// that is still too large is dropped.</item>
     /// <item>Other 4xx (and 3xx) drop the batch; logged once per status until a push succeeds.
@@ -100,7 +101,10 @@ namespace ResourceMonitorDaemon.Observability
             }
         }
 
-        /// <summary>Entries dropped because the server rejected them (4xx) or retries were given up.</summary>
+        /// <summary>
+        /// Entries dropped: those Loki reported as ignored ("total ignored: N out of M"), a whole
+        /// rejected batch when it did not say (an upper bound), and given-up entries.
+        /// </summary>
         public long DroppedByServer => Interlocked.Read(ref _droppedByServer);
 
         /// <summary>
@@ -414,14 +418,19 @@ namespace ResourceMonitorDaemon.Observability
             {
                 batch.Attempts++;
 
-                // Only a throttle without Retry-After counts against the batch itself; network
-                // errors, timeouts and 5xx are the server's problem and are retried indefinitely.
-                if (result.StatusCode == 429 && result.RetryAfter == null)
+                // Any throttle counts toward splitting (lossless); only a throttle without Retry-After
+                // counts toward giving a single entry up. Network errors, timeouts and 5xx are the
+                // server's problem and are retried indefinitely.
+                if (result.StatusCode == 429)
                 {
                     batch.Throttled++;
+                    if (result.RetryAfter == null)
+                    {
+                        batch.ThrottledWithoutRetryAfter++;
+                    }
                 }
 
-                if (batch.Throttled >= SplitAfterThrottles && batch.Entries.Count == 1)
+                if (batch.ThrottledWithoutRetryAfter >= SplitAfterThrottles && batch.Entries.Count == 1)
                 {
                     giveUp = true;
                     warnGiveUp = !_giveUpLogged;
@@ -481,7 +490,12 @@ namespace ResourceMonitorDaemon.Observability
 
         private void OnDrop(List<LokiEntry> batch, LokiPushResult result)
         {
-            Interlocked.Add(ref _droppedByServer, batch.Count);
+            // Loki usually stores the valid entries of a rejected batch and reports the rest.
+            var lost = result.IgnoredEntries is { } ignored ? Math.Min(ignored, batch.Count) : batch.Count;
+            Interlocked.Add(ref _droppedByServer, lost);
+            var what = result.IgnoredEntries is { } count
+                ? $"Loki rejected {count} of {batch.Count} entries in a batch"
+                : $"Loki rejected a batch of {batch.Count} entries (Loki may have accepted some entries)";
 
             // Wrong URL, credentials or request: retrying every flush interval would not help.
             var backOff = result.StatusCode is 401 or 403 or 404 or null;
@@ -500,12 +514,12 @@ namespace ResourceMonitorDaemon.Observability
             if (first)
             {
                 _logger.LogWarning(
-                    "Loki rejected a batch ({Result}); {Count} entries dropped{Next}. Check Url, credentials and tenant. Further rejections like this are logged at Debug until a push succeeds.",
-                    result, batch.Count, backOff ? $"; next push in {delay.TotalSeconds:F0} s" : string.Empty);
+                    "{What} ({Result}){Next}. Check Url, credentials, tenant and timestamps. Further rejections like this are logged at Debug until a push succeeds.",
+                    what, result, backOff ? $"; next push in {delay.TotalSeconds:F0} s" : string.Empty);
             }
             else
             {
-                _logger.LogDebug("Loki rejected a batch ({Result}); {Count} entries dropped.", result, batch.Count);
+                _logger.LogDebug("{What} ({Result}).", what, result);
             }
         }
 
@@ -622,6 +636,8 @@ namespace ResourceMonitorDaemon.Observability
             public int Attempts { get; set; }
 
             public int Throttled { get; set; }
+
+            public int ThrottledWithoutRetryAfter { get; set; }
         }
     }
 }

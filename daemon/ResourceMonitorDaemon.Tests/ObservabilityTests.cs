@@ -703,6 +703,92 @@ internal static class ObservabilityTests
             AssertEqual(0L, sink.Queue.TotalDropped);
             AssertEqual(string.Join(",", produced), string.Join(",", delivered));   // all, once, in order
         }),
+        ("Profile-folder fallback: absolute and UNC paths only, names with spaces, shared folders kept", () =>
+        {
+            var redactor = new LokiLogRedactor(Array.Empty<(string, string)>(), null, null);
+            string R(string text) => redactor.Redact(text, false);
+            AssertEqual("C:/Users/<user>/x", R("C:/Users/John Smith/x"));
+            AssertEqual(@"c:\users\<user>\AppData", R(@"c:\users\ABCDEF~1\AppData"));
+            AssertEqual(@"\\server\Users\<user>\share", R(@"\\server\Users\bob\share"));
+            AssertEqual(@"dir C:\Users\<user>", R(@"dir C:\Users\carol"));
+            AssertEqual("C:\\Users\\<user>\r\nnext C:\\Users\\<user>\nlast", R("C:\\Users\\carol\r\nnext C:\\Users\\dave\nlast"));
+            foreach (var untouched in new[]
+            {
+                "home/users/kitchen",
+                "/Users/someone/logs",
+                "https://api.example.com/Users/12345/profile",
+                @"C:\Users\Public\Documents",
+                @"C:\Users\Default\NTUSER.DAT",
+                @"C:\Users\All Users\Microsoft",
+                @"C:\Users\Default User\x",
+                "nothing to see here",
+            })
+            {
+                AssertEqual(untouched, R(untouched));
+            }
+        }),
+        ("A batch throttled with Retry-After is still split, and nothing is lost", () =>
+        {
+            var now = DateTimeOffset.UnixEpoch;
+            var sizes = new List<int>();
+            var delivered = new List<string>();
+            var sink = new LokiSink(new LokiEntryQueue(), NullLogger<LokiSink>.Instance, new FakeHandler(request =>
+            {
+                var lines = Lines(request);
+                sizes.Add(lines.Count);
+                if (lines.Count > 1)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Headers = { RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(2)) } };
+                }
+
+                delivered.AddRange(lines);
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }), () => now);
+            sink.Configure(new LokiSettings { Enabled = true, Url = "http://loki.test", Gzip = false });
+            foreach (var line in new[] { "1", "2", "3", "4" })
+            {
+                sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", line);
+            }
+
+            for (var i = 0; i < 30 && delivered.Count < 4; i++)
+            {
+                now = sink.RetryAt > now ? sink.RetryAt : now;
+                sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+
+            AssertEqual("4,4,4,2,2,2,1,1,2,2,2,1,1", string.Join(",", sizes));
+            AssertEqual("1,2,3,4", string.Join(",", delivered));
+            AssertEqual(0L, sink.DroppedByServer);
+        }),
+        ("A 400 counts only the entries Loki reports as ignored", () =>
+        {
+            var logs = new CapturingLogs();
+            using var factory = logs.Factory();
+            var responses = new Queue<HttpResponseMessage>(new[]
+            {
+                new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent("entry with timestamp 2026-11-22 10:00:00 +0000 UTC ignored, reason: 'entry too far behind', for stream: {app=\"resmon-daemon\"},\nentry with timestamp 2026-11-22 10:00:01 +0000 UTC ignored, reason: 'entry too far behind', for stream: {app=\"resmon-daemon\"},\nuser 'fake', total ignored: 2 out of 5"),
+                },
+                new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("error at least one label pair is required per stream") },
+            });
+            var sink = new LokiSink(new LokiEntryQueue(), factory.CreateLogger<LokiSink>(), new FakeHandler(_ => responses.Dequeue()));
+            sink.Configure(new LokiSettings { Enabled = true, Url = "http://loki.test" });
+            for (var i = 0; i < 5; i++)
+            {
+                sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", "line " + i);
+            }
+
+            AssertEqual(2, sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult()!.IgnoredEntries);
+            AssertEqual(2L, sink.DroppedByServer);
+            AssertTrue(logs.Messages.Any(m => m.Contains("Loki rejected 2 of 5 entries in a batch")), "partial rejection not reported: " + string.Join(" | ", logs.Messages));
+
+            sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", "a");
+            sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", "b");
+            AssertEqual(null, sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult()!.IgnoredEntries);
+            AssertEqual(4L, sink.DroppedByServer);
+            AssertTrue(logs.Messages.Any(m => m.Contains("Loki rejected a batch of 2 entries (Loki may have accepted some entries)")), "uncounted rejection wording");
+        }),
         ("Only a single entry still throttled (429 without Retry-After) after splitting is given up", () =>
         {
             var now = DateTimeOffset.UnixEpoch;
@@ -863,7 +949,7 @@ internal static class ObservabilityTests
             // 8.3 short forms: registered folders, plus the generic \Users\<name>\ fallback.
             var withShort = new LokiLogRedactor(new[] { (@"C:\Users\Alice Smith\AppData\Local", "%LOCALAPPDATA%"), (@"C:\Users\ALICES~1\AppData\Local", "%LOCALAPPDATA%") }, "Alice Smith", null);
             AssertEqual(@"temp=%LOCALAPPDATA%\Temp\x.tmp", withShort.Redact(@"temp=C:\Users\ALICES~1\AppData\Local\Temp\x.tmp", false));
-            AssertEqual(@"C:\Users\<user>\Documents and /Users/<user>/logs", redactor.Redact(@"C:\Users\JDOEXA~1\Documents and /Users/someone/logs", false));
+            AssertEqual(@"C:\Users\<user>\Documents and D:/Users/<user>/logs", redactor.Redact(@"C:\Users\JDOEXA~1\Documents and D:/Users/someone/logs", false));
 
             // The real TEMP path (often reported in 8.3 form) keeps no part of the user folder name.
             var temp = LokiLogRedactor.ForCurrentUser().Redact(Path.GetTempPath(), false);

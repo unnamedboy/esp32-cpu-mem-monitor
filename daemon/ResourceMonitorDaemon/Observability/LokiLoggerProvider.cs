@@ -99,8 +99,10 @@ namespace ResourceMonitorDaemon.Observability
     /// <c>%USERPROFILE%</c> (longest match first, case-insensitive);</item>
     /// <item>the Windows user name is replaced by <c>&lt;user&gt;</c> (whole word, case-insensitive);</item>
     /// <item>the machine name is replaced by <c>&lt;host&gt;</c> unless the user opted into the host label;</item>
-    /// <item>as a fallback, the folder name after any <c>\Users\</c> or <c>/Users/</c> in a path
-    /// (including 8.3 short forms such as <c>C:\Users\ABCDEF~1</c>) becomes <c>&lt;user&gt;</c>.</item>
+    /// <item>as a fallback, the profile folder in any absolute path <c>X:\Users\&lt;name&gt;</c> or
+    /// <c>\\server\Users\&lt;name&gt;</c> (either slash, any case, spaces allowed, 8.3 short forms
+    /// such as <c>C:\Users\ABCDEF~1</c> included) becomes <c>&lt;user&gt;</c>; the shared folders
+    /// Public, Default, Default User and All Users are kept, and relative paths or URLs are not touched.</item>
     /// </list>
     /// The current user's folders are registered in their long and short (8.3) forms.
     /// Names shorter than <see cref="MinNameLength"/> characters are not replaced as words (that
@@ -114,15 +116,23 @@ namespace ResourceMonitorDaemon.Observability
 
         private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
 
-        // The path segment after \Users\ or /Users/ (no spaces: an 8.3 name never has any).
-        private static readonly Regex UsersSegment = new(
-            @"(?<=[\\/]Users[\\/])[^\\/:*?""<>|\s]+",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        // A profile folder in an absolute drive (C:\Users\name) or UNC (\\server\Users\name) path. The
+        // name may contain spaces and runs up to the next separator, or to the end of the line.
+        private static readonly Regex ProfileFolder = new(
+            @"(?<prefix>(?:(?<![\p{L}\p{N}_])[A-Za-z]:|\\\\[^\\/\s:*?""<>|]+)[\\/]Users[\\/])(?<name>[^\\/:*?""<>|\r\n]+)(?=[\\/\r]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline,
             MatchTimeout);
+
+        private static readonly HashSet<string> SharedProfileFolders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Public", "Default", "Default User", "All Users",
+        };
 
         private readonly (string Prefix, string Token)[] _prefixes;
         private readonly Regex? _user;
         private readonly Regex? _host;
+        private readonly string? _userName;
+        private readonly string? _hostName;
 
         public LokiLogRedactor(IEnumerable<(string Prefix, string Token)> folders, string? userName, string? machineName)
         {
@@ -133,6 +143,8 @@ namespace ResourceMonitorDaemon.Observability
                 .ToArray();
             _user = WholeWord(userName);
             _host = WholeWord(machineName);
+            _userName = _user == null ? null : userName!.Trim();
+            _hostName = _host == null ? null : machineName!.Trim();
         }
 
         /// <summary>Redactor for the current Windows user and PC.</summary>
@@ -187,9 +199,39 @@ namespace ResourceMonitorDaemon.Observability
                 text = text.Replace(prefix, token, StringComparison.OrdinalIgnoreCase);
             }
 
-            text = Replace(_user, text, UserPlaceholder);
-            text = Replace(UsersSegment, text, UserPlaceholder);
-            return keepHostName ? text : Replace(_host, text, HostPlaceholder);
+            // Cheap substring checks first: most lines contain none of these, and the regexes
+            // (with look-around) would otherwise scan every line.
+            if (_userName != null && text.Contains(_userName, StringComparison.OrdinalIgnoreCase))
+            {
+                text = Replace(_user, text, UserPlaceholder);
+            }
+
+            if (text.Contains("Users", StringComparison.OrdinalIgnoreCase))
+            {
+                text = ReplaceProfileFolders(text);
+            }
+
+            if (!keepHostName && _hostName != null && text.Contains(_hostName, StringComparison.OrdinalIgnoreCase))
+            {
+                text = Replace(_host, text, HostPlaceholder);
+            }
+
+            return text;
+        }
+
+        private static string ReplaceProfileFolders(string text)
+        {
+            try
+            {
+                return ProfileFolder.Replace(text, match =>
+                    SharedProfileFolders.Contains(match.Groups["name"].Value.Trim())
+                        ? match.Value
+                        : match.Groups["prefix"].Value + UserPlaceholder);
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return "(line withheld: redaction timed out)";
+            }
         }
 
         private static Regex? WholeWord(string? name) =>

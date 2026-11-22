@@ -97,7 +97,9 @@ namespace ResourceMonitorDaemon.Observability
     }
 
     /// <summary>Result of one push. <see cref="Detail"/> never contains the token or credentials.</summary>
-    public sealed record LokiPushResult(LokiPushOutcome Outcome, int? StatusCode, string Detail, TimeSpan? RetryAfter = null)
+    /// <param name="IgnoredEntries">For a rejected batch: the number of entries Loki reported as ignored
+    /// ("total ignored: N out of M"), or null when the response did not say.</param>
+    public sealed record LokiPushResult(LokiPushOutcome Outcome, int? StatusCode, string Detail, TimeSpan? RetryAfter = null, int? IgnoredEntries = null)
     {
         public override string ToString() => StatusCode is { } code ? $"HTTP {code} {Detail}".TrimEnd() : Detail;
     }
@@ -172,13 +174,14 @@ namespace ResourceMonitorDaemon.Observability
                     return new LokiPushResult(LokiPushOutcome.Success, code, response.ReasonPhrase ?? response.StatusCode.ToString());
                 }
 
-                var detail = $"{response.ReasonPhrase ?? response.StatusCode.ToString()}{await ReadBodySnippetAsync(response, settings, cancellationToken).ConfigureAwait(false)}";
+                var (snippet, ignored) = await ReadBodyAsync(response, settings, cancellationToken).ConfigureAwait(false);
+                var detail = $"{response.ReasonPhrase ?? response.StatusCode.ToString()}{snippet}";
                 if (response.StatusCode == HttpStatusCode.TooManyRequests || code >= 500)
                 {
                     return new LokiPushResult(LokiPushOutcome.Retry, code, detail, RetryAfter(response));
                 }
 
-                return new LokiPushResult(LokiPushOutcome.Drop, code, detail);
+                return new LokiPushResult(LokiPushOutcome.Drop, code, detail, IgnoredEntries: ignored);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -228,26 +231,39 @@ namespace ResourceMonitorDaemon.Observability
             return retryAfter?.Date is { } date ? date - DateTimeOffset.UtcNow : null;
         }
 
-        private static async Task<string> ReadBodySnippetAsync(HttpResponseMessage response, LokiSettings settings, CancellationToken cancellationToken)
+        // Loki's partial-rejection summary, e.g. "... total ignored: 3 out of 10".
+        private static readonly System.Text.RegularExpressions.Regex IgnoredSummary = new(
+            @"total ignored:\s*(?<ignored>\d+)\s+out of\s+(?<total>\d+)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
+
+        /// <summary>
+        /// A redacted, shortened body snippet for logs, plus the "total ignored" count when Loki
+        /// reported one (it is at the end of the body, so the full body is searched).
+        /// </summary>
+        private static async Task<(string Snippet, int? Ignored)> ReadBodyAsync(HttpResponseMessage response, LokiSettings settings, CancellationToken cancellationToken)
         {
             try
             {
                 var body = (await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false)).Trim();
                 if (body.Length == 0)
                 {
-                    return string.Empty;
+                    return (string.Empty, null);
                 }
 
-                if (body.Length > MaxBodySnippetLength)
+                int? ignored = null;
+                var summary = IgnoredSummary.Match(body);
+                if (summary.Success && int.TryParse(summary.Groups["ignored"].Value, out var count))
                 {
-                    body = body[..MaxBodySnippetLength] + "…";
+                    ignored = count;
                 }
 
-                return ": " + LokiRedactor.Redact(body.ReplaceLineEndings(" "), settings);
+                var snippet = body.Length > MaxBodySnippetLength ? body[..MaxBodySnippetLength] + "…" : body;
+                return (": " + LokiRedactor.Redact(snippet.ReplaceLineEndings(" "), settings), ignored);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                return string.Empty;
+                return (string.Empty, null);
             }
         }
     }
