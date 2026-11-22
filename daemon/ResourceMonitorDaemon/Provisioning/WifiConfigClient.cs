@@ -73,18 +73,7 @@ namespace ResourceMonitorDaemon.Provisioning
             byte[]? plaintext = null;
             try
             {
-                if (ssidBytes.Length == 0 || ssidBytes.Length > ProvisioningConstants.MaxSsidBytes)
-                {
-                    throw new ArgumentException(
-                        $"The Wi-Fi network name must be 1 to {ProvisioningConstants.MaxSsidBytes} bytes long.", nameof(ssid));
-                }
-
-                if (passphraseBytes.Length > ProvisioningConstants.MaxPassphraseBytes)
-                {
-                    throw new ArgumentException(
-                        $"The Wi-Fi password must be at most {ProvisioningConstants.MaxPassphraseBytes} bytes long.", nameof(passphrase));
-                }
-
+                ValidateLengths(ssidBytes.Length, passphraseBytes.Length);
                 plaintext = WifiConfigMessages.EncodeSetConfig(ssidBytes, passphraseBytes);
                 var response = await SendAsync(plaintext, WifiConfigMsgType.RespSetConfig, cancellationToken).ConfigureAwait(false);
                 if (response.Status != ProtocommStatus.Success)
@@ -157,6 +146,32 @@ namespace ResourceMonitorDaemon.Provisioning
                     case WifiStationState.ConnectionFailed:
                         return new WifiProvisioningResult.Failed(status.FailReason ?? WifiConnectFailedReason.AuthError);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Checks the device's limits (SSID 1..32 bytes, passphrase at most 63 bytes, UTF-8) without
+        /// echoing either value. Throws <see cref="ArgumentException"/>.
+        /// </summary>
+        public static void ValidateCredentials(string ssid, string passphrase)
+        {
+            ArgumentNullException.ThrowIfNull(ssid);
+            ArgumentNullException.ThrowIfNull(passphrase);
+            ValidateLengths(Encoding.UTF8.GetByteCount(ssid), Encoding.UTF8.GetByteCount(passphrase));
+        }
+
+        private static void ValidateLengths(int ssidByteCount, int passphraseByteCount)
+        {
+            if (ssidByteCount == 0 || ssidByteCount > ProvisioningConstants.MaxSsidBytes)
+            {
+                throw new ArgumentException(
+                    $"The Wi-Fi network name must be 1 to {ProvisioningConstants.MaxSsidBytes} bytes long.", "ssid");
+            }
+
+            if (passphraseByteCount > ProvisioningConstants.MaxPassphraseBytes)
+            {
+                throw new ArgumentException(
+                    $"The Wi-Fi password must be at most {ProvisioningConstants.MaxPassphraseBytes} bytes long.", "passphrase");
             }
         }
 

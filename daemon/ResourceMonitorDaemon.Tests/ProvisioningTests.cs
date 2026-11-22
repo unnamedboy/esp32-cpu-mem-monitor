@@ -10,6 +10,10 @@ namespace ResourceMonitorDaemon.Tests
     /// </summary>
     internal static class ProvisioningTests
     {
+        private static readonly TimeSpan FastPoll = TimeSpan.FromMilliseconds(5);
+        private static readonly TimeSpan FastTimeout = TimeSpan.FromSeconds(5);
+        private static readonly ProvisioningDeviceInfo TestDevice = new("PROV_RESMON_A1B2C3", 0x240AC4A1B2C3, -60);
+
         public static readonly (string Name, Action Run)[] All =
         {
             ("ProtoWire encodes multi-byte and negative varints", () =>
@@ -404,7 +408,94 @@ namespace ResourceMonitorDaemon.Tests
                 AssertTrue(!PairingCode.TryNormalize("ABCDEFGI", out _), "I accepted");
                 AssertTrue(!PairingCode.TryNormalize(null, out _), "null accepted");
             }),
+
+            // ---- ProvisioningService facade --------------------------------------------------
+
+            ("ProvisioningService provisions the fake device and reports steps in order", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("K7M3P9QX");
+                var logger = new CapturingLogger();
+                var service = new ProvisioningService(logger, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
+                var steps = new SyncProgress<ProvisioningStep>();
+
+                var result = await service.ProvisionAsync(TestDevice, "k7m3-p9qx", "home-network", "hunter2-wifi-pass", steps, CancellationToken.None);
+
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+                AssertEqual(
+                    "ConnectingToDevice,SecuringSession,SendingWifiConfig,WaitingForWifiConnection",
+                    string.Join(",", steps.Items));
+                AssertEqual("proto-ver", device.EndpointLog[0]);
+                AssertTrue(device.Disposed, "transport was not disposed");
+                AssertTrue(logger.Lines.Any(l => l.Contains("v1.1")), "protocol version was not logged");
+                AssertTrue(logger.Lines.All(l => !l.Contains("hunter2-wifi-pass") && !l.Contains("K7M3P9QX") && !l.Contains("home-network")),
+                    "secret or SSID leaked into the log");
+            })),
+            ("ProvisioningService continues when proto-ver is absent", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("K7M3P9QX") { SupportsVersionEndpoint = false };
+                var service = new ProvisioningService(null, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
+                var result = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home-network", "password1", null, CancellationToken.None);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), result);
+            })),
+            ("ProvisioningService surfaces a wrong pairing code and disposes the transport", () => RunAsync(async () =>
+            {
+                var device = new FakeProvisioningDevice("K7M3P9QX");
+                var logger = new CapturingLogger();
+                var service = new ProvisioningService(logger, (_, _) => Task.FromResult<IProvisioningTransport>(device), FastPoll, FastTimeout);
+                await AssertThrowsAsync<PairingCodeRejectedException>(
+                    () => service.ProvisionAsync(TestDevice, "K7M3P9QZ", "home-network", "password1", null, CancellationToken.None));
+                AssertTrue(device.Disposed, "transport was not disposed");
+                AssertTrue(device.ReceivedPassphrase is null, "credentials sent without a session");
+            })),
+            ("ProvisioningService validates input before connecting", () => RunAsync(async () =>
+            {
+                var connected = false;
+                var service = new ProvisioningService(null, (_, _) =>
+                {
+                    connected = true;
+                    return Task.FromResult<IProvisioningTransport>(new FakeProvisioningDevice("K7M3P9QX"));
+                }, FastPoll, FastTimeout);
+                await AssertThrowsAsync<ArgumentException>(
+                    () => service.ProvisionAsync(TestDevice, "K7M3P9Q", "home-network", "password1", null, CancellationToken.None));
+                await AssertThrowsAsync<ArgumentException>(
+                    () => service.ProvisionAsync(TestDevice, "K7M3P9QX", "home-network", new string('x', 64), null, CancellationToken.None));
+                AssertTrue(!connected, "connected despite invalid input");
+            })),
+            ("ProtocolVersionInfo parses JSON and plain version strings", () =>
+            {
+                var json = ProtocolVersionInfo.Parse(Encoding.UTF8.GetBytes("{\n\t\"prov\":\t{\n\t\t\"ver\":\t\"v1.1\",\n\t\t\"cap\":\t[\"wifi_scan\"]\n\t}\n}"));
+                AssertEqual("v1.1", json.Version);
+                AssertEqual("wifi_scan", string.Join(",", json.Capabilities));
+                AssertEqual("v1.0", ProtocolVersionInfo.Parse(Encoding.UTF8.GetBytes("v1.0")).Version);
+                AssertEqual<string?>(null, ProtocolVersionInfo.Parse(Array.Empty<byte>()).Version);
+            }),
         };
+
+        /// <summary>IProgress that records synchronously (Progress&lt;T&gt; posts asynchronously).</summary>
+        private sealed class SyncProgress<T> : IProgress<T>
+        {
+            public List<T> Items { get; } = new();
+            public void Report(T value) => Items.Add(value);
+        }
+
+        /// <summary>Records every formatted log line and exception text.</summary>
+        private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+        {
+            public List<string> Lines { get; } = new();
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+            public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+                TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                lock (Lines)
+                {
+                    Lines.Add(formatter(state, exception) + (exception is null ? string.Empty : " " + exception));
+                }
+            }
+        }
 
         // NIST SP 800-38A, F.5.5 CTR-AES256.Encrypt / F.5.6 CTR-AES256.Decrypt
         private const string NistCtrKey = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
@@ -415,9 +506,6 @@ namespace ResourceMonitorDaemon.Tests
         private const string NistCtrCiphertext =
             "601ec313775789a5b7a7f504bbf3d228" + "f443e3ca4d62b59aca84e990cacaf5c5" +
             "2b0930daa23de94ce87017ba2d84988d" + "dfc9c58db67aada613c2dd08457941a6";
-
-        private static readonly TimeSpan FastPoll = TimeSpan.FromMilliseconds(5);
-        private static readonly TimeSpan FastTimeout = TimeSpan.FromSeconds(5);
 
         private static void RunAsync(Func<Task> test) => test().GetAwaiter().GetResult();
 
@@ -447,8 +535,6 @@ namespace ResourceMonitorDaemon.Tests
                 throw new InvalidOperationException($"expected {expectedHex.ToUpperInvariant()}, got {actualHex}");
             }
         }
-
-
 
         internal static TException AssertThrows<TException>(Action action) where TException : Exception
         {
