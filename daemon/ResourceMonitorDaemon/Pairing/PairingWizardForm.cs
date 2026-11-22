@@ -52,6 +52,7 @@ namespace ResourceMonitorDaemon.Pairing
         private readonly Label _codeStatus;
         private readonly TextBox _ssid;
         private readonly Label _ssidNote;
+        private readonly LinkLabel _useThisPcWifi;
         private readonly TextBox _password;
         private readonly CheckBox _showPassword;
         private readonly Label[] _steps;
@@ -177,7 +178,12 @@ namespace ResourceMonitorDaemon.Pairing
             var passwordRow = NewFlow();
             passwordRow.Controls.Add(_password);
             passwordRow.Controls.Add(_showPassword);
-            AddGridRow(wifiGrid, PairingText.SsidLabel, _ssid);
+            _useThisPcWifi = new LinkLabel { Text = PairingText.UseThisPcWifi, AutoSize = true, Margin = new Padding(8, 6, 3, 3) };
+            _useThisPcWifi.LinkClicked += async (_, _) => await RunSafelyAsync(UseThisPcWifiAsync);
+            var ssidRow = NewFlow();
+            ssidRow.Controls.Add(_ssid);
+            ssidRow.Controls.Add(_useThisPcWifi);
+            AddGridRow(wifiGrid, PairingText.SsidLabel, ssidRow);
             AddGridRow(wifiGrid, PairingText.PasswordLabel, passwordRow);
             AddRow(wifiLayout, wifiGrid);
             _ssidNote = NewLabel(string.Empty, SystemColors.GrayText);
@@ -238,9 +244,8 @@ namespace ResourceMonitorDaemon.Pairing
         {
             base.OnShown(e);
             _logger.LogInformation("Pairing wizard opened.");
-            var prefill = RunSafelyAsync(PrefillSsidAsync);
+            // The current SSID is only read when the user asks for it (see UseThisPcWifiAsync).
             await RunSafelyAsync(ScanAsync);
-            await prefill;
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -545,8 +550,21 @@ namespace ResourceMonitorDaemon.Pairing
 
         // ---- 3. Wi-Fi -------------------------------------------------------------------------
 
-        private async Task PrefillSsidAsync()
+        /// <summary>
+        /// Fills the SSID with the PC's current Wi-Fi, on request only: reading the connected SSID can make
+        /// Windows 11 show a one-time location-permission prompt, so it never happens automatically.
+        /// </summary>
+        private async Task UseThisPcWifiAsync()
         {
+            if (_closed || _busy)
+            {
+                return;
+            }
+
+            _useThisPcWifi.Enabled = false;
+            _ssidNote.ForeColor = SystemColors.GrayText;
+            _ssidNote.Text = PairingText.ReadingThisPcWifi;
+            _ssidNote.Visible = true;
             CurrentWifiInfo? info;
             try
             {
@@ -556,9 +574,24 @@ namespace ResourceMonitorDaemon.Pairing
             {
                 return;
             }
-
-            if (_closed || info is null || _ssid.Text.Length > 0)
+            finally
             {
+                if (!_closed)
+                {
+                    _useThisPcWifi.Enabled = !_busy;
+                }
+            }
+
+            if (_closed)
+            {
+                return;
+            }
+
+            if (info is null)
+            {
+                _prefilledSsid = null;
+                _ssidNote.Text = PairingText.ThisPcWifiUnavailable;
+                _ssidNote.Visible = true;
                 return;
             }
 
@@ -593,6 +626,7 @@ namespace ResourceMonitorDaemon.Pairing
             // Only an MQTT connection established after this point counts as "the daemon reached the
             // device": an older session may still belong to the previous network or device.
             var startGeneration = _monitor.ConnectionGeneration;
+            var previousFallback = _monitor.CurrentSettings.FallbackAddress;
             _scanCts?.Cancel();   // a running scan competes with the connection for the radio
             _popCts?.Cancel();
             using var cts = NewOperationSource();
@@ -616,7 +650,7 @@ namespace ResourceMonitorDaemon.Pairing
                 ShowResult(outcome.Message, ToneOf(outcome.Kind));
                 if (outcome.Kind == PairingOutcomeKind.Succeeded)
                 {
-                    await FinishSuccessAsync(outcome, settings, startGeneration, cts.Token);
+                    await FinishSuccessAsync(outcome, settings, startGeneration, previousFallback, cts.Token);
                 }
                 else
                 {
@@ -714,7 +748,8 @@ namespace ResourceMonitorDaemon.Pairing
             }
         }
 
-        private async Task FinishSuccessAsync(PairingOutcome outcome, DeviceSettings settings, int startGeneration, CancellationToken cancellationToken)
+        private async Task FinishSuccessAsync(
+            PairingOutcome outcome, DeviceSettings settings, int startGeneration, string previousFallback, CancellationToken cancellationToken)
         {
             string? savedAddress = null;
             if (outcome.AddressToSave is { } address)
@@ -765,7 +800,10 @@ namespace ResourceMonitorDaemon.Pairing
             bool connected;
             try
             {
-                connected = await WaitForDaemonConnectionAsync(environmentOverride ? null : savedAddress, startGeneration, cancellationToken);
+                var expectedFallback = environmentOverride ? null : savedAddress;
+                var requireNewConnection = PairingOutcomePresenter.RequiresNewDaemonConnection(
+                    outcome.DeviceWasAlreadyConnected, previousFallback, expectedFallback ?? previousFallback);
+                connected = await WaitForDaemonConnectionAsync(expectedFallback, startGeneration, requireNewConnection, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -791,10 +829,12 @@ namespace ResourceMonitorDaemon.Pairing
 
         /// <summary>
         /// Waits until the daemon applied the saved address (when one was saved) and has an MQTT
-        /// connection that was established after the attempt started, on two consecutive polls; or
-        /// until it is paused or the wait times out.
+        /// connection, on two consecutive polls; or until it is paused or the wait times out. When
+        /// <paramref name="requireNewConnection"/> is set, only a connection established after the attempt
+        /// started counts (see <see cref="PairingOutcomePresenter.RequiresNewDaemonConnection"/>).
         /// </summary>
-        private async Task<bool> WaitForDaemonConnectionAsync(string? expectedFallback, int startGeneration, CancellationToken cancellationToken)
+        private async Task<bool> WaitForDaemonConnectionAsync(
+            string? expectedFallback, int startGeneration, bool requireNewConnection, CancellationToken cancellationToken)
         {
             var deadline = DateTime.UtcNow + DaemonConnectWait;
             var consecutive = 0;
@@ -807,7 +847,8 @@ namespace ResourceMonitorDaemon.Pairing
 
                 var applied = expectedFallback is null
                     || string.Equals(_monitor.CurrentSettings.FallbackAddress, expectedFallback, StringComparison.OrdinalIgnoreCase);
-                consecutive = applied && IsNewDaemonConnection(startGeneration) ? consecutive + 1 : 0;
+                var connected = requireNewConnection ? IsNewDaemonConnection(startGeneration) : _monitor.IsConnected;
+                consecutive = applied && connected ? consecutive + 1 : 0;
                 if (consecutive >= 2)
                 {
                     return true;
@@ -975,6 +1016,7 @@ namespace ResourceMonitorDaemon.Pairing
             _code.Enabled = !_busy;
             _codeLink.Enabled = !_busy;
             _ssid.Enabled = !_busy;
+            _useThisPcWifi.Enabled = !_busy;
             _password.Enabled = !_busy;
             _showPassword.Enabled = !_busy;
             _pair.Enabled = !_busy;

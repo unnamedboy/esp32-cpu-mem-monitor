@@ -354,7 +354,7 @@ runs on the UI thread with async/await, so the UI never blocks.
 | --- | --- |
 | 1. Device | Starts a 5 s BLE scan when the wizard opens and lists `PROV_RESMON_*` devices live, with signal strength. A Rescan button repeats it. If exactly one device is found, it is selected. Bluetooth off or missing gives a clear message (`ProvisioningTransportException.Error`). |
 | 2. Pairing code | Selecting a device starts `TryReadPopFromUsbAsync(name)` in the background. If found, the code is filled in masked: "已通过 USB 自动读取配对码 (read automatically over USB)". The user can switch to "手动输入 (Enter manually)" and back. Typed codes are normalized with `PairingCode.TryNormalize`. A hint names the serial log line `Provisioning: name=... pop=...` at 115200 baud. |
-| 3. Wi-Fi | SSID and password, with a masked password box and a show/hide checkbox. A note says the ESP32 supports 2.4 GHz only. The SSID is prefilled when WinRT (`NetworkInformation` → `WlanConnectionProfileDetails.GetConnectedSsid()`) reports exactly one connected Wi-Fi network; there is no code-page conversion and no process to start. The optional 2.4 GHz warning comes from `netsh wlan show interfaces`. Its output is decoded with the system OEM code page (`GetOEMCP`, e.g. 936 on Chinese Windows) and read from the "Band" line, or from the channel number (> 14 means 5 GHz) when there is no band line. English and Chinese labels are recognized; otherwise the band is unknown and no warning is shown. Everything here is best effort: nothing is installed, no admin is needed, and any failure just leaves the field empty. Input is validated with `PairingCode` and `WifiConfigClient.ValidateCredentials` before any Bluetooth traffic. |
+| 3. Wi-Fi | SSID and password, with a masked password box and a show/hide checkbox. A note says the ESP32 supports 2.4 GHz only. Nothing is read when the wizard opens. The link "使用本机当前 Wi-Fi (Use this PC's Wi-Fi)" next to the SSID box runs the lookup on click, off the UI thread. Reading the connected SSID can make Windows 11 show its one-time "allow location access" prompt (Microsoft Learn: "Changes to API behavior for Wi-Fi access and location"), so it is never done automatically. The SSID is filled in when WinRT (`NetworkInformation` → `WlanConnectionProfileDetails.GetConnectedSsid()`) reports exactly one connected Wi-Fi network; there is no code-page conversion and no process to start. If nothing can be read, the note asks the user to type the name (not connected, or location access not granted). The optional 2.4 GHz warning is computed on the same click from `netsh wlan show interfaces`. Its output is decoded with the system OEM code page (`GetOEMCP`, e.g. 936 on Chinese Windows) and read from the "Band" line, or from the channel number (> 14 means 5 GHz) when there is no band line. English and Chinese labels are recognized; otherwise the band is unknown and no warning is shown. Everything here is best effort: nothing is installed, no admin is needed, and any failure just leaves the field empty. Input is validated with `PairingCode` and `WifiConfigClient.ValidateCredentials` before any Bluetooth traffic. |
 | 4. Pair | `ProvisionAsync` with step progress (connect, secure session, send settings, wait for Wi-Fi), followed by "save address" and "daemon connects". Cancel cancels the attempt. Closing the wizard cancels the scan, USB query, attempt and checks, and `ProvisionAsync` then disposes the BLE connection. |
 
 Results (`PairingOutcomePresenter`, pure and unit-tested):
@@ -378,7 +378,13 @@ After a save, the configuration file watcher applies the new
 the backoff). The wizard polls the read-only `MonitorService.IsConnected` and
 `ConnectionGeneration` for up to 45 s. It waits until the new address has been
 applied and a connection exists that was established after the attempt started,
-so an older MQTT session that is still up does not count. It then shows
+so an older MQTT session that is still up does not count. There is one
+exception. If the device was already on Wi-Fi before the attempt sent anything
+(`WifiProvisioningResult.Connected.AlreadyConnected`, the retry short-circuit),
+its broker did not restart. If in addition the effective `FallbackAddress` did
+not change (same address, or no IP reported), the daemon has no reason to
+reconnect. In that case an existing connection counts
+(`PairingOutcomePresenter.RequiresNewDaemonConnection`). It then shows
 **"已连接，正在发送数据 (connected, publishing)"**. Otherwise it reports that sending
 is paused or that the daemon keeps retrying. If
 `RESMON_Device__FallbackAddress` overrides the saved value, the wizard says so.
@@ -468,8 +474,9 @@ dotnet .tmpbuild\ResourceMonitorDaemon.Tests.dll
 - The first-run balloon opens the wizard only while it is on screen. Windows does
   not report clicks on notifications that have moved to the Action Center, so
   use the tray menu then.
-- SSID prefill and the 2.4 GHz hint are best effort. Newer Windows builds may
-  require location permission for Wi-Fi details, and then the field stays empty.
+- "Use this PC's Wi-Fi" and the 2.4 GHz hint are best effort. Windows 11 may ask
+  once for location permission when the link is clicked. If it is denied, or
+  location services are off, the SSID cannot be read and must be typed.
   The band hint only recognizes English and Chinese `netsh` labels.
 - Reopening the wizard right after closing it can miss the USB pairing code. A
   serial probe abandoned after its 1.5 s budget may still hold the COM port

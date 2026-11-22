@@ -34,6 +34,13 @@ namespace ResourceMonitorDaemon.Pairing
     public sealed record PairingOutcome(PairingOutcomeKind Kind, string Message)
     {
         public string? AddressToSave { get; init; }
+
+        /// <summary>
+        /// The device had already joined Wi-Fi before this attempt sent anything
+        /// (<see cref="WifiProvisioningResult.Connected.AlreadyConnected"/>).
+        /// </summary>
+        public bool DeviceWasAlreadyConnected { get; init; }
+
         public PairingField Focus { get; init; }
         public bool SuggestRescan { get; init; }
     }
@@ -62,18 +69,22 @@ namespace ResourceMonitorDaemon.Pairing
             {
                 case WifiProvisioningResult.Connected connected:
                     var address = GetAddressToSave(connected.Ip4Address);
-                    return address is null
-                        ? new PairingOutcome(
-                            PairingOutcomeKind.Succeeded,
-                            $"配对成功：设备已连接 Wi-Fi，但没有报告 IP 地址，将通过 {host} 连接（未保存备用地址）。\n" +
-                            $"Paired: the device joined Wi-Fi but reported no IP address; connecting via {host} (no fallback address saved).")
-                        : new PairingOutcome(
-                            PairingOutcomeKind.Succeeded,
-                            $"配对成功：设备已连接 Wi-Fi，IP 地址 {address}（已保存为备用地址）。\n" +
-                            $"Paired: the device joined Wi-Fi at {address} (saved as the fallback address).")
-                        {
-                            AddressToSave = address,
-                        };
+                    var message = address is null
+                        ? $"配对成功：设备已连接 Wi-Fi，但没有报告 IP 地址，将通过 {host} 连接（未保存备用地址）。\n" +
+                          $"Paired: the device joined Wi-Fi but reported no IP address; connecting via {host} (no fallback address saved)."
+                        : $"配对成功：设备已连接 Wi-Fi，IP 地址 {address}（已保存为备用地址）。\n" +
+                          $"Paired: the device joined Wi-Fi at {address} (saved as the fallback address).";
+                    if (connected.AlreadyConnected)
+                    {
+                        message += "\n设备已在之前的尝试中连接 Wi-Fi，本次没有重新发送设置。\n" +
+                                   "The device had already joined Wi-Fi after an earlier attempt; the settings were not sent again.";
+                    }
+
+                    return new PairingOutcome(PairingOutcomeKind.Succeeded, message)
+                    {
+                        AddressToSave = address,
+                        DeviceWasAlreadyConnected = connected.AlreadyConnected,
+                    };
 
                 case WifiProvisioningResult.Failed { Reason: WifiConnectFailedReason.AuthError }:
                     return new PairingOutcome(
@@ -336,6 +347,20 @@ namespace ResourceMonitorDaemon.Pairing
                 : paused
                     ? "发送已暂停，恢复发送后会自动连接设备 (sending is paused; resume it to connect)"
                     : $"守护进程仍在后台重试连接 {host} (the daemon keeps retrying {host} in the background)";
+
+        /// <summary>
+        /// Whether the final "connected" status needs an MQTT connection made after the attempt started.
+        /// It does unless the device was already on Wi-Fi before this attempt (nothing was sent, so its
+        /// broker did not restart) and the effective fallback address did not change (so the daemon has
+        /// no reason to reconnect): then an existing daemon connection already reaches the device.
+        /// </summary>
+        public static bool RequiresNewDaemonConnection(
+            bool deviceWasAlreadyConnected, string? previousEffectiveFallback, string? newEffectiveFallback) =>
+            !deviceWasAlreadyConnected
+            || !string.Equals(
+                (previousEffectiveFallback ?? string.Empty).Trim(),
+                (newEffectiveFallback ?? string.Empty).Trim(),
+                StringComparison.OrdinalIgnoreCase);
 
         // ---- First-run prompt -----------------------------------------------------------------
 

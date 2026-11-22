@@ -14,7 +14,14 @@ namespace ResourceMonitorDaemon.Provisioning
         /// The device joined Wi-Fi. <paramref name="Ip4Address"/> is the address it reported, or null
         /// if it did not report a valid dotted-quad IPv4 address.
         /// </summary>
-        public sealed record Connected(string? Ip4Address) : WifiProvisioningResult;
+        public sealed record Connected(string? Ip4Address) : WifiProvisioningResult
+        {
+            /// <summary>
+            /// True when the device already reported Connected before any credentials were sent in this
+            /// attempt (it joined Wi-Fi after an earlier attempt), so nothing was sent or re-applied.
+            /// </summary>
+            public bool AlreadyConnected { get; init; }
+        }
 
         /// <summary>The device gave up joining Wi-Fi (wrong password or network not found).</summary>
         public sealed record Failed(WifiConnectFailedReason Reason) : WifiProvisioningResult;
@@ -72,7 +79,7 @@ namespace ResourceMonitorDaemon.Provisioning
             var initial = await CheckStatusBeforeConfigAsync(cancellationToken).ConfigureAwait(false);
             if (initial?.State == WifiStationState.Connected)
             {
-                return new WifiProvisioningResult.Connected(NormalizeIp4(initial.Ip4Address));
+                return new WifiProvisioningResult.Connected(NormalizeIp4(initial.Ip4Address)) { AlreadyConnected = true };
             }
 
             await SetConfigAsync(ssid, passphrase, cancellationToken).ConfigureAwait(false);

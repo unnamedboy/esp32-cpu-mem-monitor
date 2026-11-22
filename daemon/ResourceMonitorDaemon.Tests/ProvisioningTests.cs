@@ -684,7 +684,7 @@ namespace ResourceMonitorDaemon.Tests
                 var steps = new SyncProgress<ProvisioningStep>();
                 var second = await service.ProvisionAsync(TestDevice, "K7M3P9QX", "home", "second-pass", steps, CancellationToken.None);
 
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), second);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50") { AlreadyConnected = true }, second);
                 AssertEqual(1, device.SetConfigCount);               // credentials were not sent again
                 AssertEqual("first-pass", device.ReceivedPassphrase);
                 AssertTrue(!steps.Items.Contains(ProvisioningStep.WaitingForWifiConnection), "should not wait again");
@@ -695,9 +695,10 @@ namespace ResourceMonitorDaemon.Tests
                 var device = new FakeProvisioningDevice("ABCDEFGH") { ConnectingPolls = 0 };
                 using var session = await Security1Session.EstablishAsync(device, "ABCDEFGH", CancellationToken.None);
                 var client = new WifiConfigClient(session, FastPoll, FastTimeout);
-                await client.ConfigureAsync("home", "first-pass", CancellationToken.None);
+                var first = await client.ConfigureAsync("home", "first-pass", CancellationToken.None);
+                AssertTrue(first is WifiProvisioningResult.Connected { AlreadyConnected: false }, "first attempt sent the credentials");
                 var again = await client.ConfigureAsync("home", "second-pass", CancellationToken.None);
-                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50"), again);
+                AssertEqual<WifiProvisioningResult>(new WifiProvisioningResult.Connected("192.168.1.50") { AlreadyConnected = true }, again);
                 AssertEqual(1, device.SetConfigCount);
             })),
             ("ConnectionLost wording does not assume a disconnect", () => RunAsync(async () =>

@@ -145,7 +145,7 @@ namespace ResourceMonitorDaemon.Provisioning
                     // credentials again would only make ApplyConfig fail with InternalError.
                     _logger.LogInformation("Provisioning {Device}: device already connected to Wi-Fi; not sending credentials again.",
                         device.Name);
-                    result = new WifiProvisioningResult.Connected(WifiConfigClient.NormalizeIp4(initial.Ip4Address));
+                    result = new WifiProvisioningResult.Connected(WifiConfigClient.NormalizeIp4(initial.Ip4Address)) { AlreadyConnected = true };
                 }
                 else
                 {

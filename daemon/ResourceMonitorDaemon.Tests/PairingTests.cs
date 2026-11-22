@@ -38,6 +38,28 @@ namespace ResourceMonitorDaemon.Tests
 
                 AssertEqual("10.0.0.7", PairingOutcomePresenter.GetAddressToSave(" 10.0.0.7 "));
             }),
+            ("Pairing: an already-connected device is flagged and may reuse the daemon's existing connection", () =>
+            {
+                var fresh = PairingOutcomePresenter.Present(new WifiProvisioningResult.Connected("192.168.1.50"), Host);
+                AssertTrue(!fresh.DeviceWasAlreadyConnected, "credentials were sent");
+
+                var already = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.168.1.50") { AlreadyConnected = true }, Host);
+                AssertEqual(PairingOutcomeKind.Succeeded, already.Kind);
+                AssertTrue(already.DeviceWasAlreadyConnected, "flag carried over");
+                AssertEqual("192.168.1.50", already.AddressToSave);
+                AssertTrue(already.Message.Contains("not sent again"), already.Message);
+
+                // Credentials were sent: the device rejoined Wi-Fi, so only a new MQTT connection counts.
+                AssertTrue(PairingOutcomePresenter.RequiresNewDaemonConnection(false, "192.168.1.50", "192.168.1.50"), "fresh attempt");
+                // Already connected and the fallback address changed: the daemon reconnects, wait for it.
+                AssertTrue(PairingOutcomePresenter.RequiresNewDaemonConnection(true, "", "192.168.1.50"), "new address");
+                AssertTrue(PairingOutcomePresenter.RequiresNewDaemonConnection(true, "192.168.1.9", "192.168.1.50"), "changed address");
+                // Already connected and nothing changed (same address, or no IP): an existing connection is fine.
+                AssertTrue(!PairingOutcomePresenter.RequiresNewDaemonConnection(true, "192.168.1.50", " 192.168.1.50 "), "same address");
+                AssertTrue(!PairingOutcomePresenter.RequiresNewDaemonConnection(true, "", null), "no address");
+                AssertTrue(!PairingOutcomePresenter.RequiresNewDaemonConnection(true, null, ""), "no address (null/empty)");
+            }),
             ("Pairing: Wi-Fi failures map to password / 2.4 GHz messages and focus the right field", () =>
             {
                 var auth = PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), Host);

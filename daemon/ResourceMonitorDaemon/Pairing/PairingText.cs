@@ -71,6 +71,18 @@ namespace ResourceMonitorDaemon.Pairing
         public const string WifiNote =
             "ESP32 仅支持 2.4 GHz Wi-Fi (2.4 GHz only)。密码只用于本次配对，不会保存 (the password is used for this attempt only and never saved).";
 
+        /// <summary>
+        /// Link next to the SSID box. The lookup runs only on click: reading the connected SSID can make
+        /// Windows 11 ask once for location permission.
+        /// </summary>
+        public const string UseThisPcWifi = "使用本机当前 Wi-Fi (Use this PC's Wi-Fi)";
+
+        public const string ReadingThisPcWifi = "正在读取本机 Wi-Fi… (reading this PC's Wi-Fi…)";
+
+        public const string ThisPcWifiUnavailable =
+            "无法读取本机当前 Wi-Fi（未连接，或 Windows 未授予位置权限），请手动输入。\n" +
+            "Could not read this PC's Wi-Fi (not connected, or Windows did not grant location access); type the network name.";
+
         public const string SsidPrefilled = "已填入此电脑当前连接的 Wi-Fi (prefilled with this PC's current Wi-Fi)";
 
         public const string SsidPrefilledNot24GHz =
