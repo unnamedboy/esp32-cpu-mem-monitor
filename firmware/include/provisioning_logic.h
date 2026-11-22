@@ -122,4 +122,25 @@ inline uint32_t nextReconnectDelayMs(uint32_t currentMs, uint32_t minMs, uint32_
     return currentMs * 2;
 }
 
+// What to do when BLE provisioning fails to start in this boot.
+enum class ProvisioningStartRecovery {
+    RestartAndRetry,        // restart (prov_req set) and try provisioning again
+    UseDevFallback,         // give up on BLE, connect with secrets.h credentials
+    GiveUp,                 // stay up, log a clear error, wait for user action
+};
+
+// `failedAttempts` counts consecutive failed starts including this one
+// (carried across software restarts). Never loops forever: after
+// `maxAttempts` failures the device stops restarting.
+inline ProvisioningStartRecovery decideProvisioningStartRecovery(uint32_t failedAttempts, uint32_t maxAttempts,
+                                                                 bool hasDevFallbackCredentials) {
+    if (failedAttempts < maxAttempts) {
+        return ProvisioningStartRecovery::RestartAndRetry;
+    }
+    if (hasDevFallbackCredentials) {
+        return ProvisioningStartRecovery::UseDevFallback;
+    }
+    return ProvisioningStartRecovery::GiveUp;
+}
+
 #endif

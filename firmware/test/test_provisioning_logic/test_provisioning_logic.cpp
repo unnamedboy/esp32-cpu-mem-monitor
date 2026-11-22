@@ -53,8 +53,22 @@ void test_reconnect_backoff_doubles_and_clamps() {
     TEST_ASSERT_EQUAL_UINT32(60000, nextReconnectDelayMs(0xFFFFFFFFu, 5000, 60000));
 }
 
+void test_provisioning_start_failure_retries_then_stops() {
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartRecovery::RestartAndRetry,
+                          (int)decideProvisioningStartRecovery(1, 3, false));
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartRecovery::RestartAndRetry,
+                          (int)decideProvisioningStartRecovery(2, 3, true));
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartRecovery::GiveUp,
+                          (int)decideProvisioningStartRecovery(3, 3, false));
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartRecovery::UseDevFallback,
+                          (int)decideProvisioningStartRecovery(3, 3, true));
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartRecovery::GiveUp,
+                          (int)decideProvisioningStartRecovery(0xFFFFFFFFu, 3, false));
+}
+
 void runProvisioningLogicTests() {
     UNITY_BEGIN();
+    RUN_TEST(test_provisioning_start_failure_retries_then_stops);
     RUN_TEST(test_provisioning_request_wins_over_everything);
     RUN_TEST(test_stored_credentials_win_over_dev_fallback);
     RUN_TEST(test_dev_fallback_used_only_without_stored_credentials);

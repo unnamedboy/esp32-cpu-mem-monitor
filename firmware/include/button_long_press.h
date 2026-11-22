@@ -1,27 +1,39 @@
 #ifndef BUTTON_LONG_PRESS_H
 #define BUTTON_LONG_PRESS_H
 
-// Pure, non-blocking debounce + long-press detector. No Arduino dependencies
-// so it can be unit-tested on the host. Time values are millis()-style
-// uint32_t and wrap-safe.
+// Pure, non-blocking debounce + "hold for a window, then release" detector.
+// No Arduino dependencies so it can be unit-tested on the host. Time values
+// are millis()-style uint32_t and wrap-safe.
+//
+// The action fires on RELEASE, and only when the button was held for
+// minHoldMs..maxHoldMs (inclusive). Longer holds are ignored, so a pin that
+// stays low (stuck button, or a serial tool holding DTR asserted, which pulls
+// GPIO0 low through the dev board's auto-program circuit) can never trigger
+// the action.
 
 #include <stdint.h>
 
 enum class ButtonEvent {
     None,
-    Pressed,     // debounced press started (detector armed)
-    Released,    // debounced release before the long-press threshold
-    LongPress,   // held continuously for >= holdMs; reported once per press
+    Pressed,              // debounced press started
+    HoldThresholdReached, // held for minHoldMs: releasing now triggers
+    HeldTooLong,          // held beyond maxHoldMs: this press will be ignored
+    ReleasedTooShort,     // released before minHoldMs: nothing happens
+    ReleasedTooLong,      // released after maxHoldMs: nothing happens
+    Triggered,            // released within the window: perform the action
 };
 
-class LongPressDetector {
+class HoldReleaseDetector {
 public:
-    LongPressDetector(uint32_t debounceMs, uint32_t holdMs)
-        : debounceMs_(debounceMs), holdMs_(holdMs) {}
+    HoldReleaseDetector(uint32_t debounceMs, uint32_t minHoldMs, uint32_t maxHoldMs)
+        : debounceMs_(debounceMs), minHoldMs_(minHoldMs), maxHoldMs_(maxHoldMs) {}
 
-    // `pressed` is the raw (undebounced) logical button state.
-    // The detector only arms after it has seen a stable release, so a button
-    // already held when sampling starts never triggers a long press.
+    // `pressed` is the raw (undebounced) logical button state. The detector
+    // only arms after it has seen a stable release, so a button already held
+    // when sampling starts is ignored until it is released.
+    //
+    // Hold duration is measured between the raw press and release edges, so
+    // the debounce delay does not shift the window.
     ButtonEvent update(bool pressed, uint32_t nowMs) {
         if (!initialised_) {
             initialised_ = true;
@@ -43,19 +55,39 @@ public:
                 if (!armed_) {
                     return ButtonEvent::None;
                 }
-                pressedAtMs_ = nowMs;
-                longPressReported_ = false;
+                pressedAtMs_ = rawChangedAtMs_;
+                thresholdReported_ = false;
+                tooLongReported_ = false;
                 return ButtonEvent::Pressed;
             }
 
-            const bool wasArmedPress = armed_ && !longPressReported_;
+            // Debounced release.
+            const bool wasArmed = armed_;
             armed_ = true;
-            return wasArmedPress ? ButtonEvent::Released : ButtonEvent::None;
+            if (!wasArmed) {
+                return ButtonEvent::None;
+            }
+            const uint32_t heldMs = (uint32_t)(rawChangedAtMs_ - pressedAtMs_);
+            if (heldMs < minHoldMs_) {
+                return ButtonEvent::ReleasedTooShort;
+            }
+            if (heldMs > maxHoldMs_) {
+                return ButtonEvent::ReleasedTooLong;
+            }
+            return ButtonEvent::Triggered;
         }
 
-        if (stableState_ && armed_ && !longPressReported_ && (uint32_t)(nowMs - pressedAtMs_) >= holdMs_) {
-            longPressReported_ = true;
-            return ButtonEvent::LongPress;
+        if (stableState_ && rawState_ && armed_) {
+            const uint32_t heldMs = (uint32_t)(nowMs - pressedAtMs_);
+            if (!tooLongReported_ && heldMs > maxHoldMs_) {
+                tooLongReported_ = true;
+                thresholdReported_ = true;
+                return ButtonEvent::HeldTooLong;
+            }
+            if (!thresholdReported_ && heldMs >= minHoldMs_) {
+                thresholdReported_ = true;
+                return ButtonEvent::HoldThresholdReached;
+            }
         }
 
         return ButtonEvent::None;
@@ -65,18 +97,16 @@ public:
         return initialised_ && stableState_ && armed_;
     }
 
-    uint32_t heldForMs(uint32_t nowMs) const {
-        return isHeld() ? (uint32_t)(nowMs - pressedAtMs_) : 0;
-    }
-
 private:
     uint32_t debounceMs_;
-    uint32_t holdMs_;
+    uint32_t minHoldMs_;
+    uint32_t maxHoldMs_;
     bool initialised_ = false;
     bool rawState_ = false;
     bool stableState_ = false;
     bool armed_ = false;
-    bool longPressReported_ = false;
+    bool thresholdReported_ = false;
+    bool tooLongReported_ = false;
     uint32_t rawChangedAtMs_ = 0;
     uint32_t pressedAtMs_ = 0;
 };
