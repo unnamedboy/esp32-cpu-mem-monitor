@@ -60,6 +60,42 @@ namespace ResourceMonitorDaemon.Tests
                 AssertTrue(!PairingOutcomePresenter.RequiresNewDaemonConnection(true, "", null), "no address");
                 AssertTrue(!PairingOutcomePresenter.RequiresNewDaemonConnection(true, null, ""), "no address (null/empty)");
             }),
+            ("Pairing: an already-connected device on a different network is not reported as success", () =>
+            {
+                var other = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40")
+                    {
+                        AlreadyConnected = true,
+                        JoinedSsid = "Example-Other-Net",
+                        JoinedDifferentNetwork = true,
+                    },
+                    Host);
+                AssertEqual(PairingOutcomeKind.Failed, other.Kind);
+                AssertTrue(other.DeviceOnDifferentNetwork && other.DeviceWasAlreadyConnected, "flags");
+                AssertTrue(other.AddressToSave is null, "nothing saved for the other network");
+                AssertEqual(PairingField.Ssid, other.Focus);
+                AssertTrue(other.Message.Contains("“Example-Other-Net”"), other.Message);
+                AssertTrue(other.Message.Contains(ProvisioningConstants.ReprovisionInstruction), "BOOT instruction (en)");
+                AssertTrue(other.Message.Contains(PairingOutcomePresenter.ReprovisionInstructionZh), "BOOT instruction (zh)");
+                AssertEqual(PairingText.AlreadyOnDifferentNetwork("Example-Other-Net"), other.Message);
+
+                // Same network, or SSID not reported: success as before.
+                var same = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40") { AlreadyConnected = true, JoinedSsid = "Example-Home-Net" }, Host);
+                AssertEqual(PairingOutcomeKind.Succeeded, same.Kind);
+                AssertEqual("192.0.2.40", same.AddressToSave);
+                AssertTrue(!same.DeviceOnDifferentNetwork, "same network");
+
+                var unknown = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40") { AlreadyConnected = true, JoinedSsid = null }, Host);
+                AssertEqual(PairingOutcomeKind.Succeeded, unknown.Kind);
+                AssertTrue(unknown.DeviceWasAlreadyConnected && !unknown.DeviceOnDifferentNetwork, "SSID not reported");
+
+                // The flag only matters for the already-connected path.
+                var fresh = PairingOutcomePresenter.Present(
+                    new WifiProvisioningResult.Connected("192.0.2.40") { JoinedSsid = "Example-Other-Net", JoinedDifferentNetwork = true }, Host);
+                AssertEqual(PairingOutcomeKind.Succeeded, fresh.Kind);
+            }),
             ("Pairing: Wi-Fi failures map to password / 2.4 GHz messages and focus the right field", () =>
             {
                 var auth = PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), Host);

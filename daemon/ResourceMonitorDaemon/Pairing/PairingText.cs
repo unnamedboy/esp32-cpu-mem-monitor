@@ -108,6 +108,15 @@ namespace ResourceMonitorDaemon.Pairing
 
         public static string StepSaved(string address) => $"保存设备地址 {address} (Saved {address})";
 
+        /// <summary>
+        /// The device was already on Wi-Fi (no credentials were sent) and reports a different network from
+        /// the one entered. <paramref name="joinedSsid"/> may be shown in the UI but must never be logged.
+        /// </summary>
+        public static string AlreadyOnDifferentNetwork(string joinedSsid) =>
+            $"设备已连接到网络“{joinedSsid}”，而不是你输入的网络。如需切换网络，请{PairingOutcomePresenter.ReprovisionInstructionZh}，然后重新配对。\n" +
+            $"The device is already connected to network “{joinedSsid}”, not the one you entered. " +
+            $"To switch networks, {ProvisioningConstants.ReprovisionInstruction}, and pair again.";
+
         public static string SaveFailed(string error) => $"无法保存设备地址 (Could not save the device address): {error}";
 
         public const string FallbackOverriddenByEnvironment =

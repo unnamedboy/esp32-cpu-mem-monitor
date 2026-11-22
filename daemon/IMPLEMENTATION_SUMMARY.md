@@ -387,6 +387,7 @@ Results (`PairingOutcomePresenter`, pure and unit-tested):
 | --- | --- |
 | `Connected(ip)` with a usable unicast IPv4 | Success. `ISettingsStore.Update(p => p.FallbackAddress = ip)` is called, and nothing else is changed. |
 | `Connected(null)`, or an unusable address (0.0.0.0, broadcast, loopback, multicast, 169.254/16) | Success, but nothing is saved; the daemon keeps using `Host` (resmon.local). |
+| `Connected` with `AlreadyConnected` and `JoinedDifferentNetwork` | Not a success; nothing is saved. The wizard says the device is already connected to network “`JoinedSsid`” (shown in the UI, never logged), not the one entered, and that switching networks needs BOOT 5–15 s, release, and pairing again (`PairingText.AlreadyOnDifferentNetwork`). If the device does not report its SSID, the result is a normal success. |
 | `Failed(AuthError)` | "Wi-Fi 密码错误"; focus moves to the password box. |
 | `Failed(NetworkNotFound)` | "找不到该 Wi-Fi（ESP32 仅支持 2.4 GHz）"; focus moves to the SSID box. |
 | `Timeout` | No result within 30 s: check the SSID, password and 2.4 GHz support, then retry. A retry detects a device that joined Wi-Fi late. |

@@ -149,6 +149,7 @@ The Wi-Fi password is used only for that attempt. The password box is cleared af
 | No result within 30 s | Check the SSID, password and 2.4 GHz, then try again. A retry also detects a device that joined Wi-Fi late. |
 | Lost the Bluetooth link | The wizard first tries the configured `Host:Port` (default `resmon.local:1883`) for 15 s. If the device is unreachable, rescan; if it no longer appears, hold BOOT for 5–15 s and release, then pair again. |
 | The device did not accept another attempt | Hold BOOT for 5–15 s and release, then rescan and pair. Don't just power-cycle it: it would restart with the earlier Wi-Fi settings and without Bluetooth pairing. |
+| The device is already connected to another network | It joined a different Wi-Fi in an earlier attempt and was not changed. To switch networks, hold BOOT for 5–15 s, release, and pair again. |
 
 ### Build and test
 

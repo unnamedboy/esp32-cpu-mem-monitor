@@ -41,6 +41,12 @@ namespace ResourceMonitorDaemon.Pairing
         /// </summary>
         public bool DeviceWasAlreadyConnected { get; init; }
 
+        /// <summary>
+        /// The device was already on Wi-Fi and reports a different network from the one entered
+        /// (<see cref="WifiProvisioningResult.Connected.JoinedDifferentNetwork"/>): not a success.
+        /// </summary>
+        public bool DeviceOnDifferentNetwork { get; init; }
+
         public PairingField Focus { get; init; }
         public bool SuggestRescan { get; init; }
     }
@@ -67,7 +73,17 @@ namespace ResourceMonitorDaemon.Pairing
             ArgumentNullException.ThrowIfNull(result);
             switch (result)
             {
+                case WifiProvisioningResult.Connected { AlreadyConnected: true, JoinedDifferentNetwork: true, JoinedSsid: { Length: > 0 } joinedSsid }:
+                    // Nothing was sent: the device stays on the other network. Not a success, nothing saved.
+                    return new PairingOutcome(PairingOutcomeKind.Failed, PairingText.AlreadyOnDifferentNetwork(joinedSsid))
+                    {
+                        DeviceWasAlreadyConnected = true,
+                        DeviceOnDifferentNetwork = true,
+                        Focus = PairingField.Ssid,
+                    };
+
                 case WifiProvisioningResult.Connected connected:
+                    // Includes an already-connected device that did not report its SSID (JoinedSsid null).
                     var address = GetAddressToSave(connected.Ip4Address);
                     var message = address is null
                         ? $"配对成功：设备已连接 Wi-Fi，但没有报告 IP 地址，将通过 {host} 连接（未保存备用地址）。\n" +

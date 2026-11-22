@@ -666,7 +666,7 @@ namespace ResourceMonitorDaemon.Pairing
                     return;
                 }
 
-                ShowResult(outcome.Message, ToneOf(outcome.Kind));
+                ShowResult(outcome.Message, ToneOf(outcome));
                 if (outcome.Kind == PairingOutcomeKind.Succeeded)
                 {
                     await FinishSuccessAsync(outcome, settings, startGeneration, previousFallback, cts.Token);
@@ -723,7 +723,7 @@ namespace ResourceMonitorDaemon.Pairing
                 }
 
                 var outcome = PairingOutcomePresenter.Present(result, settings.Host);
-                MarkResultSteps(outcome.Kind);
+                MarkResultSteps(outcome);
                 resultStepsMarked = true;
                 if (outcome.Kind != PairingOutcomeKind.CheckBroker || _closed)
                 {
@@ -951,7 +951,7 @@ namespace ResourceMonitorDaemon.Pairing
             SetStep(current, StepState.Running);
         }
 
-        private void MarkResultSteps(PairingOutcomeKind kind)
+        private void MarkResultSteps(PairingOutcome outcome)
         {
             if (_closed)
             {
@@ -963,10 +963,11 @@ namespace ResourceMonitorDaemon.Pairing
                 SetStep(i, StepState.Done);
             }
 
-            SetStep(StepWifi, kind switch
+            SetStep(StepWifi, outcome.Kind switch
             {
                 PairingOutcomeKind.Succeeded => StepState.Done,
                 PairingOutcomeKind.CheckBroker => StepState.Warning,
+                _ when outcome.DeviceOnDifferentNetwork => StepState.Warning,
                 _ => StepState.Failed,
             });
         }
@@ -1014,7 +1015,7 @@ namespace ResourceMonitorDaemon.Pairing
             };
         }
 
-        private static Tone ToneOf(PairingOutcomeKind kind) => kind switch
+        private static Tone ToneOf(PairingOutcome outcome) => outcome.DeviceOnDifferentNetwork ? Tone.Warning : outcome.Kind switch
         {
             PairingOutcomeKind.Succeeded => Tone.Success,
             PairingOutcomeKind.Failed => Tone.Error,
