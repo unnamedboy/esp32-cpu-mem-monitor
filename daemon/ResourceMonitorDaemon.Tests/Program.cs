@@ -224,6 +224,54 @@ var tests = new (string Name, Action Run)[]
         var lines = File.ReadAllLines(provider.FilePath).Concat(File.ReadAllLines(provider.RolledFilePath)).ToArray();
         AssertTrue(lines.All(l => l.StartsWith("[") && l.Contains("[Information] [Tests] thread")), "interleaved or malformed line");
     }),
+
+    // ---- ReconnectBackoff ----------------------------------------------------------------
+    ("ReconnectBackoff is due immediately, doubles per failure and caps at max", () =>
+    {
+        var now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var backoff = new ReconnectBackoff(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(8), () => now);
+        AssertTrue(backoff.IsAttemptDue, "first attempt should be due immediately");
+
+        var delays = new List<double>();
+        for (var i = 0; i < 6; i++)
+        {
+            var delay = backoff.RecordFailure();
+            delays.Add(delay.TotalSeconds);
+            AssertTrue(!backoff.IsAttemptDue, $"attempt due right after failure {i + 1}");
+            now += delay - TimeSpan.FromMilliseconds(1);
+            AssertTrue(!backoff.IsAttemptDue, $"attempt due before deadline after failure {i + 1}");
+            now += TimeSpan.FromMilliseconds(1);
+            AssertTrue(backoff.IsAttemptDue, $"attempt not due at deadline after failure {i + 1}");
+        }
+
+        AssertEqual("1,2,4,8,8,8", string.Join(",", delays));
+        AssertEqual(6, backoff.ConsecutiveFailures);
+    }),
+    ("ReconnectBackoff.Reset restores the initial delay and makes the attempt due", () =>
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var backoff = new ReconnectBackoff(TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(30), () => now);
+        backoff.RecordFailure();
+        backoff.RecordFailure();
+        backoff.RecordFailure();
+        AssertEqual(TimeSpan.FromSeconds(4), backoff.NextDelay);
+        backoff.Reset();
+        AssertTrue(backoff.IsAttemptDue, "not due after reset");
+        AssertEqual(0, backoff.ConsecutiveFailures);
+        AssertEqual(TimeSpan.FromMilliseconds(500), backoff.RecordFailure());
+    }),
+    ("ReconnectBackoff treats max < initial as max = initial", () =>
+    {
+        var backoff = new ReconnectBackoff(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(1));
+        AssertEqual(TimeSpan.FromSeconds(5), backoff.RecordFailure());
+        AssertEqual(TimeSpan.FromSeconds(5), backoff.RecordFailure());
+    }),
+
+    // ---- MqttConnection (in-process loopback broker) --------------------------------------
+    ("MqttConnection is non-blocking, uses the fallback, and notifies once per outage", () =>
+    {
+        MqttConnectionScenario.Run().GetAwaiter().GetResult();
+    }),
 };
 
 var failed = 0;

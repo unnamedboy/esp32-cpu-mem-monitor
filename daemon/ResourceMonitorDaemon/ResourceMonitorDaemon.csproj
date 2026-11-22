@@ -14,6 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ResourceMonitorDaemon.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Non-secret defaults; per-user overrides live in %LocalAppData%\ResourceMonitorDaemon\settings.json -->
     <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
