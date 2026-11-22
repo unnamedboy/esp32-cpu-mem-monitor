@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace ResourceMonitorDaemon.Observability
@@ -26,6 +27,7 @@ namespace ResourceMonitorDaemon.Observability
         private long _dropped;
         private long _totalDropped;
         private volatile bool _accepting = true;
+        private volatile bool _keepHostName;
         private volatile int _minLogLevel = (int)LogLevel.Information;
 
         public LokiEntryQueue()
@@ -47,6 +49,16 @@ namespace ResourceMonitorDaemon.Observability
         {
             get => _accepting;
             set => _accepting = value;
+        }
+
+        /// <summary>
+        /// True when the user opted into the host label, so log lines may keep the PC name
+        /// (see <see cref="LokiLogRedactor"/>).
+        /// </summary>
+        public bool KeepHostName
+        {
+            get => _keepHostName;
+            set => _keepHostName = value;
         }
 
         /// <summary>Minimum level of daemon log lines (used by <see cref="LokiLoggerProvider"/>).</summary>
@@ -139,20 +151,35 @@ namespace ResourceMonitorDaemon.Observability
             return true;
         }
 
-        /// <summary>Removes and returns up to <paramref name="max"/> of the oldest entries.</summary>
-        public List<LokiEntry> DequeueBatch(int max)
+        /// <summary>
+        /// Removes and returns up to <paramref name="max"/> of the oldest entries whose estimated
+        /// request size stays within <paramref name="maxBytes"/>; at least one entry is returned
+        /// when the queue is not empty.
+        /// </summary>
+        public List<LokiEntry> DequeueBatch(int max, long maxBytes = long.MaxValue)
         {
             lock (_gate)
             {
                 var batch = new List<LokiEntry>(Math.Min(Math.Max(0, max), _entries.Count));
-                while (batch.Count < max && _entries.TryDequeue(out var entry))
+                long bytes = 0;
+                while (batch.Count < max && _entries.TryPeek(out var next))
                 {
-                    batch.Add(entry);
+                    var size = EstimateBytes(next);
+                    if (batch.Count > 0 && bytes + size > maxBytes)
+                    {
+                        break;
+                    }
+
+                    batch.Add(_entries.Dequeue());
+                    bytes += size;
                 }
 
                 return batch;
             }
         }
+
+        /// <summary>Uncompressed JSON size of one value: the UTF-8 line plus timestamp and punctuation.</summary>
+        public static long EstimateBytes(in LokiEntry entry) => Encoding.UTF8.GetByteCount(entry.Line) + 32;
 
         /// <summary>Returns the drops since the previous call and resets that counter.</summary>
         public long TakeDroppedCount() => Interlocked.Exchange(ref _dropped, 0);

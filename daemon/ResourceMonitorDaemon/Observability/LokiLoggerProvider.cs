@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -13,6 +14,8 @@ namespace ResourceMonitorDaemon.Observability
     /// <c>System.Net.Http.*</c> get a no-op logger, so the sink's own messages (and HttpClient
     /// logging, if ever enabled) reach the local file only. Logging is otherwise filtered by the
     /// normal <c>Logging</c> configuration (provider alias <c>Loki</c>). Enqueueing never blocks.
+    /// Every line passes through <see cref="LokiLogRedactor"/> first, so per-user folders, the
+    /// Windows user name and (unless the host label is enabled) the PC name never reach Loki.
     /// </remarks>
     [ProviderAlias("Loki")]
     public sealed class LokiLoggerProvider : ILoggerProvider
@@ -25,17 +28,19 @@ namespace ResourceMonitorDaemon.Observability
         };
 
         private readonly LokiEntryQueue _queue;
+        private readonly LokiLogRedactor _redactor;
 
-        public LokiLoggerProvider(LokiEntryQueue queue)
+        public LokiLoggerProvider(LokiEntryQueue queue, LokiLogRedactor? redactor = null)
         {
             _queue = queue;
+            _redactor = redactor ?? LokiLogRedactor.ForCurrentUser();
         }
 
         public static bool IsExcluded(string categoryName) =>
             ExcludedCategoryPrefixes.Any(prefix => categoryName.StartsWith(prefix, StringComparison.Ordinal));
 
         public ILogger CreateLogger(string categoryName) =>
-            IsExcluded(categoryName) ? NullLogger.Instance : new LokiLogger(_queue, categoryName);
+            IsExcluded(categoryName) ? NullLogger.Instance : new LokiLogger(_queue, _redactor, categoryName);
 
         public void Dispose()
         {
@@ -44,11 +49,13 @@ namespace ResourceMonitorDaemon.Observability
         private sealed class LokiLogger : ILogger
         {
             private readonly LokiEntryQueue _queue;
+            private readonly LokiLogRedactor _redactor;
             private readonly string _category;
 
-            public LokiLogger(LokiEntryQueue queue, string categoryName)
+            public LokiLogger(LokiEntryQueue queue, LokiLogRedactor redactor, string categoryName)
             {
                 _queue = queue;
+                _redactor = redactor;
                 var lastDot = categoryName.LastIndexOf('.');
                 _category = lastDot >= 0 ? categoryName[(lastDot + 1)..] : categoryName;
             }
@@ -73,12 +80,93 @@ namespace ResourceMonitorDaemon.Observability
                         line.Append('\n').Append(exception);
                     }
 
-                    _queue.TryEnqueue(LokiStreamKind.Log, LokiLabels.Level(logLevel), line.ToString());
+                    _queue.TryEnqueue(LokiStreamKind.Log, LokiLabels.Level(logLevel), _redactor.Redact(line.ToString(), _queue.KeepHostName));
                 }
                 catch (Exception)
                 {
                     // Forwarding must never affect the caller.
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes personal data from daemon log lines before they are forwarded to Loki (the local
+    /// <c>daemon.log</c> is unchanged):
+    /// <list type="bullet">
+    /// <item>per-user folders are replaced by <c>%LOCALAPPDATA%</c>, <c>%APPDATA%</c> or
+    /// <c>%USERPROFILE%</c> (longest match first, case-insensitive);</item>
+    /// <item>the Windows user name is replaced by <c>&lt;user&gt;</c> (whole word, case-insensitive);</item>
+    /// <item>the machine name is replaced by <c>&lt;host&gt;</c> unless the user opted into the host label.</item>
+    /// </list>
+    /// Names shorter than <see cref="MinNameLength"/> characters are not replaced as words (that
+    /// would mangle ordinary text); paths containing them are still covered by the folder rules.
+    /// </summary>
+    public sealed class LokiLogRedactor
+    {
+        public const string UserPlaceholder = "<user>";
+        public const string HostPlaceholder = "<host>";
+        public const int MinNameLength = 3;
+
+        private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
+        private readonly (string Prefix, string Token)[] _prefixes;
+        private readonly Regex? _user;
+        private readonly Regex? _host;
+
+        public LokiLogRedactor(IEnumerable<(string Prefix, string Token)> folders, string? userName, string? machineName)
+        {
+            _prefixes = folders
+                .Where(f => !string.IsNullOrWhiteSpace(f.Prefix))
+                .Select(f => (Prefix: f.Prefix.TrimEnd('\\', '/'), f.Token))
+                .OrderByDescending(f => f.Prefix.Length)
+                .ToArray();
+            _user = WholeWord(userName);
+            _host = WholeWord(machineName);
+        }
+
+        /// <summary>Redactor for the current Windows user and PC.</summary>
+        public static LokiLogRedactor ForCurrentUser() => new(
+            new[]
+            {
+                (Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "%LOCALAPPDATA%"),
+                (Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "%APPDATA%"),
+                (Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "%USERPROFILE%"),
+            },
+            Environment.UserName,
+            Environment.MachineName);
+
+        public string Redact(string text, bool keepHostName)
+        {
+            foreach (var (prefix, token) in _prefixes)
+            {
+                text = text.Replace(prefix, token, StringComparison.OrdinalIgnoreCase);
+            }
+
+            text = Replace(_user, text, UserPlaceholder);
+            return keepHostName ? text : Replace(_host, text, HostPlaceholder);
+        }
+
+        private static Regex? WholeWord(string? name) =>
+            string.IsNullOrWhiteSpace(name) || name.Trim().Length < MinNameLength
+                ? null
+                : new Regex(@"(?<![\p{L}\p{N}_])" + Regex.Escape(name.Trim()) + @"(?![\p{L}\p{N}_])",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, MatchTimeout);
+
+        private static string Replace(Regex? pattern, string text, string placeholder)
+        {
+            if (pattern == null)
+            {
+                return text;
+            }
+
+            try
+            {
+                return pattern.Replace(text, placeholder);
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // Never forward a line that could not be checked.
+                return "(line withheld: redaction timed out)";
             }
         }
     }
