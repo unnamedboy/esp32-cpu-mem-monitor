@@ -588,7 +588,7 @@ var tests = new (string Name, Action Run)[]
     {
         MqttConnectionScenario.LateNotificationHandler().GetAwaiter().GetResult();
     }),
-}.Concat(ProvisioningTests.All).Concat(PairingTests.All).Concat(ObservabilityTests.All).Concat(LocalizationTests.All).ToArray();
+}.Concat(ProvisioningTests.All).Concat(PairingTests.All).Concat(ObservabilityTests.All).Concat(LocalizationTests.All).Concat(MonitorServiceTests.All).ToArray();
 
 var failed = 0;
 

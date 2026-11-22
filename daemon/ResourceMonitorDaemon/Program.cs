@@ -11,7 +11,16 @@ namespace ResourceMonitorDaemon
     {
         // The exe directory may not be writable, so the log lives under %LocalAppData%.
         private static readonly string _logFilePath = DaemonPaths.LogFilePath;
-        private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(3);
+        /// <summary>
+        /// Single host stop budget. Hosted services stop one after another: MonitorService first
+        /// (MQTT dispose, at most <see cref="MqttConnection.MaxShutdownDuration"/>), then
+        /// ObservabilityService (final Loki flush, at most
+        /// <see cref="ObservabilityService.ShutdownFlushBudget"/>), plus a 1 s margin, which is 4 s
+        /// with today's values. A healthy Exit finishes in milliseconds; the budget only bounds the
+        /// worst case.
+        /// </summary>
+        internal static readonly TimeSpan ShutdownTimeout =
+            MqttConnection.MaxShutdownDuration + ObservabilityService.ShutdownFlushBudget + TimeSpan.FromSeconds(1);
 
         [STAThread]
         static void Main()
@@ -88,7 +97,7 @@ namespace ResourceMonitorDaemon
             Application.Run();
 
             // Single owner of shutdown: the tray Exit only ends the message loop. The host is
-            // stopped here exactly once (3 s budget) and disposed by the using declaration.
+            // stopped here exactly once (ShutdownTimeout budget) and disposed by the using declaration.
             try
             {
                 using var stopTimeout = new CancellationTokenSource(ShutdownTimeout);

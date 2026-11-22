@@ -26,7 +26,16 @@ namespace ResourceMonitorDaemon
     {
         private const int FailureSummaryInterval = 20;
         private const int ShutdownDisconnectTimeoutMs = 500;
-        private static readonly TimeSpan ShutdownAttemptWait = TimeSpan.FromSeconds(2);
+
+        // In-flight work is cancelled first and normally ends within milliseconds; this only
+        // bounds work that ignores cancellation (e.g. a DNS lookup).
+        private static readonly TimeSpan ShutdownAttemptWait = TimeSpan.FromMilliseconds(500);
+
+        /// <summary>
+        /// Upper bound for <see cref="DisposeAsync"/>: waiting for in-flight connect/resubscribe
+        /// work plus a graceful disconnect. Part of the host stop budget in <c>Program</c>.
+        /// </summary>
+        public static TimeSpan MaxShutdownDuration => ShutdownAttemptWait + TimeSpan.FromMilliseconds(ShutdownDisconnectTimeoutMs);
 
         private readonly ILogger<MqttConnection> _logger;
         private readonly MqttFactory _factory = new();
@@ -294,8 +303,9 @@ namespace ResourceMonitorDaemon
         }
 
         /// <summary>
-        /// Cancels any in-flight connect attempt first, then closes the client. Completes within
-        /// about a second even when the broker is unreachable.
+        /// Cancels any in-flight connect attempt first, then closes the client. Normally completes
+        /// within milliseconds; the worst case is bounded by <see cref="MaxShutdownDuration"/>
+        /// (500 ms waiting for in-flight work that ignores cancellation + 500 ms graceful disconnect).
         /// </summary>
         public async ValueTask DisposeAsync()
         {

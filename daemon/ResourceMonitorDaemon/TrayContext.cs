@@ -333,7 +333,7 @@ namespace ResourceMonitorDaemon
             }
 
             // Hide the icon and disable the menu immediately so Exit feels instant and cannot be
-            // re-triggered; Program.Main stops the host (3 s budget) after the message loop ends.
+            // re-triggered; Program.Main stops the host (Program.ShutdownTimeout budget) after the message loop ends.
             _exiting = true;
             _updateTimer.Stop();
             if (_notifyIcon.ContextMenuStrip != null)
