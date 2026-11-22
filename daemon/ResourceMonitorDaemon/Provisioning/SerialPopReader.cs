@@ -133,7 +133,9 @@ namespace ResourceMonitorDaemon.Provisioning
     }
 
     /// <summary>
-    /// Reads the pairing code over USB serial: on every COM port, opens 115200 8N1 with DTR and RTS
+    /// Reads the pairing code over USB serial: on each candidate COM port (see
+    /// <see cref="SerialPortFilter"/>: known ESP32 USB-UART bridges; legacy UARTs and Bluetooth
+    /// ports are skipped; ports with unknown origin are still probed), opens 115200 8N1 with DTR and RTS
     /// deasserted (so the ESP32 auto-reset circuit is not triggered), sends <c>RESMON?POP\n</c> and
     /// waits up to 1.5 s for a <c>RESMON-POP</c> reply. Ports are probed in parallel. Busy or
     /// inaccessible ports are skipped silently; this class never throws for port errors.
@@ -159,15 +161,30 @@ namespace ResourceMonitorDaemon.Provisioning
             return FindPop(matches, deviceName);
         }
 
-        /// <summary>Queries every COM port in parallel and returns all devices that reported a pairing code.</summary>
+        /// <summary>
+        /// Queries the candidate COM ports (<see cref="SerialPortFilter"/>) in parallel and returns all
+        /// devices that reported a pairing code.
+        /// </summary>
         public async Task<IReadOnlyList<UsbPopMatch>> QueryAllPortsAsync(CancellationToken cancellationToken)
         {
             string[] ports;
             try
             {
-                ports = SerialPort.GetPortNames().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                var present = SerialPort.GetPortNames().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+                // Registry lookups are synchronous; keep them off the caller's (UI) thread.
+                var candidates = await Task.Run(() => SerialPortInventory.Describe(present), cancellationToken).ConfigureAwait(false);
+                ports = candidates
+                    .Where(candidate =>
+                    {
+                        var probe = SerialPortFilter.ShouldProbe(candidate, out var reason);
+                        _logger.LogDebug("Serial port {Port}: {Decision} ({Reason}).", candidate.PortName, probe ? "probing" : "skipped", reason);
+                        return probe;
+                    })
+                    .Select(candidate => candidate.PortName)
+                    .ToArray();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogInformation("Could not enumerate serial ports: {Error}", ex.Message);
                 return Array.Empty<UsbPopMatch>();
