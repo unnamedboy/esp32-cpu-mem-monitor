@@ -12,7 +12,7 @@ Status as of 2026-11-22:
 
 - Phase 1: Complete
 - Phase 2: Complete (including the former remaining work)
-- Phase 3: In progress / not complete
+- Phase 3: In progress (settings module done; first-run wizard pending)
 - Phase 4: Firmware side implemented; not yet validated on hardware
 - Phase 5: Planned
 
@@ -37,6 +37,10 @@ Completed implementation summary:
   10 s into its own broker (see [Observability](#observability); hardware
   validation pending).
 - C# tests cover MQTT percentage payload formatting and clamping.
+- The daemon reads `DeviceSettings` from defaults < `appsettings.json` <
+  `%LocalAppData%\ResourceMonitorDaemon\settings.json` < `RESMON_*`
+  environment variables, applies changes live, and reconnects in the
+  background without blocking sampling.
 
 See [COMMUNICATION.md](COMMUNICATION.md) for the active message contract.
 See [PROVISIONING.md](PROVISIONING.md) for the BLE pairing contract.
@@ -94,7 +98,9 @@ None.
 
 ## Phase 3: Windows Configuration Module
 
-Status: In progress / not complete
+Status: In progress — steps 1–3 and the tray settings entry are complete; the
+first-run wizard (step 4, part 1) and provisioning steps 5–6 are pending in a
+later branch.
 
 ### Goal
 
@@ -105,18 +111,24 @@ setup wizard without making the real-time sampling path more complex.
 
 - `MetricsSampler`: returns current CPU and memory percentages.
 - `MetricPublisher`: publishes a percentage to the configured MQTT topic.
-- `MqttConnection`: owns connection state and bounded reconnect backoff.
+- `MqttConnection`: owns connection state and bounded reconnect backoff
+  (implemented; non-blocking, Host then FallbackAddress).
 - `DeviceSettings`: owns non-secret values such as device host, port, topics,
-  and sampling interval.
+  and sampling interval (implemented, with `UserSettingsStore` for the
+  per-user settings file).
 - `ProvisioningTransport`: accepts Wi-Fi credentials for one provisioning
   attempt and does not retain them by default.
 
 ### Implementation Steps
 
-1. Add `appsettings.json` for non-secret daemon settings.
-2. Support environment-variable overrides for automation and diagnostics.
-3. Replace hard-coded daemon constants with `DeviceSettings`.
-4. Add a first-run wizard and a tray-menu entry for changing settings.
+1. Done: Add `appsettings.json` for non-secret daemon settings.
+2. Done: Support environment-variable overrides for automation and diagnostics
+   (`RESMON_` prefix, e.g. `RESMON_Device__Host`).
+3. Done: Replace hard-coded daemon constants with `DeviceSettings`
+   (validated, sanitized to defaults, applied live via `IOptionsMonitor`).
+4. Partly done: tray-menu entry "⚙ 设置 (Settings)…" edits and saves settings
+   through `UserSettingsStore`. Pending: first-run wizard, which should write
+   `FallbackAddress` with `ISettingsStore.Update(p => p.FallbackAddress = ip)`.
 5. Keep Wi-Fi passwords in memory only while a provisioning operation is in
    progress.
 6. Do not persist Wi-Fi passwords on the Windows PC by default.
