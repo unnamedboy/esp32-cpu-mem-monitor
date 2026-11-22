@@ -206,10 +206,10 @@ settings or environment; the repository and `appsettings.json` hold none of it.
     any length loses only what the bounded drop-oldest queue drops. Only one batch, plus its split
     halves, is held outside the queue. Loki rejects entries older than its
     `reject_old_samples_max_age` with a 400, and that drops the batch.
-  - After 3 throttled attempts (429 without Retry-After), a batch is split in half. A single
-    entry throttled that often is given up: it is counted in `DroppedByServer` and logged as a
-    Warning once until a push succeeds. 429 with Retry-After is retried for as long as the server
-    asks.
+  - After 3 throttled attempts (any 429, with or without Retry-After), a batch is split in half;
+    splitting is lossless. A single entry throttled 3 times without Retry-After is given up: it is
+    counted in `DroppedByServer` and logged as a Warning once until a push succeeds. With
+    Retry-After it is retried for as long as the server asks.
   - Batches are capped at 1 MiB of uncompressed body. The body is written as raw UTF-8
     (`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`): quotes, backslashes and control characters
     are still escaped, and the size estimate counts those escapes, so CJK text is not doubled by
@@ -218,6 +218,10 @@ settings or environment; the repository and `appsettings.json` hold none of it.
     dropped.
   - Other 4xx and 3xx responses drop the batch. This is logged as a Warning once per status code
     until a push succeeds; redirects are not followed.
+  - When the response body says `total ignored: N out of M` (Loki stores the valid entries of a
+    partly rejected batch), only N count as dropped and the log says "rejected N of M entries".
+    Otherwise the whole batch counts, which is an upper bound, and the log says Loki may have
+    accepted some entries.
   - 401/403/404 and request errors also back off, so a wrong URL or credentials are not retried
     every flush interval.
   - When the queue is full, the oldest entries are dropped, and the number of drops is logged at
@@ -240,8 +244,12 @@ Privacy notes:
 - Data is sent only to the URL the user configured.
 - Forwarded log lines pass through `LokiLogRedactor` first:
   - `%LOCALAPPDATA%`, `%APPDATA%` and `%USERPROFILE%` prefixes replace the real folders;
-  - the 8.3 short forms of those folders are replaced too, and any remaining
-    `\Users\<name>\` or `/Users/<name>/` segment becomes `<user>`;
+  - the 8.3 short forms of those folders are replaced too;
+  - the profile folder in any other absolute path (`X:\Users\<name>` or `\\server\Users\<name>`,
+    either slash, any case, spaces allowed up to the next separator) becomes `<user>`. `Public`,
+    `Default`, `Default User` and `All Users` are kept, and relative paths and URLs such as
+    `https://host/Users/123` are not touched;
+  - cheap substring checks run before each regex, so a typical line costs about 0.3 µs;
   - the Windows user name becomes `<user>` (whole word, case-insensitive, names of at least
     3 characters). If the account name is a common word such as `admin`, that word is also
     replaced in ordinary text. This is accepted in favour of privacy.

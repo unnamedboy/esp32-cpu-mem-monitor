@@ -156,7 +156,7 @@ Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-da
 
 - daemon log lines at or above `MinLevel`, redacted before they are sent:
   - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`, including their short 8.3 forms such as `C:\Users\ABCDEF~1`;
-  - any other `\Users\<name>\` path segment becomes `\Users\<user>\`;
+  - the profile folder in any other absolute path (`C:\Users\<name>\…` or `\\server\Users\<name>\…`, either slash, spaces allowed) becomes `<user>`. The shared folders `Public`, `Default`, `Default User` and `All Users` are kept, and relative paths and URLs are not touched;
   - the Windows user name becomes `<user>`. This is a whole-word match, so if your account name is a common word (for example `admin`), that word is replaced in ordinary text too, e.g. "Run as <user>". Privacy wins over readability here;
   - the PC name becomes `<host>`, unless you enabled `IncludeHostLabel`.
 
@@ -165,9 +165,9 @@ Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-da
 - the device status, with only the documented fields and at most one message every 5 s. It contains no SSID, password, IP or MAC address.
 
 Messages from the sink itself, for example failed pushes, stay in the local log only. The sink never blocks or slows sampling or MQTT publishing. Failed pushes are retried with backoff up to 60 s, and on Exit the daemon spends at most 2 s flushing.
-During an outage (network errors, timeouts, 5xx) the daemon keeps retrying indefinitely. Nothing is given up; entries are lost only if the bounded queue (`QueueCapacity`) overflows, which drops the oldest entries and reports it in the local log. Entries older than Loki's own limit (`reject_old_samples_max_age`, about a week by default) are rejected by Loki with a 400, which drops that batch.
+During an outage (network errors, timeouts, 5xx) the daemon keeps retrying indefinitely. Nothing is given up; entries are lost only if the bounded queue (`QueueCapacity`) overflows, which drops the oldest entries and reports it in the local log. Entries older than Loki's own limit (`reject_old_samples_max_age`, about a week by default) are rejected by Loki with a 400, which drops that batch. For a rejected batch, Loki usually stores the valid entries and reports `total ignored: N out of M`; the daemon then counts only those N as dropped. If Loki does not say, the local log says the batch was rejected and that Loki may have accepted some entries.
 
-A batch is at most 1 MiB, measured as raw UTF-8 JSON. A batch that is too large (413), or that is still throttled (429 without Retry-After), is split in half. A single entry that is still rejected after splitting is dropped and counted in the local log.
+A batch is at most 1 MiB, measured as raw UTF-8 JSON. A batch that is too large (413), or that is throttled (429) three times, is split in half; splitting never loses data. A single entry that still gets 413, or still gets 429 without Retry-After three times, is dropped and counted in the local log.
 
 Example LogQL queries (Grafana Explore):
 
