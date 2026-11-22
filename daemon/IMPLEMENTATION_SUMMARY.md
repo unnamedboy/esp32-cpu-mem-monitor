@@ -219,7 +219,8 @@ settings or environment; the repository and `appsettings.json` hold none of it.
 - **Lifecycle**: `ObservabilityService` (an `IHostedLifecycleService`) is registered before
   `MonitorService`, so it starts first and stops last; the shutdown messages of the other services
   are still flushed. On stop it flushes within a 2 s budget, which is also bounded by the host
-  stop token, then disposes the sink. A sink failure never affects sampling or MQTT.
+  stop token, then disposes the sink. `Program.Main` is the single shutdown owner and stops the host
+  once (3 s budget), so `MonitorService` stops first and the sink flushes in the remaining time. A sink failure never affects sampling or MQTT.
 - **Diagnostics**: one startup line, logged after all services have started:
   `Observability: Loki enabled|disabled; url host=<host[:port]>, auth=<mode>, token configured=yes|no.`
   Settings changes are logged with the same host-only description.
@@ -278,9 +279,13 @@ Privacy notes:
     with the placeholder "已保存 (saved)". Typing replaces the token, which is stored
     DPAPI-encrypted. "清除 (Clear)" removes it.
   - "测试连接 (Test)" pushes one line using the values in the dialog and shows the HTTP result.
-  - Before saving credentials for a plain-`http` URL, the dialog asks for confirmation.
-- Exit hides the icon and disables the menu first (re-entry guarded), then stops
-  the hosted service within 3 s and disposes the tray icon.
+  - Before saving or testing credentials for a plain-`http` URL, the dialog asks for confirmation.
+  - The dialog is modeless; Cancel closes it without saving, and Exit closes it.
+- Exit hides the icon and disables the menu immediately (re-entry guarded) and ends
+  the message loop; `Program.Main` is the single owner of shutdown and stops the
+  host once (3 s budget) before disposing it. `MonitorService.StopAsync` is also
+  idempotent.
+- The settings dialog is modeless; Cancel and Esc close it without saving.
 - If the host fails to start, the tray icon is removed, the error is logged and
   shown in a message box, and the process exits.
 

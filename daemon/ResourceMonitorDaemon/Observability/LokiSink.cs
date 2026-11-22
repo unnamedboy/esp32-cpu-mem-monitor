@@ -164,7 +164,7 @@ namespace ResourceMonitorDaemon.Observability
         {
             if (_disposed)
             {
-                // The host may call StopAsync again after disposal (e.g. Exit, then Main's final stop).
+                // Already stopped and disposed (e.g. a second StopAsync from a caller): nothing to flush.
                 return;
             }
 
