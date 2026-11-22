@@ -189,4 +189,33 @@ inline ProvisioningStartRecovery decideProvisioningStartRecovery(uint32_t failed
     return ProvisioningStartRecovery::GiveUp;
 }
 
+// What to do when WIFI_PROV_START is consumed.
+enum class ProvisioningStartedAction {
+    Continue,            // normal start (no start failure was handled)
+    ResumeProvisioning,  // started late, after the 5 s timeout was handled:
+                         // the manager is still running and BLE is up, so
+                         // cancel any retry restart and go back to provisioning
+    Ignore,              // stale event: the manager was already deinitialised
+                         // and the device is on the secrets.h dev fallback
+};
+
+// `startFailureHandled` is true once handleProvisioningStartFailure() ran in
+// this boot; `recovery` is the recovery it chose. RestartAndRetry and GiveUp
+// leave the manager initialised after a timeout, so a late PROV_START means
+// BLE really is advertising. UseDevFallback deinitialises it first.
+inline ProvisioningStartedAction decideProvisioningStarted(bool startFailureHandled,
+                                                           ProvisioningStartRecovery recovery) {
+    if (!startFailureHandled) {
+        return ProvisioningStartedAction::Continue;
+    }
+    switch (recovery) {
+        case ProvisioningStartRecovery::RestartAndRetry:
+        case ProvisioningStartRecovery::GiveUp:
+            return ProvisioningStartedAction::ResumeProvisioning;
+        case ProvisioningStartRecovery::UseDevFallback:
+            return ProvisioningStartedAction::Ignore;
+    }
+    return ProvisioningStartedAction::Ignore;
+}
+
 #endif

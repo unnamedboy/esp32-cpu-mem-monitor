@@ -175,7 +175,12 @@ Other calls and events:
   is kept in RTC memory across software resets and cleared on power-on, on a
   successful start, and on the BOOT gesture. After that it connects with the
   `secrets.h` dev fallback if one exists, otherwise it stays up and logs a
-  rate-limited error ("power-cycle to retry").
+  rate-limited error ("power-cycle to retry"). If `PROV_START` arrives late,
+  after the 5 s timeout was handled, while a retry restart is pending or after
+  giving up, BLE is in fact advertising: the firmware cancels the restart and
+  returns to provisioning mode (`decideProvisioningStarted()`). A late event
+  after switching to the dev fallback is ignored (the manager was
+  deinitialised).
 
 ## Proof of Possession (pairing code)
 

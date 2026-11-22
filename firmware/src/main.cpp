@@ -64,6 +64,7 @@ char provPop[POP_BUFFER_SIZE] = {0};
 bool provPopAvailable = false;
 bool provStartSeen = false;
 bool provStartFailed = false;
+ProvisioningStartRecovery provStartRecovery = ProvisioningStartRecovery::GiveUp;  // valid once provStartFailed
 bool provSucceeded = false;
 bool provStopRequested = false;
 bool networkServicesStarted = false;
@@ -429,7 +430,8 @@ void handleProvisioningStartFailure(const char* step, esp_err_t err, uint32_t no
     printDebugFormatted("Provisioning: ERROR BLE provisioning failed to start (%s: %s), attempt %u of %u", step,
                         esp_err_to_name(err), (unsigned)attempts, (unsigned)PROV_START_MAX_ATTEMPTS);
 
-    switch (decideProvisioningStartRecovery(attempts, PROV_START_MAX_ATTEMPTS, hasDevFallbackCredentials())) {
+    provStartRecovery = decideProvisioningStartRecovery(attempts, PROV_START_MAX_ATTEMPTS, hasDevFallbackCredentials());
+    switch (provStartRecovery) {
         case ProvisioningStartRecovery::RestartAndRetry:
             setProvisioningRequest(true);
             restartPending = true;
@@ -509,16 +511,34 @@ void startProvisioning(bool resetStoredCredentials, uint32_t now) {
 void consumeProvisioningEvents(uint32_t now) {
     if (evtProvStarted) {
         evtProvStarted = false;
-        provStartSeen = true;
-        rtcProvFailCount = 0;
-        if (restartPending && provStartFailed) {
-            // Started late, after the timeout: cancel the retry restart.
-            restartPending = false;
-            provStartFailed = false;
-            setProvisioningRequest(false);
-            networkState = NetworkState::Provisioning;
+        switch (decideProvisioningStarted(provStartFailed, provStartRecovery)) {
+            case ProvisioningStartedAction::Continue:
+                provStartSeen = true;
+                rtcProvFailCount = 0;
+                printDebugFormatted("Provisioning: BLE advertising as %s (Security1 + PoP)", provServiceName);
+                break;
+            case ProvisioningStartedAction::ResumeProvisioning:
+                // Started late, after the start timeout was handled (retry
+                // restart pending, or given up). BLE is up: cancel the restart
+                // and serve the pairing code again.
+                provStartSeen = true;
+                rtcProvFailCount = 0;
+                restartPending = false;
+                provStartFailed = false;
+                setProvisioningRequest(false);
+                networkState = NetworkState::Provisioning;
+                lastProvHintMs = now;
+                printDebugFormatted("Provisioning: BLE started late (after %u s); resuming provisioning mode",
+                                    (unsigned)(PROV_START_TIMEOUT_MS / 1000UL));
+                printDebugFormatted("Provisioning: BLE advertising as %s (Security1 + PoP)", provServiceName);
+                printProvisioningHint();
+                break;
+            case ProvisioningStartedAction::Ignore:
+                // The manager was deinitialised for the dev fallback; this
+                // event was queued before that.
+                printDebugLine("Provisioning: ignoring late BLE start (dev fallback active)");
+                break;
         }
-        printDebugFormatted("Provisioning: BLE advertising as %s (Security1 + PoP)", provServiceName);
     }
 
     if (evtProvCredReceived) {
