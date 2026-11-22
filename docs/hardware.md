@@ -22,7 +22,7 @@ A CPU/MEM gauge face for a generic square panel voltmeter is in
 
 ## Electrical safety
 
-- **The MOC9686 `DC IN` accepts 6–9 V.** Never connect 12 V to it.
+- **The MOC9686 `DC IN` is labelled 6–9 V.** Never connect 12 V to it.
 - **ESP32 GPIO is 3.3 V logic.** Don't connect 5 V (or 12 V) signals to a GPIO without a
   level shifter, divider or other documented conditioning.
 - **The 12 V backlight rail is separate.** It is planned to come from the boost converter
@@ -62,10 +62,10 @@ All assignments live in [`firmware/src/config.h`](../firmware/src/config.h).
 | Function | Setting | Direction | Voltage domain | Notes |
 | --- | --- | --- | --- | --- |
 | I2C SDA | GPIO21 (`I2C_SDA_PIN`) | Bidirectional (open-drain) | 3.3 V on the ESP32 side | Project default I2C pins |
-| I2C SCL | GPIO22 (`I2C_SCL_PIN`) | Output (open-drain, bus master) | 3.3 V on the ESP32 side | |
+| I2C SCL | GPIO22 (`I2C_SCL_PIN`) | Output from ESP32 (open-drain; bus is bidirectional) | 3.3 V on the ESP32 side | |
 | DAC | address `0x59` (`DAC_I2C_ADDRESS`) | I2C device | ESP32 side 3.3 V; module pull-up voltage unverified | Verify against the real module |
-| CPU gauge | DAC channel 0 (`CPU_OUTPUT_CHANNEL`) | DAC output | 0–5 V | `resmon/cpu` |
-| Memory gauge | DAC channel 1 (`MEM_OUTPUT_CHANNEL`) | DAC output | 0–5 V | `resmon/mem` |
+| CPU gauge | DAC channel 0 (`CPU_OUTPUT_CHANNEL`) | DAC output | Configured 0–5 V (module output unverified) | `resmon/cpu` |
+| Memory gauge | DAC channel 1 (`MEM_OUTPUT_CHANNEL`) | DAC output | Configured 0–5 V (module output unverified) | `resmon/mem` |
 | BOOT button | GPIO0 (`BOOT_BUTTON_PIN`) | Input | 3.3 V | On-board button, no extra wiring |
 
 The firmware quantises each percentage to 256 steps (0–255) and scales that to the
@@ -101,10 +101,10 @@ Rows marked unverified are design intent, not tested wiring.
 
 | Component | ESP32 connection | Direction | Voltage domain | Power | Protection/conditioning | Firmware configuration | Validation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GP8413-compatible I2C DAC (exact module unverified) | I2C: SDA GPIO21, SCL GPIO22 (carrier I2C header; exact label unverified) | SDA bidirectional, SCL output (open-drain, ESP32 is bus master); analogue outputs | ESP32 side 3.3 V; module pull-up voltage unverified; outputs configured 0–5 V | Unverified: module supply pin and allowed voltage | Unverified: pull-ups, output loading | `DAC_I2C_ADDRESS = 0x59`, `CPU_OUTPUT_CHANNEL = 0`, `MEM_OUTPUT_CHANNEL = 1` | Unverified |
-| CPU gauge (panel voltmeter) | DAC channel 0 | Output | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/cpu`, 0–100 % (out-of-range values are ignored) | Unverified |
-| Memory gauge (panel voltmeter) | DAC channel 1 | Output | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/mem`, 0–100 % (out-of-range values are ignored) | Unverified |
-| On-board BOOT push-button (ESP32-WROOM-32 dev board; board revision unverified) | GPIO0, on the board; no header wiring | Input | 3.3 V (button pulls GPIO0 to GND) | Board 3.3 V and GND | Board pull-up (value unverified) plus internal pull-up; 50 ms firmware debounce | `BOOT_BUTTON_PIN = 0`, `BOOT_BUTTON_ACTIVE_LOW = true`, `BOOT_BUTTON_DEBOUNCE_MS = 50`, `BOOT_BUTTON_MIN_HOLD_MS = 5000`, `BOOT_BUTTON_MAX_HOLD_MS = 15000` | Unverified: hold-and-release and the auto-program interaction not bench-tested |
+| GP8413-compatible I2C DAC (exact module unverified) | I2C: SDA GPIO21, SCL GPIO22 (carrier I2C header; exact label unverified) | SDA bidirectional; SCL output from ESP32 (open-drain; bus is bidirectional); analogue outputs | ESP32 side 3.3 V; module pull-up voltage unverified; outputs configured 0–5 V | Unverified: module supply pin and allowed voltage | Unverified: pull-ups, output loading | `DAC_I2C_ADDRESS = 0x59`, `CPU_OUTPUT_CHANNEL = 0`, `MEM_OUTPUT_CHANNEL = 1` | Unverified |
+| CPU gauge (panel voltmeter) | DAC channel 0 | DAC output → gauge input | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/cpu`, 0–100 % (out-of-range values are ignored) | Unverified |
+| Memory gauge (panel voltmeter) | DAC channel 1 | DAC output → gauge input | Unverified: gauge input requirements | Unverified | Unverified: current limiting, buffering, scaling or driver if needed | `resmon/mem`, 0–100 % (out-of-range values are ignored) | Unverified |
+| On-board BOOT push-button (ESP32-WROOM-32 dev board; board revision unverified) | GPIO0, on the board; no header wiring | Input | 3.3 V (button pulls GPIO0 to GND) | Board 3.3 V and GND | Internal pull-up (`INPUT_PULLUP`); any on-board pull-up unverified; 50 ms firmware debounce | `BOOT_BUTTON_PIN = 0`, `BOOT_BUTTON_ACTIVE_LOW = true`, `BOOT_BUTTON_DEBOUNCE_MS = 50`, `BOOT_BUTTON_MIN_HOLD_MS = 5000`, `BOOT_BUTTON_MAX_HOLD_MS = 15000` | Unverified: hold-and-release and the auto-program interaction not bench-tested |
 | Voltmeter backlights | None | Power only | Planned 12 V rail (backlight rating unverified) | Boost converter output; converter input source undecided and unverified | Unverified: polarity, current draw, switch/fuse, shared ground | None | Unverified load test |
 
 When you wire or change a connection, update this table with the same fields and say

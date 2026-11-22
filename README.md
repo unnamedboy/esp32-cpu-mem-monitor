@@ -32,11 +32,12 @@ This is a working prototype, not a finished product; see [Status](#status-and-li
 ## What you need
 
 - An ESP32-WROOM-32 dev board (the prototype uses a MOC9686 expansion shield), powered
-  over USB. A GP8413-compatible I2C DAC and two analogue panel gauges for the display;
-  the firmware also runs without them. The DAC's full scale is 5 V, so a 0–5 V DC panel
+  over USB.
+- For the display: a GP8413-compatible I2C DAC and two analogue panel gauges. The
+  firmware also runs without them. The DAC's full scale is 5 V, so a 0–5 V DC panel
   voltmeter would map directly (gauge input not yet verified). See
-  [docs/hardware.md](docs/hardware.md) for parts, wiring and **safety notes** (the shield's `DC IN` takes 6–9 V only, GPIO is
-  3.3 V).
+  [docs/hardware.md](docs/hardware.md) for parts, wiring and **safety notes**: the
+  shield's `DC IN` is labelled 6–9 V (never connect 12 V), and GPIO is 3.3 V.
 - A 2.4 GHz Wi-Fi network shared by the PC and the ESP32.
 - A Windows 10 (2004 or later) or Windows 11 PC with Bluetooth LE for pairing.
 - [PlatformIO](https://platformio.org/) to build the firmware.
@@ -48,15 +49,18 @@ This is a working prototype, not a finished product; see [Status](#status-and-li
 
 ### 0. Wiring (optional)
 
-There is no verified wiring guide for the DAC and gauges yet. What the firmware expects:
-a GP8413-compatible DAC (DFRobot GP8XXX library) at I2C address `0x59`, on the I2C bus
-at GPIO21 (SDA) and GPIO22 (SCL); the actual module is not yet verified. The address
-is `DAC_I2C_ADDRESS` in [`firmware/src/config.h`](firmware/src/config.h); many GP8413
-boards set their address with jumpers or switches, so check that they match. The
-firmware runs fine with nothing attached, so you can start with just the board on USB. Before wiring anything, read the
-[connection table](docs/hardware.md#connections) and the
-[safety notes](docs/hardware.md#electrical-safety), in particular the check of the DAC's
-I2C pull-up voltage: the ESP32's I2C pins are 3.3 V only.
+There is no verified wiring guide for the DAC and gauges yet. The firmware runs fine
+with nothing attached, so you can start with just the board on USB.
+
+What the firmware expects: a GP8413-compatible DAC (DFRobot GP8XXX library) at I2C
+address `0x59`, on the I2C bus at GPIO21 (SDA) and GPIO22 (SCL); the actual module is
+not yet verified. The address is `DAC_I2C_ADDRESS` in
+[`firmware/src/config.h`](firmware/src/config.h). Many GP8413 boards set their address
+with jumpers or switches, so check that the two match.
+
+Before wiring anything, read the [connection table](docs/hardware.md#connections) and
+the [safety notes](docs/hardware.md#electrical-safety), in particular the check of the
+DAC's I2C pull-up voltage: the ESP32's I2C pins are 3.3 V only.
 
 ### 1. Flash the firmware
 
@@ -67,15 +71,16 @@ git clone https://github.com/unnamedboy/esp32-cpu-mem-monitor.git
 cd esp32-cpu-mem-monitor
 ```
 
+Run the commands below from the repository root, with the board on USB (`pio` is the
+PlatformIO CLI; in VS Code, use a PlatformIO terminal). If no COM port appears for the
+board, install the driver for its USB-serial chip (usually CP210x or CH340). The first
+`pio run` downloads the ESP32 toolchain and libraries, several hundred MB.
+
 If the board has run other firmware before, erase the flash once first with
 `pio run -e esp32dev -t erase`. That removes any saved Wi-Fi network, which would
 otherwise make the board skip pairing; the device then generates a new pairing code
-([details](docs/provisioning.md#boards-that-already-have-wi-fi-settings)).
-
-From the repository root, with the board on USB (`pio` is the PlatformIO CLI; in VS Code,
-use a PlatformIO terminal). If no COM port appears for the board, install the driver
-for its USB-serial chip (usually CP210x or CH340). The first `pio run` downloads the
-ESP32 toolchain and libraries, several hundred MB:
+([details](docs/provisioning.md#boards-that-already-have-wi-fi-settings)). Then upload
+and open the serial monitor:
 
 ```sh
 pio run -e esp32dev -t upload
@@ -187,6 +192,7 @@ order.
 | Pairing code not read automatically | Close any serial monitor; the COM port can only be open in one program. Auto-read is only tried on ports that could be an ESP32 USB-serial bridge ([rules](docs/provisioning.md#serial-pairing-code-query)); otherwise type the code from the serial log. |
 | Pairing fails | See the [message table](docs/provisioning.md#if-pairing-fails). Remember the ESP32 needs 2.4 GHz. |
 | Serial log says `DAC not found at 0x59` | Check the DAC wiring and address; the firmware runs on without outputs. |
+| Upload fails with `Failed to connect to ESP32: Timed out waiting for packet header` | Use a USB data cable (not a charge-only one) and check the COM port driver. If the board needs it, hold BOOT while the upload starts connecting, then release it. |
 | Firmware build stops with `CORE_DEBUG_LEVEL >= 3 is refused` | Use a level from 0 to 2 (`platformio.ini` sets 1). The build refuses 3 and higher on purpose; see [why](docs/firmware.md#toolchain). |
 
 For anything else, open the log from the tray menu. For more detail, set
@@ -207,7 +213,7 @@ For anything else, open the log from the tray menu. For more detail, set
 
 ## Building and testing
 
-Running the daemon or its tests needs the .NET 9 runtime ([see above](#what-you-need)).
+The daemon and its tests need the .NET runtime listed under [What you need](#what-you-need).
 
 ```powershell
 # Daemon: build and run the tests (prints "N/N passed")
@@ -241,7 +247,8 @@ before a pull request.
 
 ## Status and limitations
 
-- Metrics over MQTT, the DAC output logic and the daemon work. **Bluetooth pairing, the
+- Metrics over MQTT and the daemon work, and the firmware's DAC output logic is
+  unit-tested. **Bluetooth pairing, the
   BOOT re-pairing gesture and the status topic are implemented and unit-tested but have
   not yet been tested on a physical ESP32.**
 - The DAC module, gauges and backlight wiring have not been verified on the bench.

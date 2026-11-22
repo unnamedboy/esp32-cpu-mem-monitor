@@ -43,7 +43,7 @@ When you wire something, update the [connection table](hardware.md#connections) 
 same change: part, ESP32 connection and header label, direction, voltage domain, power,
 protection, firmware setting and how you tested it. Mark anything you have not verified
 as unverified. Keep the safety rules in [hardware.md](hardware.md#electrical-safety) in
-mind: the carrier's `DC IN` is 6–9 V, GPIO is 3.3 V, and the 12 V backlight rail stays
+mind: the carrier's `DC IN` is labelled 6–9 V, GPIO is 3.3 V, and the 12 V backlight rail stays
 separate. Don't turn photo estimates into enclosure CAD; measure.
 
 ## Checks before you open a pull request
@@ -65,8 +65,8 @@ Daemon changes:
 2. Reconnects don't block sampling, settings changes apply without a rebuild, and logs
    and notifications contain no credentials.
 
-Running the tests needs the .NET 9 runtime (see the README's
-[What you need](../README.md#what-you-need)).
+The tests need the .NET runtime listed under
+[What you need](../README.md#what-you-need).
 
 If a running daemon locks the build output, build to a separate folder (ignored by
 git). Run this from the repository root and keep the folder inside `daemon\`: the

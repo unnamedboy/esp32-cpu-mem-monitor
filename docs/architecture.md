@@ -26,8 +26,8 @@ channels, output scaling or gauge behaviour.
 
 **The firmware** owns everything physical: it maps percentages to DAC codes, clamps
 them, and decides what the gauges show when data stops arriving. It does not depend on
-the daemon to reach a safe state: a stale metric starts falling after 5 s and reaches zero within about
-13 s.
+the daemon to reach a safe state: a stale metric starts falling after 5 s and reaches
+zero about 13 s later.
 
 ## Design decisions
 
