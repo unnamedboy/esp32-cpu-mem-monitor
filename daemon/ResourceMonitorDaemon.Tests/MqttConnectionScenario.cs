@@ -160,7 +160,7 @@ internal static class MqttConnectionScenario
         CheckNotifications(notifications, Failed);
     }
 
-    private static async Task<MqttServer> StartBrokerAsync(int port, ConcurrentQueue<MqttApplicationMessage> received)
+    internal static async Task<MqttServer> StartBrokerAsync(int port, ConcurrentQueue<MqttApplicationMessage> received)
     {
         var options = new MqttServerOptionsBuilder()
             .WithDefaultEndpoint()
@@ -194,7 +194,7 @@ internal static class MqttConnectionScenario
         throw new InvalidOperationException("broker did not receive the message");
     }
 
-    private static int FreeLoopbackPort()
+    internal static int FreeLoopbackPort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();

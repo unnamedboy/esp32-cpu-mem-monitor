@@ -810,7 +810,10 @@ namespace ResourceMonitorDaemon.Pairing
                     // Only FallbackAddress is touched; every other user setting stays as it is.
                     await Task.Run(() => _settingsStore.Update(patch => patch.FallbackAddress = address), CancellationToken.None);
                     savedAddress = address;
-                    _logger.LogInformation("Pairing wizard: saved FallbackAddress {Address}.", address);
+                    // The wizard itself logs the device IP only at Debug. Once saved it is the configured
+                    // FallbackAddress, which normal settings/connection diagnostics may mention.
+                    _logger.LogInformation("Pairing wizard: saved FallbackAddress.");
+                    _logger.LogDebug("Pairing wizard: FallbackAddress is {Address}.", address);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
                 {

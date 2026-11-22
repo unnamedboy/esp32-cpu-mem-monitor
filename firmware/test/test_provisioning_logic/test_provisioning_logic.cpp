@@ -113,8 +113,30 @@ void test_deferred_connect_warning_is_wrap_safe() {
     TEST_ASSERT_FALSE(shouldWarnDeferredConnect(since, 10u, 5000, false));
 }
 
+void test_provisioning_started_normally_continues() {
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartedAction::Continue,
+                          (int)decideProvisioningStarted(false, ProvisioningStartRecovery::GiveUp));
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartedAction::Continue,
+                          (int)decideProvisioningStarted(false, ProvisioningStartRecovery::UseDevFallback));
+}
+
+void test_late_provisioning_start_resumes_after_retry_or_give_up() {
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartedAction::ResumeProvisioning,
+                          (int)decideProvisioningStarted(true, ProvisioningStartRecovery::RestartAndRetry));
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartedAction::ResumeProvisioning,
+                          (int)decideProvisioningStarted(true, ProvisioningStartRecovery::GiveUp));
+}
+
+void test_late_provisioning_start_ignored_after_dev_fallback() {
+    TEST_ASSERT_EQUAL_INT((int)ProvisioningStartedAction::Ignore,
+                          (int)decideProvisioningStarted(true, ProvisioningStartRecovery::UseDevFallback));
+}
+
 void runProvisioningLogicTests() {
     UNITY_BEGIN();
+    RUN_TEST(test_provisioning_started_normally_continues);
+    RUN_TEST(test_late_provisioning_start_resumes_after_retry_or_give_up);
+    RUN_TEST(test_late_provisioning_start_ignored_after_dev_fallback);
     RUN_TEST(test_deferred_connect_warning_waits_for_grace_period);
     RUN_TEST(test_deferred_connect_warning_only_once);
     RUN_TEST(test_deferred_connect_warning_is_wrap_safe);
