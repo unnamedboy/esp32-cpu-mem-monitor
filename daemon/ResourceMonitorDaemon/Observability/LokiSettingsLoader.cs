@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using ResourceMonitorDaemon.Localization;
 
 namespace ResourceMonitorDaemon.Observability
 {
@@ -26,22 +27,28 @@ namespace ResourceMonitorDaemon.Observability
         /// <summary>Loki/Mimir tenant ids: at most 150 bytes of <c>[A-Za-z0-9!-_.*'()]</c>, not "." or "..".</summary>
         public const int MaxTenantIdLength = 150;
 
-        public static string? ValidateUsername(string? username) =>
+        public static string? ValidateUsername(string? username) => UsernameProblem(username)?.English;
+
+        public static UiMessage? UsernameProblem(string? username) =>
             username == null || username.Length == 0
                 ? null
                 : username.Length > MaxUsernameLength || username.Any(char.IsControl) || username.Contains(':') || username != username.Trim()
-                    ? "Username must be at most 256 characters without ':', control characters or surrounding spaces."
+                    ? new UiMessage(nameof(Strings.Observability_ErrorUsername), MaxUsernameLength)
                     : null;
 
         /// <summary>The token goes into an HTTP header: printable ASCII without spaces only.</summary>
-        public static string? ValidateToken(string? token) =>
+        public static string? ValidateToken(string? token) => TokenProblem(token)?.English;
+
+        public static UiMessage? TokenProblem(string? token) =>
             token == null || token.Length == 0
                 ? null
                 : token.Length > MaxTokenLength || token.Any(c => c < '!' || c > '~')
-                    ? "Token must be printable ASCII without spaces (at most 4096 characters)."
+                    ? new UiMessage(nameof(Strings.Observability_ErrorToken), MaxTokenLength)
                     : null;
 
-        public static string? ValidateTenantId(string? tenantId)
+        public static string? ValidateTenantId(string? tenantId) => TenantIdProblem(tenantId)?.English;
+
+        public static UiMessage? TenantIdProblem(string? tenantId)
         {
             if (string.IsNullOrEmpty(tenantId))
             {
@@ -52,17 +59,21 @@ namespace ResourceMonitorDaemon.Observability
                 || tenantId is "." or ".."
                 || tenantId.Any(c => !(char.IsAsciiLetterOrDigit(c) || "!-_.*'()".Contains(c))))
             {
-                return "TenantId may contain only letters, digits and ! - _ . * ' ( ) (at most 150 characters).";
+                return new UiMessage(nameof(Strings.Observability_ErrorTenantId), MaxTenantIdLength);
             }
 
             return null;
         }
 
-        /// <summary>Returns every problem with <paramref name="settings"/>; empty when valid.</summary>
-        public static IReadOnlyList<string> Validate(LokiSettings settings)
+        /// <summary>Returns every problem with <paramref name="settings"/> in English; empty when valid.</summary>
+        public static IReadOnlyList<string> Validate(LokiSettings settings) =>
+            Problems(settings).Select(problem => problem.English).ToList();
+
+        /// <summary>Every problem with <paramref name="settings"/>; the dialog shows <see cref="UiMessage.Localized"/>.</summary>
+        public static IReadOnlyList<UiMessage> Problems(LokiSettings settings)
         {
-            var errors = new List<string>();
-            void Add(string? error)
+            var errors = new List<UiMessage>();
+            void Add(UiMessage? error)
             {
                 if (error != null)
                 {
@@ -72,26 +83,26 @@ namespace ResourceMonitorDaemon.Observability
 
             if (settings.Enabled || settings.Url.Length > 0)
             {
-                Add(LokiUrl.Validate(settings.Url));
+                Add(LokiUrl.Problem(settings.Url));
             }
 
             if (!Enum.IsDefined(settings.AuthMode))
             {
-                errors.Add("AuthMode must be None, Basic or Bearer.");
+                errors.Add(new UiMessage(nameof(Strings.Observability_ErrorAuthMode)));
             }
 
-            Add(ValidateUsername(settings.Username));
+            Add(UsernameProblem(settings.Username));
             if (settings.AuthMode == LokiAuthMode.Basic && settings.Enabled && settings.Username.Length == 0)
             {
-                errors.Add("AuthMode Basic needs a Username.");
+                errors.Add(new UiMessage(nameof(Strings.Observability_ErrorBasicNeedsUsername)));
             }
 
-            Add(ValidateToken(settings.Token));
-            Add(ValidateTenantId(settings.TenantId));
-            Add(DeviceSettingsValidator.ValidateRange(settings.MetricsIntervalSeconds, MinMetricsIntervalSeconds, MaxMetricsIntervalSeconds, nameof(LokiSettings.MetricsIntervalSeconds)));
-            Add(DeviceSettingsValidator.ValidateRange(settings.BatchMaxEntries, MinBatchMaxEntries, MaxBatchMaxEntries, nameof(LokiSettings.BatchMaxEntries)));
-            Add(DeviceSettingsValidator.ValidateRange(settings.QueueCapacity, MinQueueCapacity, MaxQueueCapacity, nameof(LokiSettings.QueueCapacity)));
-            Add(DeviceSettingsValidator.ValidateRange(settings.FlushIntervalMs, MinFlushIntervalMs, MaxFlushIntervalMs, nameof(LokiSettings.FlushIntervalMs)));
+            Add(TokenProblem(settings.Token));
+            Add(TenantIdProblem(settings.TenantId));
+            Add(DeviceSettingsValidator.RangeProblem(settings.MetricsIntervalSeconds, MinMetricsIntervalSeconds, MaxMetricsIntervalSeconds, nameof(LokiSettings.MetricsIntervalSeconds)));
+            Add(DeviceSettingsValidator.RangeProblem(settings.BatchMaxEntries, MinBatchMaxEntries, MaxBatchMaxEntries, nameof(LokiSettings.BatchMaxEntries)));
+            Add(DeviceSettingsValidator.RangeProblem(settings.QueueCapacity, MinQueueCapacity, MaxQueueCapacity, nameof(LokiSettings.QueueCapacity)));
+            Add(DeviceSettingsValidator.RangeProblem(settings.FlushIntervalMs, MinFlushIntervalMs, MaxFlushIntervalMs, nameof(LokiSettings.FlushIntervalMs)));
             return errors;
         }
 

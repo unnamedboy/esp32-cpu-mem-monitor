@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using ResourceMonitorDaemon.Localization;
 
 namespace ResourceMonitorDaemon.Observability
 {
@@ -101,6 +102,13 @@ namespace ResourceMonitorDaemon.Observability
     /// ("total ignored: N out of M"), or null when the response did not say.</param>
     public sealed record LokiPushResult(LokiPushOutcome Outcome, int? StatusCode, string Detail, TimeSpan? RetryAfter = null, int? IgnoredEntries = null)
     {
+        /// <summary>
+        /// For results the daemon itself describes (timeout, invalid URL): the same text as
+        /// <see cref="Detail"/> for the UI language. Null when <see cref="Detail"/> comes from the
+        /// server or the network stack. <see cref="Detail"/> (English) is what gets logged.
+        /// </summary>
+        public UiMessage? LocalizedDetail { get; init; }
+
         public override string ToString() => StatusCode is { } code ? $"HTTP {code} {Detail}".TrimEnd() : Detail;
     }
 
@@ -189,7 +197,8 @@ namespace ResourceMonitorDaemon.Observability
             }
             catch (OperationCanceledException)
             {
-                return new LokiPushResult(LokiPushOutcome.Retry, null, $"timed out after {RequestTimeout.TotalSeconds:F0} s");
+                var timedOut = new UiMessage(nameof(Strings.Observability_RequestTimedOut), (int)RequestTimeout.TotalSeconds);
+                return new LokiPushResult(LokiPushOutcome.Retry, null, timedOut.English) { LocalizedDetail = timedOut };
             }
             catch (HttpRequestException ex)
             {
@@ -208,9 +217,9 @@ namespace ResourceMonitorDaemon.Observability
         /// </summary>
         public static async Task<LokiPushResult> TestAsync(LokiSettings settings, CancellationToken cancellationToken, HttpMessageHandler? handler = null)
         {
-            if (LokiUrl.Validate(settings.Url) is { } error)
+            if (LokiUrl.Problem(settings.Url) is { } error)
             {
-                return new LokiPushResult(LokiPushOutcome.Drop, null, error);
+                return new LokiPushResult(LokiPushOutcome.Drop, null, error.English) { LocalizedDetail = error };
             }
 
             using var client = new LokiPushClient(handler);
