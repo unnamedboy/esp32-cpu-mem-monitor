@@ -57,11 +57,11 @@ Startup order: the tray is created before the host starts, so the "connection fa
 notification handler is attached before the first attempt can fail. The UI language is
 applied before any UI text exists.
 
-Shutdown: **Exit** hides the icon and ends the message loop. `Program.Main` then stops the
-host once, with a 3 s budget. Services stop in reverse registration order:
-`MonitorService` first (cancelling any in-flight connect), then the Loki sink, which
-gets up to 2 s to flush. If the host fails to start, the tray icon is removed and the
-error is logged and shown in a message box.
+Shutdown: **Exit** hides the icon and ends the message loop. `Program.Main` then stops
+the host once, within `ShutdownTimeout` (currently 3 s). Services stop in reverse
+registration order: `MonitorService` first (cancelling any in-flight connect), then the
+Loki sink, which gets up to `ShutdownFlushBudget` (2 s) to flush. If the host fails to
+start, the tray icon is removed and the error is logged and shown in a message box.
 
 ## Sampling and publishing
 
@@ -371,5 +371,5 @@ in both languages at 100 % and 150 % scaling.
   scanning and GATT, long writes, the real error codes on a wrong pairing code, the USB
   query on this board's USB-UART bridge, and BLE timing are all unverified.
 - Loki entries live only in memory: they are lost if the process is killed, and
-  whatever is still queued after the 2 s shutdown budget is dropped.
+  whatever is still queued after the shutdown flush budget is dropped.
 - Only English and Simplified Chinese exist; Traditional Chinese Windows uses English.

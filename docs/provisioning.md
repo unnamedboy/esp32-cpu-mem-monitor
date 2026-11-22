@@ -238,8 +238,9 @@ it.
   `RESMON-POP `.
 - Open the port with DTR and RTS both off. That avoids resetting the board and avoids
   pulling GPIO0 low through the auto-program circuit. The Windows client does this,
-  tries each COM port for at most 1.5 s, and only accepts a reply whose `name=` matches
-  the selected BLE device.
+  sends `RESMON?POP` to the PC's serial ports, waits at most 1.5 s per port, and only
+  accepts a reply whose `name=` matches the selected BLE device. Other serial devices
+  attached to the PC may therefore receive that line too.
 
 ## Firmware behaviour worth knowing
 

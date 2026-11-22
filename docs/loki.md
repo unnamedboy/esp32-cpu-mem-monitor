@@ -83,8 +83,10 @@ URL. Log lines are redacted first:
   ordinary words), but paths containing them are still covered by the folder rules;
 - the PC name becomes `<host>`, unless `IncludeHostLabel` is on.
 
-Apart from that the lines match `daemon.log`, so they can contain the broker host name
-or IP address you configured. The device status never contains an SSID, password, IP or
+Apart from that the lines match `daemon.log`. They can contain the broker host name or
+IP address you configured, and log lines from pairing can contain the paired device's
+Wi-Fi IP address and Bluetooth address; such lines are forwarded only if their level is
+at or above `MinLevel`. The device status never contains an SSID, password, IP or
 MAC address. The sink's own messages, such as failed pushes, stay in the local log.
 
 ## Reliability
@@ -93,8 +95,8 @@ The sink never blocks or slows sampling or MQTT publishing.
 
 - Network errors, timeouts and 5xx responses are retried with backoff (1 s doubling to
   60 s) for as long as the outage lasts. Entries are lost only if the bounded queue
-  overflows, which drops the oldest and reports the count in the local log at most once
-  a minute.
+  overflows (`QueueCapacity`, default 5000): it then drops the oldest entries and
+  reports the count in the local log at most once a minute.
 - 429 honours `Retry-After` (up to 60 s). After 3 throttled attempts a batch is split in
   half; a single entry throttled 3 times without `Retry-After` is dropped.
 - A batch is at most 1 MiB of JSON as sent (raw UTF-8, so Chinese text is not inflated
@@ -106,7 +108,8 @@ The sink never blocks or slows sampling or MQTT publishing.
   default).
 - 401, 403 and 404 also back off, so wrong credentials or a wrong URL are not retried
   every flush interval.
-- On exit the daemon spends at most 2 s flushing. There is no disk buffer, so entries
+- On exit the daemon spends at most 2 s flushing
+  (`ObservabilityService.ShutdownFlushBudget`). There is no disk buffer, so entries
   still queued then, or when the process is killed, are lost.
 
 ## Example LogQL queries
