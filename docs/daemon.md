@@ -383,8 +383,10 @@ English first. What is covered:
   shutdown budget, and the serial port filter.
 - **`LocalizationTests.cs`**: see [Localization](#localization).
 
-To add a test, add a `(name, action)` entry to the `All` list of the matching test file;
-a new test file needs its `All` list added to the test runner's `Program.cs`.
+To add a test, add a `(name, action)` entry to the `tests` array in the test runner's
+`Program.cs` (for payload, settings, store, logging, backoff and `MqttConnectionScenario`
+tests) or to the `All` list of the other test files; a new test file needs its `All` list
+concatenated onto `tests` in `Program.cs`.
 
 The wizard and dialog layouts are not unit-tested. If you change a layout, check the
 dialog by eye in English and Simplified Chinese, at 100 % and 150 % display scaling.
