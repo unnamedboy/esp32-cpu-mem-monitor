@@ -47,11 +47,11 @@ internal static class MqttConnectionScenario
             Check(!published, "publish reported success without a broker");
 
             await connection.PendingAttempt;
-            Check(connection.ConsecutiveFailures == i, $"expected {i} failures, got {connection.ConsecutiveFailures}");
+            Check(connection.FailedAttemptsInOutage == i, $"expected {i} failures, got {connection.FailedAttemptsInOutage}");
 
             connection.MaintainConnection(); // backoff not elapsed: must not attempt again
             await connection.PendingAttempt;
-            Check(connection.ConsecutiveFailures == i, "attempted again before the backoff deadline");
+            Check(connection.FailedAttemptsInOutage == i, "attempted again before the backoff deadline");
             now += TimeSpan.FromMilliseconds(settings.ReconnectMaxBackoffMs);
         }
 
@@ -64,7 +64,7 @@ internal static class MqttConnectionScenario
             connection.MaintainConnection();
             await connection.PendingAttempt;
             Check(connection.IsConnected, "did not connect once the broker was up");
-            Check(connection.ConsecutiveFailures == 0, "backoff not reset after success");
+            Check(connection.FailedAttemptsInOutage == 0, "outage failure count not reset after success");
             CheckNotifications(notifications, Failed, Reconnected);
 
             Check(await connection.PublishAsync(settings.CpuTopic, MetricPayloadFormatter.FormatPercentPayload(42.26), CancellationToken.None), "publish failed");
@@ -97,13 +97,64 @@ internal static class MqttConnectionScenario
         }
 
         Check(!connection.IsConnected, "broker shutdown not detected");
+
+        // The connection was short-lived (fake clock did not advance), so the drop counts as a
+        // failure: no immediate reconnect attempt.
         connection.MaintainConnection();
-        await connection.PendingAttempt;
-        now += TimeSpan.FromMilliseconds(settings.ReconnectMaxBackoffMs);
-        connection.MaintainConnection();
-        await connection.PendingAttempt;
-        Check(connection.ConsecutiveFailures == 2, $"expected 2 failures, got {connection.ConsecutiveFailures}");
+        Check(connection.PendingAttempt.IsCompleted && connection.FailedAttemptsInOutage == 0, "reconnected immediately after a short-lived connection");
+        for (var i = 1; i <= 2; i++)
+        {
+            now += TimeSpan.FromMilliseconds(settings.ReconnectMaxBackoffMs);
+            connection.MaintainConnection();
+            await connection.PendingAttempt;
+        }
+
+        Check(connection.FailedAttemptsInOutage == 2, $"expected 2 failures, got {connection.FailedAttemptsInOutage}");
         CheckNotifications(notifications, Failed, Reconnected, Failed);
+    }
+
+    /// <summary>Dispose must not wait for connect timeouts to unreachable Host and fallback.</summary>
+    public static async Task DisposeWhileConnecting()
+    {
+        var connection = new MqttConnection(NullLogger<MqttConnection>.Instance);
+        connection.Configure(new DeviceSettings
+        {
+            Host = "192.0.2.1",              // TEST-NET-1: never answers
+            FallbackAddress = "192.0.2.2",
+            ConnectTimeoutMs = 10000,
+        });
+        connection.MaintainConnection();
+        await Task.Delay(200);
+        var attempt = connection.PendingAttempt;
+        Check(!attempt.IsCompleted, "attempt finished before dispose; cannot exercise cancellation here");
+
+        var stopwatch = Stopwatch.StartNew();
+        await connection.DisposeAsync();
+        Check(stopwatch.ElapsedMilliseconds < 1000, $"dispose took {stopwatch.ElapsedMilliseconds} ms");
+        Check(attempt.IsCompleted, "connect attempt still running after dispose");
+    }
+
+    /// <summary>An outage noticed before the tray attached its handler is still notified once.</summary>
+    public static async Task LateNotificationHandler()
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var notifications = new ConcurrentQueue<string>();
+        await using var connection = new MqttConnection(NullLogger<MqttConnection>.Instance, () => now);
+        connection.Configure(new DeviceSettings { Host = "127.0.0.1", Port = FreeLoopbackPort(), ConnectTimeoutMs = 500 });
+
+        connection.MaintainConnection();
+        await connection.PendingAttempt;
+        Check(connection.FailedAttemptsInOutage == 1, "first attempt did not fail");
+
+        connection.OnNotification = (title, _, _) => notifications.Enqueue(title);
+        for (var i = 0; i < 2; i++)
+        {
+            now += TimeSpan.FromMinutes(1);
+            connection.MaintainConnection();
+            await connection.PendingAttempt;
+        }
+
+        CheckNotifications(notifications, Failed);
     }
 
     private static async Task<MqttServer> StartBrokerAsync(int port, ConcurrentQueue<MqttApplicationMessage> received)

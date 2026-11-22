@@ -20,6 +20,7 @@ namespace ResourceMonitorDaemon
         private PerformanceCounter? _cpuCounter;
         private DeviceSettings _settings;
         private DeviceSettings? _pendingSettings;
+        private IDisposable? _settingsSubscription;
         private volatile bool _isPaused;
 
         public MonitorService(
@@ -33,11 +34,17 @@ namespace ResourceMonitorDaemon
             _connection = connection;
             _settingsStore = settingsStore;
             _settings = settingsMonitor.CurrentValue;
-            _connection.OnNotification = (title, message, icon) => OnNotification?.Invoke(title, message, icon);
         }
 
-        /// <summary>User-visible notification sink (set by the tray). May be invoked from any thread.</summary>
-        public Action<string, string, ToolTipIcon>? OnNotification { get; set; }
+        /// <summary>
+        /// User-visible notification sink (set by the tray before the host starts). May be
+        /// invoked from any thread.
+        /// </summary>
+        public Action<string, string, ToolTipIcon>? OnNotification
+        {
+            get => _connection.OnNotification;
+            set => _connection.OnNotification = value;
+        }
 
         /// <summary>Settings currently in effect.</summary>
         public DeviceSettings CurrentSettings => Volatile.Read(ref _settings);
@@ -46,6 +53,9 @@ namespace ResourceMonitorDaemon
 
         public override Task StartAsync(CancellationToken cancellationToken)
         {
+            // Subscribe before reading CurrentValue so a reload during start-up (e.g. while the
+            // performance counter initializes) is not lost; equal values are ignored later.
+            _settingsSubscription = _settingsMonitor.OnChange(updated => Volatile.Write(ref _pendingSettings, updated));
             _settings = _settingsMonitor.CurrentValue;
             LogStartupDiagnostics(_settings);
 
@@ -65,7 +75,6 @@ namespace ResourceMonitorDaemon
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            using var settingsSubscription = _settingsMonitor.OnChange(updated => Volatile.Write(ref _pendingSettings, updated));
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_settings.SampleIntervalMs));
 
             // Start connecting right away instead of waiting one sample period.
@@ -162,9 +171,23 @@ namespace ResourceMonitorDaemon
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("ResourceMonitorDaemon stopping...");
-            await base.StopAsync(cancellationToken);
-            _cpuCounter?.Dispose();
-            await _connection.DisposeAsync();
+            _settingsSubscription?.Dispose();
+
+            // Cancel in-flight connect attempts first so shutdown never waits for a timeout.
+            var connectionClosed = _connection.DisposeAsync().AsTask();
+            try
+            {
+                await base.StopAsync(cancellationToken);
+                await connectionClosed.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning("Shutdown did not complete before the stop timeout.");
+            }
+            finally
+            {
+                _cpuCounter?.Dispose();
+            }
         }
     }
 }

@@ -16,24 +16,30 @@ namespace ResourceMonitorDaemon
     /// <see cref="DeviceSettings.ConnectTimeoutMs"/>). While an attempt is in flight or the
     /// broker is unreachable, <see cref="PublishAsync"/> returns false without blocking.
     /// A tray notification is raised once per outage, plus one "reconnected" notice.
+    /// <see cref="DisposeAsync"/> cancels any in-flight connect immediately.
     /// </remarks>
     public sealed class MqttConnection : IAsyncDisposable
     {
         private const int FailureSummaryInterval = 20;
+        private const int ShutdownDisconnectTimeoutMs = 500;
+        private static readonly TimeSpan ShutdownAttemptWait = TimeSpan.FromSeconds(2);
 
         private readonly ILogger<MqttConnection> _logger;
         private readonly MqttFactory _factory = new();
         private readonly Func<DateTimeOffset> _clock;
         private readonly object _gate = new();
+        private readonly CancellationTokenSource _shutdown = new();
 
         private DeviceSettings? _settings;
         private ReconnectBackoff? _backoff;
         private IMqttClient? _client;
         private string? _connectedAddress;
         private Task? _attempt;
-        private bool _reconnectRequested;
+        private bool _reconnectRequested;   // endpoint changed: reconnect now, bypassing backoff
+        private bool _dropRequested;        // publish failed: treat the current client as lost
         private bool _wasConnected;
         private bool _outageNotified;
+        private int _outageFailures;
         private DateTimeOffset? _outageStartedAt;
         private bool _disposed;
 
@@ -43,7 +49,10 @@ namespace ResourceMonitorDaemon
             _clock = clock ?? (() => DateTimeOffset.UtcNow);
         }
 
-        /// <summary>Raised (from a background thread) for user-visible connection events.</summary>
+        /// <summary>
+        /// Raised (from a background thread) for user-visible connection events. The outage is
+        /// only marked as notified when a handler was attached and ran.
+        /// </summary>
         public Action<string, string, ToolTipIcon>? OnNotification { get; set; }
 
         /// <summary>True when a connected client is ready for publishing.</summary>
@@ -70,14 +79,14 @@ namespace ResourceMonitorDaemon
             }
         }
 
-        /// <summary>Test hook: failed attempts in the current outage.</summary>
-        internal int ConsecutiveFailures
+        /// <summary>Test hook: failed connect attempts in the current outage.</summary>
+        internal int FailedAttemptsInOutage
         {
             get
             {
                 lock (_gate)
                 {
-                    return _backoff?.ConsecutiveFailures ?? 0;
+                    return _outageFailures;
                 }
             }
         }
@@ -85,6 +94,7 @@ namespace ResourceMonitorDaemon
         private bool IsConnectedLocked =>
             !_disposed
             && !_reconnectRequested
+            && !_dropRequested
             && (_attempt == null || _attempt.IsCompleted)
             && _client?.IsConnected == true;
 
@@ -138,7 +148,7 @@ namespace ResourceMonitorDaemon
                     return;
                 }
 
-                var connected = _client?.IsConnected == true;
+                var connected = _client?.IsConnected == true && !_dropRequested;
                 if (connected && !_reconnectRequested)
                 {
                     return;
@@ -155,6 +165,7 @@ namespace ResourceMonitorDaemon
                 }
 
                 _reconnectRequested = false;
+                _dropRequested = false;
                 _wasConnected = false;
                 var oldClient = _client;
                 _client = null;
@@ -166,7 +177,7 @@ namespace ResourceMonitorDaemon
 
         /// <summary>
         /// Publishes one QoS 0, non-retained message. Returns false (without waiting) when not
-        /// connected; a failed publish schedules an immediate reconnect.
+        /// connected; a failed publish marks the connection lost (reconnect follows the backoff).
         /// </summary>
         public async Task<bool> PublishAsync(string topic, string payload, CancellationToken cancellationToken)
         {
@@ -185,7 +196,7 @@ namespace ResourceMonitorDaemon
 
             try
             {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
                 timeout.CancelAfter(timeoutMs);
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic(topic)
@@ -203,10 +214,10 @@ namespace ResourceMonitorDaemon
             {
                 lock (_gate)
                 {
-                    if (ReferenceEquals(_client, client) && !_reconnectRequested)
+                    if (!_disposed && ReferenceEquals(_client, client) && !_dropRequested && !_reconnectRequested)
                     {
+                        _dropRequested = true;
                         BeginOutageLocked($"publish to {topic} failed ({Describe(ex, timeoutMs)})");
-                        _reconnectRequested = true;
                     }
                 }
 
@@ -214,11 +225,14 @@ namespace ResourceMonitorDaemon
             }
         }
 
+        /// <summary>
+        /// Cancels any in-flight connect attempt first, then closes the client. Completes within
+        /// about a second even when the broker is unreachable.
+        /// </summary>
         public async ValueTask DisposeAsync()
         {
             Task? attempt;
             IMqttClient? client;
-            int timeoutMs;
             lock (_gate)
             {
                 if (_disposed)
@@ -230,14 +244,15 @@ namespace ResourceMonitorDaemon
                 attempt = _attempt;
                 client = _client;
                 _client = null;
-                timeoutMs = _settings?.ConnectTimeoutMs ?? DeviceSettings.DefaultConnectTimeoutMs;
             }
+
+            _shutdown.Cancel();
 
             if (attempt != null)
             {
                 try
                 {
-                    await attempt.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs * 2 + 500)).ConfigureAwait(false);
+                    await attempt.WaitAsync(ShutdownAttemptWait).ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
@@ -247,26 +262,33 @@ namespace ResourceMonitorDaemon
 
             if (client != null)
             {
-                await CloseClientAsync(client, timeoutMs).ConfigureAwait(false);
+                await CloseClientAsync(client, ShutdownDisconnectTimeoutMs, CancellationToken.None).ConfigureAwait(false);
             }
         }
 
         private async Task RunAttemptAsync(DeviceSettings settings, IMqttClient? oldClient)
         {
+            var shutdown = _shutdown.Token;
             try
             {
                 if (oldClient != null)
                 {
-                    await CloseClientAsync(oldClient, settings.ConnectTimeoutMs).ConfigureAwait(false);
+                    await CloseClientAsync(oldClient, settings.ConnectTimeoutMs, shutdown).ConfigureAwait(false);
                 }
 
                 var failures = new List<string>();
                 foreach (var address in CandidateAddresses(settings))
                 {
+                    if (shutdown.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
                     var client = _factory.CreateMqttClient();
                     try
                     {
-                        using var timeout = new CancellationTokenSource(settings.ConnectTimeoutMs);
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
+                        timeout.CancelAfter(settings.ConnectTimeoutMs);
                         var options = new MqttClientOptionsBuilder()
                             .WithTcpServer(address, settings.Port)
                             .WithCleanSession()
@@ -277,13 +299,18 @@ namespace ResourceMonitorDaemon
                     catch (Exception ex)
                     {
                         client.Dispose();
+                        if (shutdown.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
                         failures.Add($"{address}:{settings.Port} ({Describe(ex, settings.ConnectTimeoutMs)})");
                         continue;
                     }
 
                     if (!OnConnected(client, address, settings))
                     {
-                        await CloseClientAsync(client, settings.ConnectTimeoutMs).ConfigureAwait(false);
+                        await CloseClientAsync(client, ShutdownDisconnectTimeoutMs, CancellationToken.None).ConfigureAwait(false);
                     }
 
                     return;
@@ -291,10 +318,14 @@ namespace ResourceMonitorDaemon
 
                 OnAttemptFailed(settings, string.Join("; ", failures));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!shutdown.IsCancellationRequested)
             {
                 _logger.LogError(ex, "Unexpected error during MQTT connect attempt.");
                 OnAttemptFailed(settings, ex.Message);
+            }
+            catch (Exception)
+            {
+                // Cancelled by shutdown.
             }
         }
 
@@ -311,8 +342,7 @@ namespace ResourceMonitorDaemon
                 _client = client;
                 _connectedAddress = address;
                 _wasConnected = true;
-                var failedAttempts = _backoff!.ConsecutiveFailures;
-                _backoff.Reset();
+                _backoff!.RecordConnected();
 
                 var via = string.Equals(address, settings.Host, StringComparison.OrdinalIgnoreCase)
                     ? string.Empty
@@ -321,7 +351,7 @@ namespace ResourceMonitorDaemon
                 {
                     _logger.LogInformation(
                         "Reconnected to MQTT broker {Address}:{Port}{Via} after {Failures} failed attempt(s); outage lasted {Seconds:F0} s.",
-                        address, settings.Port, via, failedAttempts, (_clock() - started).TotalSeconds);
+                        address, settings.Port, via, _outageFailures, (_clock() - started).TotalSeconds);
                 }
                 else
                 {
@@ -335,6 +365,7 @@ namespace ResourceMonitorDaemon
                 }
 
                 _outageStartedAt = null;
+                _outageFailures = 0;
             }
 
             if (reconnectedMessage != null)
@@ -347,7 +378,7 @@ namespace ResourceMonitorDaemon
 
         private void OnAttemptFailed(DeviceSettings settings, string details)
         {
-            var notify = false;
+            bool notify;
             lock (_gate)
             {
                 if (_disposed)
@@ -356,35 +387,34 @@ namespace ResourceMonitorDaemon
                 }
 
                 _outageStartedAt ??= _clock();
+                _outageFailures++;
                 var delay = _backoff!.RecordFailure();
-                var failures = _backoff.ConsecutiveFailures;
-                if (failures == 1)
+                if (_outageFailures == 1)
                 {
                     _logger.LogWarning("MQTT connect failed: {Details}. Retrying in {Delay:F1} s.", details, delay.TotalSeconds);
                 }
-                else if (failures % FailureSummaryInterval == 0)
+                else if (_outageFailures % FailureSummaryInterval == 0)
                 {
-                    _logger.LogInformation("MQTT still disconnected after {Failures} attempts: {Details}. Next retry in {Delay:F1} s.", failures, details, delay.TotalSeconds);
+                    _logger.LogInformation("MQTT still disconnected after {Failures} attempts: {Details}. Next retry in {Delay:F1} s.", _outageFailures, details, delay.TotalSeconds);
                 }
                 else
                 {
-                    _logger.LogDebug("MQTT connect attempt {Failures} failed: {Details}. Next retry in {Delay:F1} s.", failures, details, delay.TotalSeconds);
+                    _logger.LogDebug("MQTT connect attempt {Failures} failed: {Details}. Next retry in {Delay:F1} s.", _outageFailures, details, delay.TotalSeconds);
                 }
 
-                if (!_outageNotified)
-                {
-                    _outageNotified = true;
-                    notify = true;
-                }
+                notify = !_outageNotified;
             }
 
-            if (notify)
-            {
-                Notify(
+            if (notify && Notify(
                     "MQTT connection failed",
                     $"Unable to connect to ESP32 MQTT broker ({DescribeEndpoint(settings)}).\n" +
                     "Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the background.",
-                    ToolTipIcon.Error);
+                    ToolTipIcon.Error))
+            {
+                lock (_gate)
+                {
+                    _outageNotified = true;
+                }
             }
         }
 
@@ -392,19 +422,35 @@ namespace ResourceMonitorDaemon
         {
             _wasConnected = false;
             _outageStartedAt ??= _clock();
-            _backoff?.Reset();
-            _logger.LogWarning("MQTT {Reason}.", reason);
+            var delay = _backoff?.RecordDisconnected();
+            if (delay is { } wait)
+            {
+                _logger.LogWarning("MQTT {Reason}; connection was short-lived, next attempt in {Delay:F1} s.", reason, wait.TotalSeconds);
+            }
+            else
+            {
+                _logger.LogWarning("MQTT {Reason}.", reason);
+            }
         }
 
-        private void Notify(string title, string message, ToolTipIcon icon)
+        /// <summary>Returns true when a handler was attached and ran without throwing.</summary>
+        private bool Notify(string title, string message, ToolTipIcon icon)
         {
+            var handler = OnNotification;
+            if (handler == null)
+            {
+                return false;
+            }
+
             try
             {
-                OnNotification?.Invoke(title, message, icon);
+                handler(title, message, icon);
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.LogDebug("Notification handler failed: {Error}", ex.Message);
+                return false;
             }
         }
 
@@ -428,19 +474,20 @@ namespace ResourceMonitorDaemon
                 ? $"timed out after {timeoutMs} ms"
                 : ex.GetBaseException().Message;
 
-        private static async Task CloseClientAsync(IMqttClient client, int timeoutMs)
+        private static async Task CloseClientAsync(IMqttClient client, int timeoutMs, CancellationToken cancellationToken)
         {
             try
             {
                 if (client.IsConnected)
                 {
-                    using var timeout = new CancellationTokenSource(timeoutMs);
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(timeoutMs);
                     await client.DisconnectAsync(new MqttClientDisconnectOptionsBuilder().Build(), timeout.Token).ConfigureAwait(false);
                 }
             }
             catch (Exception)
             {
-                // Best effort: the broker may already be gone.
+                // Best effort: the broker may already be gone, or we are shutting down.
             }
             finally
             {
