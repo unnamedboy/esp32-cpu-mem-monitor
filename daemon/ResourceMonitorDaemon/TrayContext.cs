@@ -121,7 +121,7 @@ namespace ResourceMonitorDaemon
             }
 
             _settingsForm = new SettingsForm(
-                // Fresh effective settings: MonitorService.CurrentSettings lags until its next tick.
+                // Fresh effective settings: MonitorService.CurrentSettings can briefly lag a reload.
                 _settingsMonitor.CurrentValue,
                 DaemonConfiguration.LoadLowerLayers(AppContext.BaseDirectory),
                 _settingsStore,

@@ -499,6 +499,77 @@ var tests = new (string Name, Action Run)[]
         services.DisposeAsync().AsTask().GetAwaiter().GetResult();   // MqttConnection is IAsyncDisposable only
     }),
 
+    ("Case-variant duplicate keys: Update backs the file up instead of silently dropping values", () =>
+    {
+        using var temp = new TempDir();
+        var path = Path.Combine(temp.Path, "settings.json");
+        const string original = """{ "Device": { "Host": "a", "host": "b", "Port": 1999, "MemTopic": "x/mem" } }""";
+        File.WriteAllText(path, original);
+        var store = new UserSettingsStore(path);
+
+        store.Update(patch => patch.SampleIntervalMs = 2000);
+
+        AssertTrue(store.LastBackupPath != null, "no backup for an ambiguous file");
+        AssertEqual(original, File.ReadAllText(store.LastBackupPath!));
+        AssertEqual(2000, store.Load().SampleIntervalMs);
+    }),
+    ("Exact duplicate keys: Update backs the file up instead of throwing", () =>
+    {
+        using var temp = new TempDir();
+        var path = Path.Combine(temp.Path, "settings.json");
+        const string original = """{ "Device": { "Port": 1, "Port": 2 } }""";
+        File.WriteAllText(path, original);
+        var store = new UserSettingsStore(path);
+
+        store.Update(patch => patch.Port = 1885);
+
+        AssertTrue(store.LastBackupPath != null, "no backup for a duplicate-key file");
+        AssertEqual(original, File.ReadAllText(store.LastBackupPath!));
+        AssertEqual(1885, store.Load().Port);
+    }),
+    ("MonitorService applies settings changes within a second even with a 60 s interval", () =>
+    {
+        using var temp = new TempDir();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Device:Host"] = "127.0.0.1",
+            ["Device:Port"] = "1",
+            ["Device:SampleIntervalMs"] = "60000",
+        }).Build();
+        var captured = new CapturingLoggerProvider();
+        var services = new ServiceCollection()
+            .AddLogging(logging => logging.AddProvider(captured))
+            .AddSingleton<IConfiguration>(configuration)
+            .AddDeviceSettings()
+            .AddSingleton<ISettingsStore>(new UserSettingsStore(Path.Combine(temp.Path, "settings.json")))
+            .AddSingleton(provider => new MqttConnection(provider.GetRequiredService<ILogger<MqttConnection>>()))
+            .AddSingleton<MonitorService>()
+            .BuildServiceProvider();
+        var service = services.GetRequiredService<MonitorService>();
+        service.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        try
+        {
+            AssertEqual(60000, service.CurrentSettings.SampleIntervalMs);
+            configuration["Device:SampleIntervalMs"] = "500";
+            configuration["Device:Port"] = "2";
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            configuration.Reload();
+            while (service.CurrentSettings.Port != 2 && stopwatch.ElapsedMilliseconds < 5000)
+            {
+                Thread.Sleep(20);
+            }
+
+            AssertTrue(stopwatch.ElapsedMilliseconds < 1000, $"settings applied after {stopwatch.ElapsedMilliseconds} ms");
+            AssertEqual(500, service.CurrentSettings.SampleIntervalMs);
+            AssertEqual(1, captured.Messages.Count(m => m.StartsWith("Settings changed")));
+        }
+        finally
+        {
+            service.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+            services.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+    }),
+
     // ---- MqttConnection (in-process loopback broker) --------------------------------------
     ("MqttConnection is non-blocking, uses the fallback, and notifies once per outage", () =>
     {
