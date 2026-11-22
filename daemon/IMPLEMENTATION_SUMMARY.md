@@ -279,7 +279,8 @@ key until it is disposed.
     Connecting (`wifi_state` 0).
   - If this check returns Connected, the device already joined Wi-Fi after an
     earlier attempt ended in `Timeout` or `ConnectionLost`. The client then
-    sends no credentials and returns `Connected(ip4)` directly, because a new
+    sends no credentials and returns `Connected(ip4) { AlreadyConnected = true }`
+    directly, because a new
     ApplyConfig would fail and the user would be told to restart a device that
     is working. On a real device, answering Connected also makes the firmware
     finish provisioning and stop BLE.
