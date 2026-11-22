@@ -237,7 +237,7 @@ Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the backgr
     <comment>{0} = name. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorRange" xml:space="preserve">
-    <value>{0} {1} is outside {2}..{3}.</value>
+    <value>{0}: {1} is outside {2}..{3}.</value>
     <comment>{0} = name, {1} = value, {2} = min, {3} = max. Field placeholders get the field's display name in the UI (e.g. Settings_CpuTopic) and its configuration key in the log.</comment>
   </data>
   <data name="Settings_ErrorTopicsEqual" xml:space="preserve">
@@ -349,38 +349,44 @@ Check that the ESP32 is powered on and on the same Wi-Fi. Retrying in the backgr
     <value>The test would send the token over unencrypted HTTP. Continue?</value>
   </data>
   <data name="Observability_ErrorUrlEmpty" xml:space="preserve">
-    <value>Url must not be empty.</value>
+    <value>{0} must not be empty.</value>
+    <comment>{0} = url. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorUrlTooLong" xml:space="preserve">
-    <value>Url is longer than {0} characters.</value>
-    <comment>{0} = maxLength</comment>
+    <value>{0} is longer than {1} characters.</value>
+    <comment>{0} = url, {1} = maxLength. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorUrlNotHttp" xml:space="preserve">
-    <value>Url must be an absolute http:// or https:// URL.</value>
+    <value>{0} must be an absolute http:// or https:// URL.</value>
+    <comment>{0} = url. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorUrlUserInfo" xml:space="preserve">
-    <value>Url must not contain a user name or password; use AuthMode, Username and the token instead.</value>
+    <value>{0} must not contain a user name or password; use {1}, {2} and the token instead.</value>
+    <comment>{0} = url, {1} = authMode, {2} = username. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorUrlFragment" xml:space="preserve">
-    <value>Url must not contain a fragment (#...).</value>
+    <value>{0} must not contain a fragment (#...).</value>
+    <comment>{0} = url. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorUsername" xml:space="preserve">
-    <value>Username must be at most {0} characters without ':', control characters or surrounding spaces.</value>
-    <comment>{0} = maxLength</comment>
+    <value>{0} must be at most {1} characters without ':', control characters or surrounding spaces.</value>
+    <comment>{0} = username, {1} = maxLength. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorToken" xml:space="preserve">
-    <value>Token must be printable ASCII without spaces (at most {0} characters).</value>
-    <comment>{0} = maxLength</comment>
+    <value>{0} must be printable ASCII without spaces (at most {1} characters).</value>
+    <comment>{0} = token, {1} = maxLength. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorTenantId" xml:space="preserve">
-    <value>TenantId may contain only letters, digits and ! - _ . * ' ( ) (at most {0} characters).</value>
-    <comment>{0} = maxLength</comment>
+    <value>{0} may contain only letters, digits and ! - _ . * ' ( ) (at most {1} characters).</value>
+    <comment>{0} = tenant, {1} = maxLength. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorAuthMode" xml:space="preserve">
-    <value>AuthMode must be None, Basic or Bearer.</value>
+    <value>{0} must be None, Basic or Bearer.</value>
+    <comment>{0} = authMode. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Observability_ErrorBasicNeedsUsername" xml:space="preserve">
-    <value>AuthMode Basic needs a Username.</value>
+    <value>{0} Basic needs a {1}.</value>
+    <comment>{0} = authMode, {1} = username. Field placeholders get the field's display name in the UI and its configuration key in the log.</comment>
   </data>
   <data name="Pairing_ReprovisionInstruction" xml:space="preserve">
     <value>hold its BOOT button for 5–15 seconds, then release it</value>
@@ -582,7 +588,7 @@ You can also use the tray menu → Pair device.</value>
     <value>Bluetooth scan failed; see the log for details.</value>
   </data>
   <data name="Pairing_DaemonConnected" xml:space="preserve">
-    <value>Connected, publishing</value>
+    <value>Connected, publishing.</value>
   </data>
   <data name="Pairing_DaemonPaused" xml:space="preserve">
     <value>Sending is paused; resume it to connect.</value>

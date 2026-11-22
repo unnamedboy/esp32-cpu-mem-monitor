@@ -67,17 +67,23 @@ namespace ResourceMonitorDaemon.Pairing
 
         private static int BrokerCheckSeconds => (int)BrokerCheckBudget.TotalSeconds;
 
+        /// <summary>
+        /// Every text method takes an optional <see cref="StringSet"/>: the wizard passes the one it was
+        /// created with, so its messages stay in its language; null means the current UI language.
+        /// </summary>
+        private static StringSet T(StringSet? text) => text ?? Strings.Current;
+
         // ---- Provisioning results -------------------------------------------------------------
 
         /// <summary>Maps the result of <see cref="ProvisioningService.ProvisionAsync"/> to an outcome.</summary>
-        public static PairingOutcome Present(WifiProvisioningResult result, string host)
+        public static PairingOutcome Present(WifiProvisioningResult result, string host, StringSet? text = null)
         {
             ArgumentNullException.ThrowIfNull(result);
             switch (result)
             {
                 case WifiProvisioningResult.Connected { AlreadyConnected: true, JoinedDifferentNetwork: true, JoinedSsid: { Length: > 0 } joinedSsid }:
                     // Nothing was sent: the device stays on the other network. Not a success, nothing saved.
-                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Pairing_AlreadyOnDifferentNetwork(joinedSsid, Strings.Pairing_ReprovisionInstruction))
+                    return new PairingOutcome(PairingOutcomeKind.Failed, T(text).Pairing_AlreadyOnDifferentNetwork(joinedSsid, T(text).Pairing_ReprovisionInstruction))
                     {
                         DeviceWasAlreadyConnected = true,
                         DeviceOnDifferentNetwork = true,
@@ -87,10 +93,10 @@ namespace ResourceMonitorDaemon.Pairing
                 case WifiProvisioningResult.Connected connected:
                     // Includes an already-connected device that did not report its SSID (JoinedSsid null).
                     var address = GetAddressToSave(connected.Ip4Address);
-                    var message = address is null ? Strings.Pairing_SucceededNoAddress(host) : Strings.Pairing_Succeeded(address);
+                    var message = address is null ? T(text).Pairing_SucceededNoAddress(host) : T(text).Pairing_Succeeded(address);
                     if (connected.AlreadyConnected)
                     {
-                        message += "\n" + Strings.Pairing_AlreadyConnected;
+                        message += "\n" + T(text).Pairing_AlreadyConnected;
                     }
 
                     return new PairingOutcome(PairingOutcomeKind.Succeeded, message)
@@ -100,19 +106,19 @@ namespace ResourceMonitorDaemon.Pairing
                     };
 
                 case WifiProvisioningResult.Failed { Reason: WifiConnectFailedReason.AuthError }:
-                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Pairing_WrongPassword)
+                    return new PairingOutcome(PairingOutcomeKind.Failed, T(text).Pairing_WrongPassword)
                     {
                         Focus = PairingField.Password,
                     };
 
                 case WifiProvisioningResult.Failed { Reason: WifiConnectFailedReason.NetworkNotFound }:
-                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Pairing_NetworkNotFound)
+                    return new PairingOutcome(PairingOutcomeKind.Failed, T(text).Pairing_NetworkNotFound)
                     {
                         Focus = PairingField.Ssid,
                     };
 
                 case WifiProvisioningResult.Failed failed:
-                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Pairing_WifiFailed((int)failed.Reason))
+                    return new PairingOutcome(PairingOutcomeKind.Failed, T(text).Pairing_WifiFailed((int)failed.Reason))
                     {
                         Focus = PairingField.Ssid,
                     };
@@ -120,16 +126,16 @@ namespace ResourceMonitorDaemon.Pairing
                 case WifiProvisioningResult.Timeout:
                     return new PairingOutcome(
                         PairingOutcomeKind.Failed,
-                        Strings.Pairing_WifiTimeout((int)ProvisioningConstants.WifiConnectTimeout.TotalSeconds))
+                        T(text).Pairing_WifiTimeout((int)ProvisioningConstants.WifiConnectTimeout.TotalSeconds))
                     {
                         Focus = PairingField.Ssid,
                     };
 
                 case WifiProvisioningResult.ConnectionLost:
-                    return new PairingOutcome(PairingOutcomeKind.CheckBroker, Strings.Pairing_ConnectionLost(BrokerCheckSeconds));
+                    return new PairingOutcome(PairingOutcomeKind.CheckBroker, T(text).Pairing_ConnectionLost(BrokerCheckSeconds));
 
                 default:
-                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Pairing_Failed);
+                    return new PairingOutcome(PairingOutcomeKind.Failed, T(text).Pairing_Failed);
             }
         }
 
@@ -138,31 +144,31 @@ namespace ResourceMonitorDaemon.Pairing
         /// broker answered at <paramref name="host"/>:<paramref name="port"/> within the check budget.
         /// No address is saved: the device did not report one.
         /// </summary>
-        public static PairingOutcome PresentBrokerCheck(bool reachable, string host, int port) =>
+        public static PairingOutcome PresentBrokerCheck(bool reachable, string host, int port, StringSet? text = null) =>
             reachable
-                ? new PairingOutcome(PairingOutcomeKind.Succeeded, Strings.Pairing_BrokerReachable(host, port))
+                ? new PairingOutcome(PairingOutcomeKind.Succeeded, T(text).Pairing_BrokerReachable(host, port))
                 : new PairingOutcome(
                     PairingOutcomeKind.Failed,
-                    Strings.Pairing_BrokerUnreachable(host, port, BrokerCheckSeconds, Strings.Pairing_ReprovisionInstruction))
+                    T(text).Pairing_BrokerUnreachable(host, port, BrokerCheckSeconds, T(text).Pairing_ReprovisionInstruction))
                 {
                     SuggestRescan = true,
                 };
 
         /// <summary>Maps an exception thrown by <see cref="ProvisioningService.ProvisionAsync"/> to an outcome.</summary>
-        public static PairingOutcome PresentException(Exception exception)
+        public static PairingOutcome PresentException(Exception exception, StringSet? text = null)
         {
             ArgumentNullException.ThrowIfNull(exception);
             switch (exception)
             {
                 case OperationCanceledException:
-                    return new PairingOutcome(PairingOutcomeKind.Cancelled, Strings.Pairing_Cancelled);
+                    return new PairingOutcome(PairingOutcomeKind.Cancelled, T(text).Pairing_Cancelled);
 
                 case PairingCodeRejectedException rejected:
                     return new PairingOutcome(
                         PairingOutcomeKind.Failed,
                         rejected.Reason == PairingCodeRejectionReason.VerificationMismatch
-                            ? Strings.Provisioning_CodeNotVerified
-                            : Strings.Provisioning_CodeRejected)
+                            ? T(text).Provisioning_CodeNotVerified
+                            : T(text).Provisioning_CodeRejected)
                     {
                         Focus = PairingField.PairingCode,
                     };
@@ -171,62 +177,62 @@ namespace ResourceMonitorDaemon.Pairing
                     return new PairingOutcome(
                         PairingOutcomeKind.Failed,
                         retry.PreviousAttemptFailed
-                            ? Strings.Provisioning_RetryRejectedAfterFailure(Strings.Pairing_ReprovisionInstruction)
-                            : Strings.Provisioning_RetryRejected(Strings.Pairing_ReprovisionInstruction))
+                            ? T(text).Provisioning_RetryRejectedAfterFailure(T(text).Pairing_ReprovisionInstruction)
+                            : T(text).Provisioning_RetryRejected(T(text).Pairing_ReprovisionInstruction))
                     {
                         SuggestRescan = true,
                     };
 
                 case ProvisioningTransportException transport:
-                    return PresentTransportFailure(transport);
+                    return PresentTransportFailure(transport, text);
 
                 case ProvisioningProtocolException:
-                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Provisioning_UnexpectedAnswer)
+                    return new PairingOutcome(PairingOutcomeKind.Failed, T(text).Provisioning_UnexpectedAnswer)
                     {
                         SuggestRescan = true,
                     };
 
                 case ArgumentException argument:
-                    return PresentInvalidInput(argument);
+                    return PresentInvalidInput(argument, text);
 
                 default:
-                    return new PairingOutcome(PairingOutcomeKind.Failed, Strings.Provisioning_FailedWithType(exception.GetType().Name));
+                    return new PairingOutcome(PairingOutcomeKind.Failed, T(text).Provisioning_FailedWithType(exception.GetType().Name));
             }
         }
 
         /// <summary>The UI text for a Bluetooth transport failure, by error code (the English exception message is only logged).</summary>
-        public static string DescribeTransportError(ProvisioningTransportError error) => error switch
+        public static string DescribeTransportError(ProvisioningTransportError error, StringSet? text = null) => error switch
         {
-            ProvisioningTransportError.BluetoothOff => Strings.Provisioning_BluetoothOff,
-            ProvisioningTransportError.BluetoothUnavailable => Strings.Provisioning_BluetoothUnavailable,
-            ProvisioningTransportError.DeviceNotFound => Strings.Provisioning_DeviceNotFound,
-            ProvisioningTransportError.DeviceDisconnected => Strings.Provisioning_DeviceDisconnected,
-            ProvisioningTransportError.Timeout => Strings.Provisioning_Timeout,
+            ProvisioningTransportError.BluetoothOff => T(text).Provisioning_BluetoothOff,
+            ProvisioningTransportError.BluetoothUnavailable => T(text).Provisioning_BluetoothUnavailable,
+            ProvisioningTransportError.DeviceNotFound => T(text).Provisioning_DeviceNotFound,
+            ProvisioningTransportError.DeviceDisconnected => T(text).Provisioning_DeviceDisconnected,
+            ProvisioningTransportError.Timeout => T(text).Provisioning_Timeout,
             ProvisioningTransportError.ServiceNotFound or ProvisioningTransportError.EndpointNotFound =>
-                Strings.Provisioning_ServiceNotFound(Strings.Pairing_ReprovisionInstruction),
-            ProvisioningTransportError.GattError => Strings.Provisioning_GattError,
-            _ => Strings.Provisioning_TransportFailed,
+                T(text).Provisioning_ServiceNotFound(T(text).Pairing_ReprovisionInstruction),
+            ProvisioningTransportError.GattError => T(text).Provisioning_GattError,
+            _ => T(text).Provisioning_TransportFailed,
         };
 
-        private static PairingOutcome PresentTransportFailure(ProvisioningTransportException transport)
+        private static PairingOutcome PresentTransportFailure(ProvisioningTransportException transport, StringSet? text)
         {
             var rescan = transport.Error is not (ProvisioningTransportError.BluetoothOff or ProvisioningTransportError.BluetoothUnavailable);
-            return new PairingOutcome(PairingOutcomeKind.Failed, DescribeTransportError(transport.Error))
+            return new PairingOutcome(PairingOutcomeKind.Failed, DescribeTransportError(transport.Error, text))
             {
                 SuggestRescan = rescan,
                 Focus = rescan ? PairingField.Device : PairingField.None,
             };
         }
 
-        private static PairingOutcome PresentInvalidInput(ArgumentException argument)
+        private static PairingOutcome PresentInvalidInput(ArgumentException argument, StringSet? text)
         {
             // Mapped by parameter name only: ArgumentException.Message is English and never shown.
             var (message, field) = argument.ParamName switch
             {
-                "ssid" => (Strings.Provisioning_SsidLength(ProvisioningConstants.MaxSsidBytes), PairingField.Ssid),
-                "passphrase" or "password" => (Strings.Provisioning_PasswordLength(ProvisioningConstants.MaxPassphraseBytes), PairingField.Password),
-                "pop" => (Strings.Provisioning_PairingCodeFormat, PairingField.PairingCode),
-                _ => (Strings.Provisioning_InvalidInput, PairingField.None),
+                "ssid" => (T(text).Provisioning_SsidLength(ProvisioningConstants.MaxSsidBytes), PairingField.Ssid),
+                "passphrase" or "password" => (T(text).Provisioning_PasswordLength(ProvisioningConstants.MaxPassphraseBytes), PairingField.Password),
+                "pop" => (T(text).Provisioning_PairingCodeFormat, PairingField.PairingCode),
+                _ => (T(text).Provisioning_InvalidInput, PairingField.None),
             };
 
             return new PairingOutcome(PairingOutcomeKind.Failed, message) { Focus = field };
@@ -271,20 +277,20 @@ namespace ResourceMonitorDaemon.Pairing
         /// when everything is usable, otherwise a message and the field to focus. Never echoes values.
         /// </summary>
         public static string? ValidateInputs(
-            bool deviceSelected, string? pairingCodeInput, string ssid, string password, out string pairingCode, out PairingField field)
+            bool deviceSelected, string? pairingCodeInput, string ssid, string password, out string pairingCode, out PairingField field, StringSet? text = null)
         {
             pairingCode = string.Empty;
             field = PairingField.None;
             if (!deviceSelected)
             {
                 field = PairingField.Device;
-                return Strings.Pairing_SelectDeviceFirst;
+                return T(text).Pairing_SelectDeviceFirst;
             }
 
             if (!PairingCode.TryNormalize(pairingCodeInput, out var code))
             {
                 field = PairingField.PairingCode;
-                return Strings.Provisioning_PairingCodeFormat;
+                return T(text).Provisioning_PairingCodeFormat;
             }
 
             try
@@ -293,7 +299,7 @@ namespace ResourceMonitorDaemon.Pairing
             }
             catch (ArgumentException ex)
             {
-                var outcome = PresentInvalidInput(ex);
+                var outcome = PresentInvalidInput(ex, text);
                 field = outcome.Focus;
                 return outcome.Message;
             }
@@ -305,31 +311,31 @@ namespace ResourceMonitorDaemon.Pairing
         // ---- Scan status ----------------------------------------------------------------------
 
         /// <summary>Status text after a completed scan that found <paramref name="count"/> devices.</summary>
-        public static string DescribeScanResult(int count) => count switch
+        public static string DescribeScanResult(int count, StringSet? text = null) => count switch
         {
-            0 => Strings.Pairing_ScanNone(Strings.Pairing_ReprovisionInstruction),
-            1 => Strings.Pairing_ScanOne,
-            _ => Strings.Pairing_ScanMany(count),
+            0 => T(text).Pairing_ScanNone(T(text).Pairing_ReprovisionInstruction),
+            1 => T(text).Pairing_ScanOne,
+            _ => T(text).Pairing_ScanMany(count),
         };
 
         /// <summary>Status text when the scan could not run (Bluetooth off or unavailable, etc.).</summary>
-        public static string DescribeScanFailure(Exception exception) => exception switch
+        public static string DescribeScanFailure(Exception exception, StringSet? text = null) => exception switch
         {
-            ProvisioningTransportException { Error: ProvisioningTransportError.BluetoothOff } => Strings.Pairing_ScanBluetoothOff,
-            ProvisioningTransportException { Error: ProvisioningTransportError.BluetoothUnavailable } => Strings.Pairing_ScanBluetoothUnavailable,
-            ProvisioningTransportException => Strings.Pairing_ScanFailedRescan,
-            _ => Strings.Pairing_ScanFailed,
+            ProvisioningTransportException { Error: ProvisioningTransportError.BluetoothOff } => T(text).Pairing_ScanBluetoothOff,
+            ProvisioningTransportException { Error: ProvisioningTransportError.BluetoothUnavailable } => T(text).Pairing_ScanBluetoothUnavailable,
+            ProvisioningTransportException => T(text).Pairing_ScanFailedRescan,
+            _ => T(text).Pairing_ScanFailed,
         };
 
         // ---- After saving: the daemon's own connection -----------------------------------------
 
         /// <summary>Final status line once the wizard stops waiting for the daemon's MQTT connection.</summary>
-        public static string DescribeDaemonStatus(bool connected, bool paused, string host) =>
+        public static string DescribeDaemonStatus(bool connected, bool paused, string host, StringSet? text = null) =>
             connected
-                ? Strings.Pairing_DaemonConnected
+                ? T(text).Pairing_DaemonConnected
                 : paused
-                    ? Strings.Pairing_DaemonPaused
-                    : Strings.Pairing_DaemonRetrying(host);
+                    ? T(text).Pairing_DaemonPaused
+                    : T(text).Pairing_DaemonRetrying(host);
 
         /// <summary>
         /// Whether the final "connected" status needs an MQTT connection made after the attempt started.

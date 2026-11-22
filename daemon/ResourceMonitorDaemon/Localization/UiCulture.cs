@@ -21,7 +21,8 @@ namespace ResourceMonitorDaemon.Localization
 
         /// <summary>
         /// Raised (on the thread that changed it) after the UI culture changed. Open windows keep their
-        /// language; the tray menu re-reads its texts.
+        /// language (each holds the <see cref="StringSet"/> it was created with); the tray menu re-reads
+        /// its texts.
         /// </summary>
         public static event EventHandler? Changed;
 

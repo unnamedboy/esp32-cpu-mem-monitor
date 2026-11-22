@@ -18,30 +18,30 @@ namespace ResourceMonitorDaemon.Observability
         {
             if (string.IsNullOrWhiteSpace(url))
             {
-                return UiMessage.Observability_ErrorUrlEmpty();
+                return UiMessage.Observability_ErrorUrlEmpty(LokiSettingsFields.Url);
             }
 
             var trimmed = url.Trim();
             if (trimmed.Length > MaxLength)
             {
-                return UiMessage.Observability_ErrorUrlTooLong(MaxLength);
+                return UiMessage.Observability_ErrorUrlTooLong(LokiSettingsFields.Url, MaxLength);
             }
 
             if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
                 || string.IsNullOrEmpty(uri.Host))
             {
-                return UiMessage.Observability_ErrorUrlNotHttp();
+                return UiMessage.Observability_ErrorUrlNotHttp(LokiSettingsFields.Url);
             }
 
             if (uri.UserInfo.Length > 0)
             {
-                return UiMessage.Observability_ErrorUrlUserInfo();
+                return UiMessage.Observability_ErrorUrlUserInfo(LokiSettingsFields.Url, LokiSettingsFields.AuthMode, LokiSettingsFields.Username);
             }
 
             if (uri.Fragment.Length > 0)
             {
-                return UiMessage.Observability_ErrorUrlFragment();
+                return UiMessage.Observability_ErrorUrlFragment(LokiSettingsFields.Url);
             }
 
             return null;

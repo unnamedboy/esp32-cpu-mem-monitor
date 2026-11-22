@@ -34,6 +34,12 @@ namespace ResourceMonitorDaemon.Localization
             internal set => Volatile.Write(ref _culture, value);
         }
 
+        /// <summary>
+        /// The texts bound to the current UI culture. Dialogs take one when they are created and keep
+        /// using it, so an open dialog never mixes languages.
+        /// </summary>
+        public static StringSet Current => new(Culture);
+
         /// <summary>The text for <paramref name="key"/> in <paramref name="culture"/> (falls back to English).</summary>
         public static string Get(string key, CultureInfo culture) =>
             ResourceManager.GetString(key, culture) ?? $"[{key}]";
@@ -146,16 +152,16 @@ namespace ResourceMonitorDaemon.Localization
         public static string Observability_RequestTimedOut(int seconds) => Format(nameof(Observability_RequestTimedOut), seconds);
         public static string Observability_InsecureSaveQuestion => Get(nameof(Observability_InsecureSaveQuestion));
         public static string Observability_InsecureTestQuestion => Get(nameof(Observability_InsecureTestQuestion));
-        public static string Observability_ErrorUrlEmpty => Get(nameof(Observability_ErrorUrlEmpty));
-        public static string Observability_ErrorUrlTooLong(int maxLength) => Format(nameof(Observability_ErrorUrlTooLong), maxLength);
-        public static string Observability_ErrorUrlNotHttp => Get(nameof(Observability_ErrorUrlNotHttp));
-        public static string Observability_ErrorUrlUserInfo => Get(nameof(Observability_ErrorUrlUserInfo));
-        public static string Observability_ErrorUrlFragment => Get(nameof(Observability_ErrorUrlFragment));
-        public static string Observability_ErrorUsername(int maxLength) => Format(nameof(Observability_ErrorUsername), maxLength);
-        public static string Observability_ErrorToken(int maxLength) => Format(nameof(Observability_ErrorToken), maxLength);
-        public static string Observability_ErrorTenantId(int maxLength) => Format(nameof(Observability_ErrorTenantId), maxLength);
-        public static string Observability_ErrorAuthMode => Get(nameof(Observability_ErrorAuthMode));
-        public static string Observability_ErrorBasicNeedsUsername => Get(nameof(Observability_ErrorBasicNeedsUsername));
+        public static string Observability_ErrorUrlEmpty(string url) => Format(nameof(Observability_ErrorUrlEmpty), url);
+        public static string Observability_ErrorUrlTooLong(string url, int maxLength) => Format(nameof(Observability_ErrorUrlTooLong), url, maxLength);
+        public static string Observability_ErrorUrlNotHttp(string url) => Format(nameof(Observability_ErrorUrlNotHttp), url);
+        public static string Observability_ErrorUrlUserInfo(string url, string authMode, string username) => Format(nameof(Observability_ErrorUrlUserInfo), url, authMode, username);
+        public static string Observability_ErrorUrlFragment(string url) => Format(nameof(Observability_ErrorUrlFragment), url);
+        public static string Observability_ErrorUsername(string username, int maxLength) => Format(nameof(Observability_ErrorUsername), username, maxLength);
+        public static string Observability_ErrorToken(string token, int maxLength) => Format(nameof(Observability_ErrorToken), token, maxLength);
+        public static string Observability_ErrorTenantId(string tenant, int maxLength) => Format(nameof(Observability_ErrorTenantId), tenant, maxLength);
+        public static string Observability_ErrorAuthMode(string authMode) => Format(nameof(Observability_ErrorAuthMode), authMode);
+        public static string Observability_ErrorBasicNeedsUsername(string authMode, string username) => Format(nameof(Observability_ErrorBasicNeedsUsername), authMode, username);
 
         public static string Pairing_ReprovisionInstruction => Get(nameof(Pairing_ReprovisionInstruction));
         public static string Pairing_FirstRunBalloonText => Get(nameof(Pairing_FirstRunBalloonText));

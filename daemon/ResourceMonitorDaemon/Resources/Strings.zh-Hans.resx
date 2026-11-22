@@ -325,34 +325,34 @@
     <value>测试会通过未加密的 HTTP 发送令牌。要继续吗？</value>
   </data>
   <data name="Observability_ErrorUrlEmpty" xml:space="preserve">
-    <value>地址不能为空。</value>
+    <value>{0}不能为空。</value>
   </data>
   <data name="Observability_ErrorUrlTooLong" xml:space="preserve">
-    <value>地址超过 {0} 个字符。</value>
+    <value>{0}超过 {1} 个字符。</value>
   </data>
   <data name="Observability_ErrorUrlNotHttp" xml:space="preserve">
-    <value>地址必须是以 http:// 或 https:// 开头的完整 URL。</value>
+    <value>{0}必须是以 http:// 或 https:// 开头的完整 URL。</value>
   </data>
   <data name="Observability_ErrorUrlUserInfo" xml:space="preserve">
-    <value>地址中不能包含用户名或密码；请改用认证方式、用户名和令牌。</value>
+    <value>{0}中不能包含用户名或密码；请改用{1}、{2}和令牌。</value>
   </data>
   <data name="Observability_ErrorUrlFragment" xml:space="preserve">
-    <value>地址中不能包含片段（#...）。</value>
+    <value>{0}中不能包含片段（#...）。</value>
   </data>
   <data name="Observability_ErrorUsername" xml:space="preserve">
-    <value>用户名最多 {0} 个字符，且不能包含“:”、控制字符或首尾空格。</value>
+    <value>{0}最多 {1} 个字符，且不能包含“:”、控制字符或首尾空格。</value>
   </data>
   <data name="Observability_ErrorToken" xml:space="preserve">
-    <value>令牌只能包含不含空格的可打印 ASCII 字符（最多 {0} 个字符）。</value>
+    <value>{0}只能包含不含空格的可打印 ASCII 字符（最多 {1} 个字符）。</value>
   </data>
   <data name="Observability_ErrorTenantId" xml:space="preserve">
-    <value>租户 ID 只能包含字母、数字和 ! - _ . * ' ( )（最多 {0} 个字符）。</value>
+    <value>{0}只能包含字母、数字和 ! - _ . * ' ( )（最多 {1} 个字符）。</value>
   </data>
   <data name="Observability_ErrorAuthMode" xml:space="preserve">
-    <value>认证方式必须是 None、Basic 或 Bearer。</value>
+    <value>{0}必须是 None、Basic 或 Bearer。</value>
   </data>
   <data name="Observability_ErrorBasicNeedsUsername" xml:space="preserve">
-    <value>认证方式为 Basic 时需要填写用户名。</value>
+    <value>{0}为 Basic 时需要填写{1}。</value>
   </data>
   <data name="Pairing_ReprovisionInstruction" xml:space="preserve">
     <value>按住设备上的 BOOT 键 5–15 秒后松开</value>
@@ -542,7 +542,7 @@
     <value>蓝牙扫描失败，详情见日志。</value>
   </data>
   <data name="Pairing_DaemonConnected" xml:space="preserve">
-    <value>已连接，正在发送数据</value>
+    <value>已连接，正在发送数据。</value>
   </data>
   <data name="Pairing_DaemonPaused" xml:space="preserve">
     <value>发送已暂停，恢复发送后会自动连接设备。</value>
@@ -590,7 +590,7 @@
     <value>设备返回了意外的应答（详情见日志），请重新扫描后重试。</value>
   </data>
   <data name="Provisioning_SsidLength" xml:space="preserve">
-    <value>Wi-Fi 名称需为 1–{0} 字节。</value>
+    <value>网络名称需为 1–{0} 字节。</value>
   </data>
   <data name="Provisioning_PasswordLength" xml:space="preserve">
     <value>Wi-Fi 密码最多 {0} 字节。</value>

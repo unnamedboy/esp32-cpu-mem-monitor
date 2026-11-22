@@ -245,8 +245,12 @@ namespace ResourceMonitorDaemon
             {
                 if (_settingsForm?.DialogResult == DialogResult.OK)
                 {
-                    // Switch now (menu and this balloon); the file watcher reload then finds nothing to change.
-                    _languageMonitor.ApplySaved(_settingsForm.LanguageSetting);
+                    // A changed language switches now (menu and this balloon); the file watcher reload then
+                    // finds nothing to change. An untouched drop-down applies nothing.
+                    if (_settingsForm.ChangedLanguageSetting is { } language)
+                    {
+                        _languageMonitor.ApplySaved(language);
+                    }
                     var overridden = _settingsForm.EnvironmentOverriddenFields;
                     var message = overridden.Count == 0
                         ? Strings.Tray_AppliedWithoutRestart

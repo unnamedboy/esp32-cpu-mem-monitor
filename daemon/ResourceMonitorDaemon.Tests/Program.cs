@@ -347,7 +347,7 @@ var tests = new (string Name, Action Run)[]
             AssertEqual(DeviceSettings.DefaultPort, monitor.CurrentValue.Port);
         }
 
-        AssertEqual(1, captured.Messages.Count(m => m.Contains("Port 0")));
+        AssertEqual(1, captured.Messages.Count(m => m.Contains("Port: 0")));
     }),
     ("Configuration load errors report the absolute file path", () =>
     {

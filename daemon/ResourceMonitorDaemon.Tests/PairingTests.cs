@@ -251,7 +251,7 @@ namespace ResourceMonitorDaemon.Tests
             ("Pairing: daemon status text after saving", () =>
             {
                 AssertEqual(Strings.Pairing_DaemonConnected, PairingOutcomePresenter.DescribeDaemonStatus(true, false, Host));
-                AssertEqual("已连接，正在发送数据", LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.DescribeDaemonStatus(true, false, Host)));
+                AssertEqual("已连接，正在发送数据。", LocalizationTests.InCulture(UiLanguage.ChineseSimplifiedCulture, () => PairingOutcomePresenter.DescribeDaemonStatus(true, false, Host)));
                 AssertTrue(PairingOutcomePresenter.DescribeDaemonStatus(false, true, Host).Contains("paused"), "paused");
                 AssertTrue(PairingOutcomePresenter.DescribeDaemonStatus(false, false, Host).Contains(Host), "retrying");
             }),

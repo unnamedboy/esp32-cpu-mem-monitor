@@ -24,12 +24,6 @@ namespace ResourceMonitorDaemon.Observability
         public const int MaxUsernameLength = 256;
         public const int MaxTokenLength = 4096;
 
-        // Range fields as named in messages: configuration key in logs, dialog label in the UI.
-        private static readonly UiField MetricsIntervalField = new(nameof(LokiSettings.MetricsIntervalSeconds), nameof(Strings.Observability_MetricsInterval));
-        private static readonly UiField BatchMaxEntriesField = new(nameof(LokiSettings.BatchMaxEntries), nameof(Strings.Observability_BatchMaxEntries));
-        private static readonly UiField QueueCapacityField = new(nameof(LokiSettings.QueueCapacity), nameof(Strings.Observability_QueueCapacity));
-        private static readonly UiField FlushIntervalField = new(nameof(LokiSettings.FlushIntervalMs), nameof(Strings.Observability_FlushInterval));
-
         /// <summary>Loki/Mimir tenant ids: at most 150 bytes of <c>[A-Za-z0-9!-_.*'()]</c>, not "." or "..".</summary>
         public const int MaxTenantIdLength = 150;
 
@@ -39,7 +33,7 @@ namespace ResourceMonitorDaemon.Observability
             username == null || username.Length == 0
                 ? null
                 : username.Length > MaxUsernameLength || username.Any(char.IsControl) || username.Contains(':') || username != username.Trim()
-                    ? UiMessage.Observability_ErrorUsername(MaxUsernameLength)
+                    ? UiMessage.Observability_ErrorUsername(LokiSettingsFields.Username, MaxUsernameLength)
                     : null;
 
         /// <summary>The token goes into an HTTP header: printable ASCII without spaces only.</summary>
@@ -49,7 +43,7 @@ namespace ResourceMonitorDaemon.Observability
             token == null || token.Length == 0
                 ? null
                 : token.Length > MaxTokenLength || token.Any(c => c < '!' || c > '~')
-                    ? UiMessage.Observability_ErrorToken(MaxTokenLength)
+                    ? UiMessage.Observability_ErrorToken(LokiSettingsFields.Token, MaxTokenLength)
                     : null;
 
         public static string? ValidateTenantId(string? tenantId) => TenantIdProblem(tenantId)?.English;
@@ -65,7 +59,7 @@ namespace ResourceMonitorDaemon.Observability
                 || tenantId is "." or ".."
                 || tenantId.Any(c => !(char.IsAsciiLetterOrDigit(c) || "!-_.*'()".Contains(c))))
             {
-                return UiMessage.Observability_ErrorTenantId(MaxTenantIdLength);
+                return UiMessage.Observability_ErrorTenantId(LokiSettingsFields.TenantId, MaxTenantIdLength);
             }
 
             return null;
@@ -94,21 +88,21 @@ namespace ResourceMonitorDaemon.Observability
 
             if (!Enum.IsDefined(settings.AuthMode))
             {
-                errors.Add(UiMessage.Observability_ErrorAuthMode());
+                errors.Add(UiMessage.Observability_ErrorAuthMode(LokiSettingsFields.AuthMode));
             }
 
             Add(UsernameProblem(settings.Username));
             if (settings.AuthMode == LokiAuthMode.Basic && settings.Enabled && settings.Username.Length == 0)
             {
-                errors.Add(UiMessage.Observability_ErrorBasicNeedsUsername());
+                errors.Add(UiMessage.Observability_ErrorBasicNeedsUsername(LokiSettingsFields.AuthMode, LokiSettingsFields.Username));
             }
 
             Add(TokenProblem(settings.Token));
             Add(TenantIdProblem(settings.TenantId));
-            Add(DeviceSettingsValidator.RangeProblem(settings.MetricsIntervalSeconds, MinMetricsIntervalSeconds, MaxMetricsIntervalSeconds, MetricsIntervalField));
-            Add(DeviceSettingsValidator.RangeProblem(settings.BatchMaxEntries, MinBatchMaxEntries, MaxBatchMaxEntries, BatchMaxEntriesField));
-            Add(DeviceSettingsValidator.RangeProblem(settings.QueueCapacity, MinQueueCapacity, MaxQueueCapacity, QueueCapacityField));
-            Add(DeviceSettingsValidator.RangeProblem(settings.FlushIntervalMs, MinFlushIntervalMs, MaxFlushIntervalMs, FlushIntervalField));
+            Add(DeviceSettingsValidator.RangeProblem(settings.MetricsIntervalSeconds, MinMetricsIntervalSeconds, MaxMetricsIntervalSeconds, LokiSettingsFields.MetricsIntervalSeconds));
+            Add(DeviceSettingsValidator.RangeProblem(settings.BatchMaxEntries, MinBatchMaxEntries, MaxBatchMaxEntries, LokiSettingsFields.BatchMaxEntries));
+            Add(DeviceSettingsValidator.RangeProblem(settings.QueueCapacity, MinQueueCapacity, MaxQueueCapacity, LokiSettingsFields.QueueCapacity));
+            Add(DeviceSettingsValidator.RangeProblem(settings.FlushIntervalMs, MinFlushIntervalMs, MaxFlushIntervalMs, LokiSettingsFields.FlushIntervalMs));
             return errors;
         }
 
@@ -210,6 +204,23 @@ namespace ResourceMonitorDaemon.Observability
 
             return clamped;
         }
+    }
+
+    /// <summary>
+    /// The <see cref="LokiSettings"/> fields as named in messages: configuration key in logs, the
+    /// Observability dialog label (<c>Observability_*</c> resource) in the UI.
+    /// </summary>
+    public static class LokiSettingsFields
+    {
+        public static readonly UiField Url = new(nameof(LokiSettings.Url), nameof(Strings.Observability_Url));
+        public static readonly UiField AuthMode = new(nameof(LokiSettings.AuthMode), nameof(Strings.Observability_AuthMode));
+        public static readonly UiField Username = new(nameof(LokiSettings.Username), nameof(Strings.Observability_Username));
+        public static readonly UiField Token = new(LokiSettings.TokenKey, nameof(Strings.Observability_Token));
+        public static readonly UiField TenantId = new(nameof(LokiSettings.TenantId), nameof(Strings.Observability_Tenant));
+        public static readonly UiField MetricsIntervalSeconds = new(nameof(LokiSettings.MetricsIntervalSeconds), nameof(Strings.Observability_MetricsInterval));
+        public static readonly UiField BatchMaxEntries = new(nameof(LokiSettings.BatchMaxEntries), nameof(Strings.Observability_BatchMaxEntries));
+        public static readonly UiField QueueCapacity = new(nameof(LokiSettings.QueueCapacity), nameof(Strings.Observability_QueueCapacity));
+        public static readonly UiField FlushIntervalMs = new(nameof(LokiSettings.FlushIntervalMs), nameof(Strings.Observability_FlushInterval));
     }
 
     /// <summary>Reads the <c>Observability:Loki</c> section without ever throwing on malformed values.</summary>

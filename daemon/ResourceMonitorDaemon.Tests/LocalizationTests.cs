@@ -8,6 +8,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using ResourceMonitorDaemon.Localization;
 using ResourceMonitorDaemon.Observability;
+using ResourceMonitorDaemon.Pairing;
+using ResourceMonitorDaemon.Provisioning;
 
 namespace ResourceMonitorDaemon.Tests
 {
@@ -143,9 +145,9 @@ namespace ResourceMonitorDaemon.Tests
                     AssertEqual("Host must not be empty.", problem!.English);
                     AssertEqual("主机不能为空。", problem.Localized);
                     AssertEqual("Host must not be empty.", DeviceSettingsValidator.ValidateHost(""));   // string API (logs) stays English
-                    AssertEqual("Port 0 is outside 1..65535.", DeviceSettingsValidator.ValidatePort(0));
+                    AssertEqual("Port: 0 is outside 1..65535.", DeviceSettingsValidator.ValidatePort(0));
                     AssertEqual(
-                        "SampleIntervalMs 100 is outside 250..60000.",
+                        "SampleIntervalMs: 100 is outside 250..60000.",
                         DeviceSettingsValidator.Validate(new DeviceSettings { SampleIntervalMs = 100 }).Single());
                     AssertEqual(
                         "采样间隔（毫秒）的值 100 超出范围 250..60000。",
@@ -164,11 +166,11 @@ namespace ResourceMonitorDaemon.Tests
                     var timedOut = UiMessage.Observability_RequestTimedOut(10);
                     var result = new LokiPushResult(LokiPushOutcome.Retry, null, timedOut.English) { LocalizedDetail = timedOut };
                     AssertEqual("timed out after 10 s", result.Detail);
-                    AssertEqual("10 秒后超时", ObservabilityForm.DescribeTestResult(result));
-                    AssertEqual("HTTP 204 No Content", ObservabilityForm.DescribeTestResult(new LokiPushResult(LokiPushOutcome.Success, 204, "No Content")));
+                    AssertEqual("10 秒后超时", ObservabilityForm.DescribeTestResult(result, Chinese));
+                    AssertEqual("HTTP 204 No Content", ObservabilityForm.DescribeTestResult(new LokiPushResult(LokiPushOutcome.Success, 204, "No Content"), Chinese));
                     var invalid = LokiPushClient.TestAsync(new LokiSettings { Url = "ftp://x" }, CancellationToken.None).GetAwaiter().GetResult();
                     AssertEqual("Url must be an absolute http:// or https:// URL.", invalid.Detail);
-                    AssertEqual("地址必须是以 http:// 或 https:// 开头的完整 URL。", ObservabilityForm.DescribeTestResult(invalid));
+                    AssertEqual("地址必须是以 http:// 或 https:// 开头的完整 URL。", ObservabilityForm.DescribeTestResult(invalid, Chinese));
                     AssertEqual("失败：x", Strings.Observability_TestFailed("x"));
                     return 0;
                 });
@@ -376,7 +378,7 @@ namespace ResourceMonitorDaemon.Tests
                         var box = (System.Windows.Forms.ComboBox)typeof(SettingsForm).GetField("_languageBox", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
                         box.SelectedIndex = 2;   // zh-Hans
                         typeof(SettingsForm).GetMethod("OnSave", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new object?[] { null, EventArgs.Empty });
-                        AssertEqual("zh-Hans", form.LanguageSetting);
+                        AssertEqual("zh-Hans", form.ChangedLanguageSetting);
                         AssertEqual(System.Windows.Forms.DialogResult.OK, form.DialogResult);
                     }
                     catch (Exception ex)
@@ -395,8 +397,89 @@ namespace ResourceMonitorDaemon.Tests
                 AssertEqual("zh-Hans", store.LoadUiLanguage());
                 AssertEqual(0, store.Load().Port);   // the Device section was left alone
                 ProvisioningTests.AssertThrows<ArgumentException>(() => store.Update(patch => patch.Host = "other"));   // what the dialog avoids
+
+                // Save without touching the drop-down: nothing to apply, and the Ui section is not rewritten,
+                // even when the value shown at opening (auto) is stale because the file changed meanwhile.
+                store.UpdateUiLanguage("en");
+                string? untouched = "not run";
+                RunSta(() =>
+                {
+                    using var form = new SettingsForm(
+                        new DeviceSettings(), new DeviceSettings(), store, new HashSet<string>(),
+                        new UiLanguageSetting(UiLanguage.Auto, UiLanguage.Auto, FromEnvironment: false), store,
+                        Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+                    typeof(SettingsForm).GetMethod("OnSave", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new object?[] { null, EventArgs.Empty });
+                    untouched = form.ChangedLanguageSetting;
+                });
+                AssertTrue(untouched is null, "untouched drop-down reported a language: " + untouched);
+                AssertEqual("en", store.LoadUiLanguage());
             }),
-            ("Localization: no CJK text or bilingual labels in daemon sources outside Resources", () =>
+            ("Localization: Strings and StringSet have the same members; a captured StringSet keeps a dialog's language", () =>
+            {
+                static string Signature(MethodInfo m) => m.Name + "(" + string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name)) + ")";
+                var statics = typeof(Strings).GetMembers(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                    .Where(m => m.Name.Contains('_') && m is PropertyInfo or MethodInfo { IsSpecialName: false })
+                    .Select(m => m is MethodInfo method ? Signature(method) : m.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+                var instance = typeof(StringSet).GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                    .Where(m => m.Name.Contains('_') && m is PropertyInfo or MethodInfo { IsSpecialName: false })
+                    .Select(m => m is MethodInfo method ? Signature(method) : m.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+                AssertTrue(statics.SequenceEqual(instance), "Strings/StringSet differ: " + string.Join(", ", statics.Except(instance).Concat(instance.Except(statics))));
+
+                // The UI language is English, but a dialog opened in Chinese keeps formatting in Chinese.
+                InCulture(English, () =>
+                {
+                    var zh = new StringSet(Chinese);
+                    AssertEqual("Exit", Strings.Tray_Exit);
+                    AssertEqual("退出", zh.Tray_Exit);
+                    AssertEqual("Wi-Fi 密码错误，请重新输入密码后重试。",
+                        PairingOutcomePresenter.Present(new WifiProvisioningResult.Failed(WifiConnectFailedReason.AuthError), "resmon.local", zh).Message);
+                    AssertTrue(PairingOutcomePresenter.PresentBrokerCheck(false, "resmon.local", 1883, zh).Message.Contains("按住设备上的 BOOT 键"), "broker check (zh)");
+                    AssertTrue(PairingOutcomePresenter.DescribeScanResult(0, zh).StartsWith("未找到", StringComparison.Ordinal), "scan (zh)");
+                    AssertEqual("已连接，正在发送数据。", PairingOutcomePresenter.DescribeDaemonStatus(true, false, "resmon.local", zh));
+                    AssertTrue(PairingOutcomePresenter.PresentException(new ProvisioningTransportException(ProvisioningTransportError.BluetoothOff, "off"), zh).Message.StartsWith("蓝牙已关闭", StringComparison.Ordinal), "exception (zh)");
+                    AssertEqual("请先选择设备。", PairingOutcomePresenter.ValidateInputs(false, "", "", "", out _, out _, zh));
+                    AssertEqual("CPU 主题不能为空。", DeviceSettingsValidator.TopicProblem("", DeviceSettingsFields.CpuTopic)!.Format(zh.Culture));
+                    AssertTrue(SettingsSaveFailure.Describe(new IOException("x"), "p", zh).StartsWith("无法", StringComparison.Ordinal), "save failure (zh)");
+                    var timedOut = UiMessage.Observability_RequestTimedOut(10);
+                    AssertEqual("10 秒后超时", ObservabilityForm.DescribeTestResult(new LokiPushResult(LokiPushOutcome.Retry, null, timedOut.English) { LocalizedDetail = timedOut }, zh.Culture));
+                    return 0;
+                });
+
+                // And the other way round: Chinese UI language, English dialog.
+                InCulture(Chinese, () =>
+                {
+                    var en = new StringSet(English);
+                    AssertEqual("Select a device first.", PairingOutcomePresenter.ValidateInputs(false, "", "", "", out _, out _, en));
+                    AssertEqual("Connected, publishing.", PairingOutcomePresenter.DescribeDaemonStatus(true, false, "h", en));
+                    return 0;
+                });
+            }),
+            ("Localization: Observability messages name dialog labels in the UI and configuration keys in the log", () =>
+            {
+                var basic = LokiSettingsValidator.Problems(new LokiSettings { Enabled = true, Url = "https://logs.example.net", AuthMode = LokiAuthMode.Basic }).Single();
+                AssertEqual("AuthMode Basic needs a Username.", basic.English);
+                AssertEqual("Auth mode Basic needs a Username.", basic.Format(English));
+                AssertEqual("认证方式为 Basic 时需要填写用户名。", basic.Format(Chinese));
+                var url = LokiUrl.Problem("");
+                AssertEqual("Url must not be empty.", url!.English);
+                AssertEqual("URL must not be empty.", url.Format(English));
+                AssertEqual("Url must not contain a user name or password; use AuthMode, Username and the token instead.", LokiUrl.Validate("https://u:p@logs.example.net"));
+                AssertEqual("URL must not contain a user name or password; use Auth mode, Username and the token instead.", LokiUrl.Problem("https://u:p@logs.example.net")!.Format(English));
+                var all = LokiSettingsValidator.Problems(new LokiSettings
+                {
+                    Enabled = true, Url = "ftp://x", AuthMode = (LokiAuthMode)42, Username = "a:b", Token = "has space", TenantId = "bad tenant",
+                    MetricsIntervalSeconds = -1, BatchMaxEntries = 0, QueueCapacity = 0, FlushIntervalMs = 0,
+                });
+                foreach (var culture in new[] { English, Chinese })
+                {
+                    var leaking = all.Select(p => p.Format(culture))
+                        .Where(text => new[] { "Url", "AuthMode", "TenantId", "MetricsIntervalSeconds", "BatchMaxEntries", "QueueCapacity", "FlushIntervalMs" }
+                            .Any(key => text.Contains(key, StringComparison.Ordinal)))
+                        .ToList();
+                    AssertTrue(leaking.Count == 0, $"configuration keys in {culture.Name} dialog messages: " + string.Join(" | ", leaking));
+                }
+            }),
+            ("Localization: no CJK text, bilingual labels or English literals passed to UI sinks in daemon sources outside Resources", () =>
             {
                 var sourceRoot = FindDaemonSourceDirectory();
                 var offenders = new List<string>();
@@ -419,16 +502,98 @@ namespace ResourceMonitorDaemon.Tests
                             continue;
                         }
 
-                        if (Cjk.IsMatch(lines[i]) || Bilingual.IsMatch(lines[i]))
+                        if (Cjk.IsMatch(lines[i]) || Bilingual.IsMatch(lines[i]) || HasUiLiteral(lines, i))
                         {
                             offenders.Add($"{relative}:{i + 1}: {lines[i].Trim()}");
                         }
                     }
                 }
 
-                AssertTrue(offenders.Count == 0, "hard-coded CJK/bilingual text (move it to Resources/Strings*.resx):\n" + string.Join("\n", offenders));
+                AssertTrue(offenders.Count == 0, "hard-coded UI text (move it to Resources/Strings*.resx):\n" + string.Join("\n", offenders));
+
+                // The UI-sink check itself must catch the usual shapes (and accept the allowed ones).
+                AssertTrue(HasUiLiteral(new[] { "MessageBox.Show(\"No log yet\", caption);" }, 0), "MessageBox literal");
+                AssertTrue(HasUiLiteral(new[] { "MessageBox.Show(", "    this,", "    $\"Failed: {error}\"," }, 0), "multi-line MessageBox literal");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text = \"Scanning\";" }, 0), "Text assignment");
+                AssertTrue(HasUiLiteral(new[] { "var b = new Button { Text = \"Save\", AutoSize = true };" }, 0), "initializer");
+                AssertTrue(HasUiLiteral(new[] { "_icon.ShowBalloonTip(1000, \"Paused\", text, icon);" }, 0), "balloon");
+                AssertTrue(HasUiLiteral(new[] { "menu.Items.Add(new ToolStripMenuItem(\"Exit\"));" }, 0), "menu item");
+                AssertTrue(!HasUiLiteral(new[] { "contextMenu.Items.Add(\"-\");" }, 0), "separator allowed");
+                AssertTrue(!HasUiLiteral(new[] { "label.Text = $\"{glyph}  {text}\";" }, 0), "placeholders only allowed");
+                AssertTrue(!HasUiLiteral(new[] { "item.Text = $\"{rssi} dBm\";" }, 0), "unit allowed");
+                AssertTrue(!HasUiLiteral(new[] { "_label.Text = _text.Tray_Exit;" }, 0), "resource text");
             }),
         };
+
+        // UI sinks: calls whose string arguments the user sees, and Text-like property assignments.
+        private static readonly Regex UiSinkCall = new(
+            @"\b(?:MessageBox\.Show|ShowBalloonTip|ShowBalloon|ShowResult|SetStep|new\s+ToolStripMenuItem|Items\.Add|Columns\.Add)\s*\(",
+            RegexOptions.CultureInvariant);
+        private static readonly Regex TextAssignment = new(
+            @"\b(?:Text|PlaceholderText|Caption|ToolTipText|BalloonTipText|BalloonTipTitle)\s*=\s*(\$?@?""(?:[^""\\]|\\.)*"")",
+            RegexOptions.CultureInvariant);
+        private static readonly Regex StringLiteral = new(@"\$?@?""((?:[^""\\]|\\.)*)""", RegexOptions.CultureInvariant);
+        private static readonly Regex Hole = new(@"\{[^{}]*\}", RegexOptions.CultureInvariant);
+        private static readonly Regex Word = new(@"[A-Za-z]{2,}", RegexOptions.CultureInvariant);
+
+        /// <summary>Words a UI literal may contain (units and other language-neutral tokens).</summary>
+        private static readonly HashSet<string> AllowedUiWords = new(StringComparer.Ordinal) { "dBm" };
+
+        /// <summary>
+        /// True when line <paramref name="index"/> passes a string literal with words to a UI sink
+        /// (a sink call's arguments are read up to the end of the statement, at most 4 more lines).
+        /// Interpolation holes are ignored, so <c>$"{glyph}  {text}"</c> or "-" are fine.
+        /// </summary>
+        private static bool HasUiLiteral(IReadOnlyList<string> lines, int index)
+        {
+            var line = lines[index];
+            var literals = new List<string>();
+            foreach (Match assignment in TextAssignment.Matches(line))
+            {
+                literals.Add(assignment.Groups[1].Value);
+            }
+
+            var call = UiSinkCall.Match(line);
+            if (call.Success)
+            {
+                var statement = line[(call.Index + call.Length)..];
+                for (var next = index + 1; next < lines.Count && next <= index + 4 && !statement.Contains(';'); next++)
+                {
+                    statement += " " + lines[next];
+                }
+
+                var end = statement.IndexOf(';');
+                literals.Add(end >= 0 ? statement[..end] : statement);
+            }
+
+            return literals
+                .SelectMany(text => StringLiteral.Matches(text).Select(literal => Hole.Replace(literal.Groups[1].Value, " ")))
+                .SelectMany(body => Word.Matches(body).Select(word => word.Value))
+                .Any(word => !AllowedUiWords.Contains(word));
+        }
+
+        private static void RunSta(Action action)
+        {
+            Exception? failure = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+            if (failure != null)
+            {
+                throw new InvalidOperationException("STA action failed: " + failure.GetBaseException().Message, failure);
+            }
+        }
 
         /// <summary>Runs <paramref name="action"/> with <paramref name="culture"/> as the UI language, then restores it.</summary>
         public static T InCulture<T>(CultureInfo culture, Func<T> action)

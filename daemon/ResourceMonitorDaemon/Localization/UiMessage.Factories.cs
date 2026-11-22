@@ -26,15 +26,15 @@ namespace ResourceMonitorDaemon.Localization
         public static UiMessage Settings_ErrorStatusTopicCollides(UiField statusTopic, UiField cpuTopic, UiField memTopic) => new(nameof(Strings.Settings_ErrorStatusTopicCollides), statusTopic, cpuTopic, memTopic);
         public static UiMessage Settings_ErrorBackoffOrder(UiField maxBackoff, UiField initialBackoff) => new(nameof(Strings.Settings_ErrorBackoffOrder), maxBackoff, initialBackoff);
         public static UiMessage Observability_RequestTimedOut(int seconds) => new(nameof(Strings.Observability_RequestTimedOut), seconds);
-        public static UiMessage Observability_ErrorUrlEmpty() => new(nameof(Strings.Observability_ErrorUrlEmpty));
-        public static UiMessage Observability_ErrorUrlTooLong(int maxLength) => new(nameof(Strings.Observability_ErrorUrlTooLong), maxLength);
-        public static UiMessage Observability_ErrorUrlNotHttp() => new(nameof(Strings.Observability_ErrorUrlNotHttp));
-        public static UiMessage Observability_ErrorUrlUserInfo() => new(nameof(Strings.Observability_ErrorUrlUserInfo));
-        public static UiMessage Observability_ErrorUrlFragment() => new(nameof(Strings.Observability_ErrorUrlFragment));
-        public static UiMessage Observability_ErrorUsername(int maxLength) => new(nameof(Strings.Observability_ErrorUsername), maxLength);
-        public static UiMessage Observability_ErrorToken(int maxLength) => new(nameof(Strings.Observability_ErrorToken), maxLength);
-        public static UiMessage Observability_ErrorTenantId(int maxLength) => new(nameof(Strings.Observability_ErrorTenantId), maxLength);
-        public static UiMessage Observability_ErrorAuthMode() => new(nameof(Strings.Observability_ErrorAuthMode));
-        public static UiMessage Observability_ErrorBasicNeedsUsername() => new(nameof(Strings.Observability_ErrorBasicNeedsUsername));
+        public static UiMessage Observability_ErrorUrlEmpty(UiField url) => new(nameof(Strings.Observability_ErrorUrlEmpty), url);
+        public static UiMessage Observability_ErrorUrlTooLong(UiField url, int maxLength) => new(nameof(Strings.Observability_ErrorUrlTooLong), url, maxLength);
+        public static UiMessage Observability_ErrorUrlNotHttp(UiField url) => new(nameof(Strings.Observability_ErrorUrlNotHttp), url);
+        public static UiMessage Observability_ErrorUrlUserInfo(UiField url, UiField authMode, UiField username) => new(nameof(Strings.Observability_ErrorUrlUserInfo), url, authMode, username);
+        public static UiMessage Observability_ErrorUrlFragment(UiField url) => new(nameof(Strings.Observability_ErrorUrlFragment), url);
+        public static UiMessage Observability_ErrorUsername(UiField username, int maxLength) => new(nameof(Strings.Observability_ErrorUsername), username, maxLength);
+        public static UiMessage Observability_ErrorToken(UiField token, int maxLength) => new(nameof(Strings.Observability_ErrorToken), token, maxLength);
+        public static UiMessage Observability_ErrorTenantId(UiField tenant, int maxLength) => new(nameof(Strings.Observability_ErrorTenantId), tenant, maxLength);
+        public static UiMessage Observability_ErrorAuthMode(UiField authMode) => new(nameof(Strings.Observability_ErrorAuthMode), authMode);
+        public static UiMessage Observability_ErrorBasicNeedsUsername(UiField authMode, UiField username) => new(nameof(Strings.Observability_ErrorBasicNeedsUsername), authMode, username);
     }
 }

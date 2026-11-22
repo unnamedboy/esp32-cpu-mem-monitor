@@ -19,10 +19,14 @@ namespace ResourceMonitorDaemon
     {
         /// <param name="exception">What <see cref="ISettingsStore.Update"/> (or a sibling store method) threw.</param>
         /// <param name="filePath">The user settings file.</param>
-        public static string Describe(Exception exception, string filePath) =>
-            exception is ArgumentException
-                ? Strings.Common_SaveFailedInvalidFile(filePath)   // validation of the whole patch, e.g. a bad hand-edited value
-                : Strings.Common_SaveFailed(filePath);
+        /// <param name="text">The dialog's texts (its language); null for the current UI language.</param>
+        public static string Describe(Exception exception, string filePath, StringSet? text = null)
+        {
+            text ??= Strings.Current;
+            return exception is ArgumentException
+                ? text.Common_SaveFailedInvalidFile(filePath)   // validation of the whole patch, e.g. a bad hand-edited value
+                : text.Common_SaveFailed(filePath);
+        }
     }
 
     /// <summary>
@@ -40,6 +44,7 @@ namespace ResourceMonitorDaemon
     /// </remarks>
     public sealed class SettingsForm : Form
     {
+        private readonly StringSet _text = Strings.Current;   // the dialog's language, fixed when it opens
         private readonly ISettingsStore _store;
         private readonly IUiSettingsStore _uiStore;
         private readonly DeviceSettings _effective;
@@ -73,12 +78,11 @@ namespace ResourceMonitorDaemon
             _language = language;
             _logger = logger;
             _savedLanguage = language.Effective;
-            LanguageSetting = language.Effective;
             EnvironmentOverriddenFields = UserDeviceSettingsPatch.DialogFieldNames
                 .Where(environmentOverriddenFields.Contains)
                 .ToList();
 
-            Text = Strings.Settings_WindowTitle;
+            Text = _text.Settings_WindowTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -115,42 +119,42 @@ namespace ResourceMonitorDaemon
             _languageBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180 };
             _languageBox.Items.AddRange(new object[]
             {
-                new LanguageOption(UiLanguage.Auto, Strings.Settings_LanguageAutomatic),
-                new LanguageOption(UiLanguage.English, Strings.Settings_LanguageEnglish),
-                new LanguageOption(UiLanguage.ChineseSimplified, Strings.Settings_LanguageChineseSimplified),
+                new LanguageOption(UiLanguage.Auto, _text.Settings_LanguageAutomatic),
+                new LanguageOption(UiLanguage.English, _text.Settings_LanguageEnglish),
+                new LanguageOption(UiLanguage.ChineseSimplified, _text.Settings_LanguageChineseSimplified),
             });
             _languageBox.SelectedItem = _languageBox.Items.Cast<LanguageOption>().First(option => option.Value == language.Effective);
             _languageBox.Enabled = !language.FromEnvironment;
 
-            AddField(layout, Strings.Settings_Host, nameof(DeviceSettings.Host), _host);
-            AddField(layout, Strings.Settings_Port, nameof(DeviceSettings.Port), _port);
-            AddField(layout, Strings.Settings_CpuTopic, nameof(DeviceSettings.CpuTopic), _cpuTopic);
-            AddField(layout, Strings.Settings_MemTopic, nameof(DeviceSettings.MemTopic), _memTopic);
-            AddField(layout, Strings.Settings_SampleInterval, nameof(DeviceSettings.SampleIntervalMs), _interval);
-            AddRow(layout, Strings.Common_FieldLabel(Strings.Settings_FallbackAddress), new Label
+            AddField(layout, _text.Settings_Host, nameof(DeviceSettings.Host), _host);
+            AddField(layout, _text.Settings_Port, nameof(DeviceSettings.Port), _port);
+            AddField(layout, _text.Settings_CpuTopic, nameof(DeviceSettings.CpuTopic), _cpuTopic);
+            AddField(layout, _text.Settings_MemTopic, nameof(DeviceSettings.MemTopic), _memTopic);
+            AddField(layout, _text.Settings_SampleInterval, nameof(DeviceSettings.SampleIntervalMs), _interval);
+            AddRow(layout, _text.Common_FieldLabel(_text.Settings_FallbackAddress), new Label
             {
-                Text = string.IsNullOrEmpty(effective.FallbackAddress) ? Strings.Common_None : effective.FallbackAddress,
+                Text = string.IsNullOrEmpty(effective.FallbackAddress) ? _text.Common_None : effective.FallbackAddress,
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
                 Margin = new Padding(3, 6, 3, 3),
             });
             AddRow(
                 layout,
-                language.FromEnvironment ? Strings.Common_EnvFieldLabel(Strings.Settings_Language) : Strings.Common_FieldLabel(Strings.Settings_Language),
+                language.FromEnvironment ? _text.Common_EnvFieldLabel(_text.Settings_Language) : _text.Common_FieldLabel(_text.Settings_Language),
                 _languageBox);
-            AddNote(layout, Strings.Settings_LanguageNote, SystemColors.GrayText);
+            AddNote(layout, _text.Settings_LanguageNote, SystemColors.GrayText);
 
-            AddNote(layout, Strings.Common_SavedTo(store.FilePath), SystemColors.GrayText);
+            AddNote(layout, _text.Common_SavedTo(store.FilePath), SystemColors.GrayText);
             var environmentFields = language.FromEnvironment
                 ? EnvironmentOverriddenFields.Append(UiLanguage.ConfigurationKey).ToList()
                 : EnvironmentOverriddenFields;
             if (environmentFields.Count > 0)
             {
-                AddNote(layout, Strings.Common_EnvironmentFieldsNote(string.Join(", ", environmentFields)), Color.DarkOrange);
+                AddNote(layout, _text.Common_EnvironmentFieldsNote(string.Join(", ", environmentFields)), Color.DarkOrange);
             }
 
-            var save = new Button { Text = Strings.Common_Save, AutoSize = true };
-            var cancel = new Button { Text = Strings.Common_Cancel, AutoSize = true, DialogResult = DialogResult.Cancel };
+            var save = new Button { Text = _text.Common_Save, AutoSize = true };
+            var cancel = new Button { Text = _text.Common_Cancel, AutoSize = true, DialogResult = DialogResult.Cancel };
             save.Click += OnSave;
 
             // The dialog is modeless (Show), so DialogResult alone does not close it; Esc
@@ -180,10 +184,12 @@ namespace ResourceMonitorDaemon
         public IReadOnlyList<string> EnvironmentOverriddenFields { get; }
 
         /// <summary>
-        /// The effective <c>Ui:Language</c> after Save (the environment value when overridden), so the
-        /// tray can switch at once instead of waiting for the configuration file watcher.
+        /// The <c>Ui:Language</c> value saved because the user changed the drop-down, so the tray can
+        /// switch at once instead of waiting for the configuration file watcher; null when the language
+        /// was not changed (or is set by <c>RESMON_Ui__Language</c>). A value shown when the dialog
+        /// opened may be stale, so it is never re-applied.
         /// </summary>
-        public string LanguageSetting { get; private set; }
+        public string? ChangedLanguageSetting { get; private set; }
 
         private void AddField(TableLayoutPanel layout, string label, string field, Control control)
         {
@@ -200,7 +206,7 @@ namespace ResourceMonitorDaemon
                 }
             }
 
-            AddRow(layout, fromEnvironment ? Strings.Common_EnvFieldLabel(label) : Strings.Common_FieldLabel(label), control);
+            AddRow(layout, fromEnvironment ? _text.Common_EnvFieldLabel(label) : _text.Common_FieldLabel(label), control);
         }
 
         private static void AddRow(TableLayoutPanel layout, string label, Control control)
@@ -238,8 +244,8 @@ namespace ResourceMonitorDaemon
             {
                 MessageBox.Show(
                     this,
-                    string.Join(Environment.NewLine, errors.Select(error => error.Localized)),
-                    Strings.Common_InvalidSettingsCaption,
+                    string.Join(Environment.NewLine, errors.Select(error => error.Format(_text.Culture))),
+                    _text.Common_InvalidSettingsCaption,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
@@ -265,11 +271,11 @@ namespace ResourceMonitorDaemon
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
                 _logger.LogWarning("Settings dialog: could not save to {Path}: {Error}", _store.FilePath, ex.Message);
-                MessageBox.Show(this, SettingsSaveFailure.Describe(ex, _store.FilePath), Strings.Common_ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, SettingsSaveFailure.Describe(ex, _store.FilePath, _text), _text.Common_ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            LanguageSetting = _language.FromEnvironment ? _language.Effective : selectedLanguage;
+            ChangedLanguageSetting = !_language.FromEnvironment && selectedLanguage != _language.Effective ? selectedLanguage : null;
             DialogResult = DialogResult.OK;
             Close();
         }
