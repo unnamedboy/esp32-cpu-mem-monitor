@@ -34,6 +34,7 @@ The firmware in [firmware/src/main.cpp](firmware/src/main.cpp) currently does th
 - validates incoming payloads and ignores malformed or out-of-range values;
 - updates two DAC channels for CPU and memory output;
 - fades stale metrics back toward zero after the configured timeout;
+- publishes a small JSON health snapshot (build, uptime, heap, RSSI, Wi-Fi/provisioning state, DAC presence) on `resmon/status` every 10 s into its own broker (feature flag `ENABLE_STATUS_TOPIC`; no SSID, IP, MAC or secrets);
 - logs startup diagnostics including build id, I2C/DAC settings, free heap, and connection state.
 
 ### Shared configuration and contract
@@ -51,6 +52,7 @@ The firmware in [firmware/src/main.cpp](firmware/src/main.cpp) currently does th
 - CPU topic: `resmon/cpu`
 - memory topic: `resmon/mem`
 - payload: plain ASCII percentage, for example `42.5`
+- device status topic (ESP32 → subscribers): `resmon/status`, compact JSON, see [COMMUNICATION.md](COMMUNICATION.md)
 - transport: MQTT only
 - QoS: 0 (at-most-once)
 
@@ -60,7 +62,7 @@ The ESP32 treats each metric independently and expires stale values after a five
 
 - [platformio.ini](platformio.ini) — PlatformIO project configuration for the ESP32 firmware
 - [firmware/src](firmware/src) — firmware source, Wi-Fi config, MQTT settings, and DAC logic
-- [firmware/include](firmware/include) — pure, unit-tested firmware helpers (metric conversion, provisioning boot decision, pairing code, serial command parsing, BOOT button hold-and-release window)
+- [firmware/include](firmware/include) — pure, unit-tested firmware helpers (metric conversion, provisioning boot decision, pairing code, serial command parsing, BOOT button hold-and-release window, `resmon/status` payload formatting)
 - [firmware/test](firmware/test) — Unity tests for the helpers in `firmware/include`
 - [daemon/ResourceMonitorDaemon](daemon/ResourceMonitorDaemon) — Windows daemon app
 - [daemon/ResourceMonitorDaemon.Tests](daemon/ResourceMonitorDaemon.Tests) — small smoke tests for formatting and clamping logic
