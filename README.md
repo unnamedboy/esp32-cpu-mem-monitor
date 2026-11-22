@@ -165,7 +165,7 @@ The tray menu, notifications and dialogs are available in English and Simplified
 
 Change it with the **Language** drop-down in the tray **⚙ Settings…** dialog. It saves `"Ui": { "Language": "zh-Hans" }` in the user settings file; choosing the value that `appsettings.json` already sets (normally `auto`) removes the entry again. To force a language without touching the file, set `RESMON_Ui__Language` (for example `$env:RESMON_Ui__Language = "en"`); the drop-down is then read-only. An invalid value falls back to `auto` with a warning in the log.
 
-The tray menu switches as soon as the setting changes; notifications and windows opened afterwards use the new language. A dialog that is already open keeps its labels. The log (`daemon.log` and the optional Loki sink) is always in English, so searches and LogQL queries do not depend on the UI language. Windows itself draws the Yes/No/OK buttons of message boxes in the Windows display language.
+The tray menu switches as soon as the setting changes; notifications and windows opened afterwards use the new language. A dialog that is already open stays entirely in the language it was opened in, including the messages it shows later. The log (`daemon.log` and the optional Loki sink) is always in English, so searches and LogQL queries do not depend on the UI language. Windows itself draws the Yes/No/OK buttons of message boxes in the Windows display language.
 
 ### Pairing a device (Wi-Fi setup over Bluetooth)
 
@@ -181,7 +181,7 @@ The tray's **Pair device… (配对设备…)** wizard sends your Wi-Fi name and
 6. **Click Pair (开始配对).** The wizard shows each step: connect, secure session, send Wi-Fi settings, wait for Wi-Fi. **Cancel (取消)** stops the attempt, and closing the wizard cancels everything.
 7. **Done.** When the device reports its IP address, the wizard saves it as `FallbackAddress` in `%LocalAppData%\ResourceMonitorDaemon\settings.json`; no other setting is changed. The daemon then reconnects without a restart. The wizard waits up to 45 s for a new daemon MQTT connection to the device, without waiting for a published message. It then ends with one of three states:
 
-   - **Connected, publishing** (已连接，正在发送数据): the daemon is connected.
+   - **Connected, publishing.** (已连接，正在发送数据。): the daemon is connected.
    - **Sending is paused** (发送已暂停): resume sending from the tray menu to connect.
    - **The daemon keeps retrying … in the background** (守护进程仍在后台重试连接 …): the connection was not up yet when the wizard stopped waiting.
 

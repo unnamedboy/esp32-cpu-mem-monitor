@@ -225,7 +225,7 @@ The contract is [PROVISIONING.md](PROVISIONING.md). Summary:
    mDNS, and starts the MQTT broker.
 8. The client forgets the Wi-Fi password by default and switches into normal
    metric publishing mode. (Client: done. It saves the reported IPv4 as
-   `FallbackAddress`, reconnects live and shows "Connected, publishing".)
+   `FallbackAddress`, reconnects live and shows "Connected, publishing.".)
 
 ### Client-to-ESP32 Configuration Payload
 

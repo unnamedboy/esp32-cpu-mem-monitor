@@ -320,9 +320,11 @@ Privacy notes:
   each language in its own name ("English", "简体中文"); it is read-only when
   `RESMON_Ui__Language` is set. A changed language is saved first and on its own,
   and the Device section is written only when a device field changed, so an
-  invalid hand-edited value in the user file cannot block a language change. The
-  language is applied when the dialog closes, so the menu and the confirmation
-  balloon already use it. A failed save shows a localized generic message
+  invalid hand-edited value in the user file cannot block a language change. A
+  changed language is applied when the dialog closes, so the menu and the
+  confirmation balloon already use it; when the drop-down was not changed,
+  nothing is saved or applied (`SettingsForm.ChangedLanguageSetting` is null), so a
+  value shown at opening that has gone stale is never re-applied. A failed save shows a localized generic message
   (`SettingsSaveFailure`: "the settings file already contains invalid values" for
   a validation error, otherwise "could not save"); the exception text goes to the
   log. The Observability dialog does the same.
@@ -370,6 +372,8 @@ The UI is available in English (neutral language) and Simplified Chinese
   The English resx `<comment>` names each placeholder. Keys are grouped by prefix:
   `Common_`, `Tray_`, `Settings_`, `Observability_`, `Pairing_`, `Provisioning_`.
   Format strings are formatted with `string.Format(Strings.Culture, …)`.
+  `Localization/StringSet.cs` has the same members as instance members bound to
+  one culture (`Strings.Current` returns one for the current UI language).
 - **Culture**: `UiLanguage` resolves `Ui:Language` (`auto` | `en` | `zh-Hans`,
   case-insensitive; anything else → `auto` plus a logged warning). `auto` maps
   any Simplified Chinese Windows display language (`zh-Hans`, `zh-CN`, `zh-SG`,
@@ -381,9 +385,13 @@ The UI is available in English (neutral language) and Simplified Chinese
   `Program.Main` right after the host is built, before any UI text exists, logs the
   start-up language, and re-applies it on every configuration reload (user file
   saved, no restart). `UiCulture.Changed` makes the tray re-read its menu texts.
-  Balloons and dialogs read their texts when they are shown; an open dialog keeps
-  the labels it was created with, and messages it shows later use the then-current
-  language.
+  Balloons read their texts when they are shown. Each dialog (settings,
+  Observability, pairing wizard) takes a `StringSet` when it is created and reads
+  every text through it, including messages shown later (validation errors via
+  `UiMessage.Format(culture)`, the Test result, the wizard's results, scan, code and
+  SSID notes and final status; `PairingOutcomePresenter` and `SettingsSaveFailure`
+  take the dialog's `StringSet`). An open dialog therefore stays entirely in the
+  language it was opened in.
 - **Logs stay English**: log messages, `daemon.log`, the Loki sink and exception
   messages are never localized, so LogQL queries and searches stay stable. Where a
   message is both logged and shown, the code carries a key, not a sentence:
@@ -396,9 +404,12 @@ The UI is available in English (neutral language) and Simplified Chinese
   - a `UiMessage` can only be created through its typed factories
     (`UiMessage.Factories.cs`, e.g. `UiMessage.Settings_ErrorRange(field, value, min, max)`),
     so the argument count always matches the placeholders. Fields are passed as
-    `UiField`s (`DeviceSettingsFields`, the Loki range fields): the log gets the
-    configuration key (`CpuTopic and MemTopic must be different.`), the dialog the
-    label (`CPU 主题和内存主题不能相同。`);
+    `UiField`s (`DeviceSettingsFields`, `LokiSettingsFields`): the log gets the
+    configuration key (`CpuTopic and MemTopic must be different.`,
+    `AuthMode Basic needs a Username.`), the dialog the label in either language
+    (`CPU 主题和内存主题不能相同。`, `Auth mode Basic needs a Username.`). Range
+    errors read `<field>: <value> is outside <min>..<max>.` because a label may
+    contain parentheses ("Sample interval (ms): 100 …");
   - MQTT notifications are built as `UiMessage`s and formatted with one snapshot
     of `Strings.Culture` when shown, so title and text never mix languages; the
     endpoint text is also logged, in English;
@@ -425,10 +436,16 @@ The UI is available in English (neutral language) and Simplified Chinese
   localized save failures and a language save that succeeds while the Device
   section is invalid (drives `SettingsForm.OnSave`); invariant
   `MetricPayloadFormatter` output under zh-Hans and de-DE; the `Ui` section of the
-  store; `UiLanguageMonitor` reloads; and a source scan that fails on any CJK
-  character or bilingual label in `daemon/ResourceMonitorDaemon/**/*.cs` outside
-  `Resources/` (lines marked `i18n-allow`, such as the `netsh` labels in
-  `CurrentWifiNetwork`, are exempt).
+  store; `UiLanguageMonitor` reloads; `Strings`/`StringSet` member parity and
+  dialog texts formatted with a captured culture while the UI language is the
+  other one; an untouched language drop-down applying nothing; and a source scan
+  of `daemon/ResourceMonitorDaemon/**/*.cs` outside `Resources/` that fails on any
+  CJK character, bilingual label, or string literal with words passed to a UI
+  sink (`MessageBox.Show`, `ShowBalloon`/`ShowBalloonTip`, `ShowResult`, `SetStep`,
+  `new ToolStripMenuItem`, `Items.Add`, `Columns.Add`, or a `Text`/`PlaceholderText`
+  assignment). Interpolation holes are ignored, so "-" or `$"{glyph}  {text}"` pass,
+  and `dBm` is allow-listed. Lines marked `i18n-allow`, such as the `netsh` labels in
+  `CurrentWifiNetwork`, are exempt.
 
 To add a language (for example `zh-Hant`):
 
@@ -445,9 +462,9 @@ To add a language (for example `zh-Hant`):
    automatically.
 
 To add a text, add the key to `Strings.resx` (with a placeholder comment) and to
-every translation, then add the matching member to `Strings.cs` (and, for a text
-that is also logged, a factory in `UiMessage.Factories.cs`); the tests fail until
-they agree.
+every translation, then add the matching member to `Strings.cs` and `StringSet.cs`
+(and, for a text that is also logged, a factory in `UiMessage.Factories.cs`); the
+tests fail until they agree.
 
 ## Project Structure
 
@@ -704,7 +721,7 @@ its broker did not restart. If in addition the effective `FallbackAddress` did
 not change (same address, or no IP reported), the daemon has no reason to
 reconnect. In that case an existing connection counts
 (`PairingOutcomePresenter.RequiresNewDaemonConnection`). It then shows
-**"Connected, publishing"** (已连接，正在发送数据). Otherwise it reports that sending
+**"Connected, publishing."** (已连接，正在发送数据。). Otherwise it reports that sending
 is paused or that the daemon keeps retrying. If
 `RESMON_Device__FallbackAddress` overrides the saved value, the wizard says so.
 
@@ -850,8 +867,8 @@ dotnet .tmpbuild\ResourceMonitorDaemon.Tests.dll
 - The wizard does not set a device name or the MQTT port and topics. The BLE
   contract only carries the SSID and password.
 - Only English and Simplified Chinese exist; Traditional Chinese Windows uses
-  English. A dialog that is open while the language changes keeps its labels, and
-  message boxes show Windows' own OK/Yes/No buttons in the Windows display language.
+  English. Message boxes show Windows' own OK/Yes/No buttons in the Windows
+  display language.
 - Comments in a hand-edited `settings.json` are not preserved when the file is
   saved from the dialog or wizard.
 - Wi-Fi credentials must not be stored in daemon settings, source code or logs.
