@@ -356,8 +356,9 @@ full erase, see "First boot") or item 1 fails by design.
       device still gets an IP before any credentials were accepted it stays in
       provisioning mode, not `source=stored`, and after 5 s logs
       `Wi-Fi: got an IP while provisioning, but no credentials were accepted
-      after 5 s ...`. A normal successful pairing must **not** print that line. Confirm the client reports the failure and that a retry
-      from the wizard re-provisions it.
+      after 5 s ...`. A normal successful pairing must **not** print that
+      line. Confirm the client reports the failure and that a retry from the
+      wizard re-provisions it.
 - [ ] Timeout (failure other than AuthError / NetworkNotFound, e.g. AP refuses
       association): the client times out after 30 s; a wizard retry gets
       `InternalError`; a power cycle boots with the stored credentials (no BLE);

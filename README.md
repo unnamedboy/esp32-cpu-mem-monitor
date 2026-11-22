@@ -70,7 +70,7 @@ The ESP32 treats each metric independently and expires stale values after a five
 - [firmware/include](firmware/include) — pure, unit-tested firmware helpers (metric conversion, provisioning boot decision, pairing code, serial command parsing, BOOT button hold-and-release window, `resmon/status` payload formatting)
 - [firmware/test](firmware/test) — Unity tests for the helpers in `firmware/include`
 - [daemon/ResourceMonitorDaemon](daemon/ResourceMonitorDaemon) — Windows daemon app
-- [daemon/ResourceMonitorDaemon.Tests](daemon/ResourceMonitorDaemon.Tests) — zero-dependency tests for payload formatting, settings, backoff, MQTT connection handling, the provisioning client, the pairing wizard's decisions and the optional Loki sink
+- [daemon/ResourceMonitorDaemon.Tests](daemon/ResourceMonitorDaemon.Tests) — zero-dependency tests for payload formatting, settings, backoff, MQTT connection handling, the provisioning client, the pairing wizard's decisions, the optional Loki sink and UI localization
 - [assets/SQ52_CPU_MEM_1to1.svg](assets/SQ52_CPU_MEM_1to1.svg) — front-panel sticker asset for a CPU/MEM gauge face, intended as a replacement for a generic voltmeter face
 
 ## Local setup
@@ -105,7 +105,7 @@ Create a local secrets file from the example:
 Copy-Item firmware\src\secrets.example.h firmware\src\secrets.h
 ```
 
-Then edit [firmware/src/secrets.h](firmware/src/secrets.h) locally with your SSID and password:
+Then edit `firmware/src/secrets.h` locally with your SSID and password:
 
 ```cpp
 const char* WIFI_SSID = "your-wifi-ssid";
@@ -236,7 +236,7 @@ Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-da
 
   Apart from this, the lines are the same text as `daemon.log` and can contain the broker host or IP address you configured.
 - CPU and memory percentages, memory used/total in GB, and the MQTT state.
-- the device status, with only the documented fields and at most one message every 5 s. It contains no SSID, password, IP or MAC address.
+- the device status, with only the documented fields, rate-limited to a burst of 3 and then at most one message every 5 s. It contains no SSID, password, IP or MAC address.
 
 Messages from the sink itself, for example failed pushes, stay in the local log only. The sink never blocks or slows sampling or MQTT publishing. Failed pushes are retried with backoff up to 60 s, and on Exit the daemon spends at most 2 s flushing.
 During an outage (network errors, timeouts, 5xx) the daemon keeps retrying indefinitely. Nothing is given up; entries are lost only if the bounded queue (`QueueCapacity`) overflows, which drops the oldest entries and reports it in the local log. Entries older than Loki's own limit (`reject_old_samples_max_age`, about a week by default) are rejected by Loki with a 400, which drops that batch. For a rejected batch, Loki usually stores the valid entries and reports `total ignored: N out of M`; the daemon then counts only those N as dropped. If Loki does not say, the local log says the batch was rejected and that Loki may have accepted some entries.

@@ -226,7 +226,7 @@ namespace ResourceMonitorDaemon
             var clamped = Math.Clamp(value, min, max);
             if (clamped != value)
             {
-                warnings.Add($"{name} {value} is outside {min}..{max}; clamped to {clamped}.");
+                warnings.Add($"{name}: {value} is outside {min}..{max}; clamped to {clamped}.");   // same shape as Settings_ErrorRange
             }
 
             return clamped;

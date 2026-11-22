@@ -52,10 +52,10 @@ void test_is_valid_pop_accepts_only_eight_alphabet_characters() {
 }
 
 void test_service_name_uses_last_three_mac_bytes_uppercase() {
-    const uint8_t mac[6] = {0x24, 0x6f, 0x28, 0xa1, 0x0b, 0xfe};
+    const uint8_t mac[6] = {0x00, 0x00, 0x5e, 0x00, 0x53, 0x01};
     char name[PROV_SERVICE_NAME_BUFFER_SIZE];
     TEST_ASSERT_TRUE(formatProvisioningServiceName(name, sizeof(name), mac));
-    TEST_ASSERT_EQUAL_STRING("PROV_RESMON_A10BFE", name);
+    TEST_ASSERT_EQUAL_STRING("PROV_RESMON_005301", name);
     TEST_ASSERT_EQUAL_UINT32(18, strlen(name));
 }
 

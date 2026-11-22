@@ -153,6 +153,13 @@ namespace ResourceMonitorDaemon.Tests
                         "采样间隔（毫秒）的值 100 超出范围 250..60000。",
                         DeviceSettingsValidator.Problems(new DeviceSettings { SampleIntervalMs = 100 }).Single().Localized);
 
+                    var clampWarnings = new List<string>();
+                    DeviceSettingsValidator.Sanitize(new DeviceSettings { SampleIntervalMs = 100 }, clampWarnings);
+                    AssertEqual("SampleIntervalMs: 100 is outside 250..60000; clamped to 250.", clampWarnings.Single());
+                    clampWarnings.Clear();
+                    LokiSettingsValidator.Sanitize(new LokiSettings { MetricsIntervalSeconds = 5000 }, clampWarnings);
+                    AssertEqual("Observability:Loki:MetricsIntervalSeconds: 5000 is outside 0..3600; clamped to 3600.", clampWarnings.Single());
+
                     var sanitizeWarnings = new List<string>();
                     DeviceSettingsValidator.Sanitize(new DeviceSettings { Host = "" }, sanitizeWarnings);
                     AssertTrue(sanitizeWarnings.Single().StartsWith("Host must not be empty.", StringComparison.Ordinal), "log warning is English: " + sanitizeWarnings.Single());
@@ -356,7 +363,7 @@ namespace ResourceMonitorDaemon.Tests
             ("Localization: save failures show a localized generic text; the language is saved even if the Device section is invalid", () =>
             {
                 const string path = @"C:\x\settings.json";
-                AssertEqual(Strings.Common_SaveFailedInvalidFile(path), SettingsSaveFailure.Describe(new ArgumentException("Invalid settings: Port 0 is outside 1..65535."), path));
+                AssertEqual(Strings.Common_SaveFailedInvalidFile(path), SettingsSaveFailure.Describe(new ArgumentException("Invalid settings: Port: 0 is outside 1..65535."), path));
                 AssertEqual(Strings.Common_SaveFailed(path), SettingsSaveFailure.Describe(new IOException("disk full"), path));
                 AssertTrue(InCulture(Chinese, () => SettingsSaveFailure.Describe(new ArgumentException("x"), path)).StartsWith("无法保存", StringComparison.Ordinal), "zh");
 
@@ -522,17 +529,34 @@ namespace ResourceMonitorDaemon.Tests
                 AssertTrue(!HasUiLiteral(new[] { "label.Text = $\"{glyph}  {text}\";" }, 0), "placeholders only allowed");
                 AssertTrue(!HasUiLiteral(new[] { "item.Text = $\"{rssi} dBm\";" }, 0), "unit allowed");
                 AssertTrue(!HasUiLiteral(new[] { "_label.Text = _text.Tray_Exit;" }, 0), "resource text");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text = path + \" saved\";" }, 0), "literal not first in a concatenation");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text = ok ? _text.Common_Save : \"Failed\";" }, 0), "ternary");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text = ok", "    ? _text.Common_Save", "    : \"Failed\";" }, 0), "multi-line ternary");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text = string.Format(\"{0} found\", count);" }, 0), "string.Format");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text += \" (env)\";" }, 0), "+=");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text = @$\"Saved to {path}\";" }, 0), "@$ literal");
+                AssertTrue(HasUiLiteral(new[] { "_label.Text = $@\"Saved to {path}\";" }, 0), "$@ literal");
+                AssertTrue(HasUiLiteral(new[] { "AddNote(layout, \"Saved\", SystemColors.GrayText);" }, 0), "helper AddNote");
+                AssertTrue(HasUiLiteral(new[] { "AddRow(layout, \"Host:\", _host);" }, 0), "helper AddRow");
+                AssertTrue(HasUiLiteral(new[] { "var l = NewLabel(\"Hint\", SystemColors.GrayText);" }, 0), "helper NewLabel");
+                AssertTrue(HasUiLiteral(new[] { "return new PairingOutcome(PairingOutcomeKind.Failed, \"Oops\");" }, 0), "PairingOutcome");
+                AssertTrue(!HasUiLiteral(new[] { "if (_item.Text != \"Pause\" || _item.Text == \"Resume\") {}" }, 0), "comparisons are not assignments");
+                AssertTrue(!HasUiLiteral(new[] { "var l = new Label { Text = label, Name = \"statusLabel\" };" }, 0), "assignment ends at the initializer comma"); 
             }),
         };
 
         // UI sinks: calls whose string arguments the user sees, and Text-like property assignments.
+        // The repo's own label helpers (SettingsForm, ObservabilityForm, PairingWizardForm, TrayContext) count as sinks too.
         private static readonly Regex UiSinkCall = new(
-            @"\b(?:MessageBox\.Show|ShowBalloonTip|ShowBalloon|ShowResult|SetStep|new\s+ToolStripMenuItem|Items\.Add|Columns\.Add)\s*\(",
+            @"\b(?:MessageBox\.Show|ShowBalloonTip|ShowBalloon|ShowNotification|ShowResult|ShowTestResult|SetStep|SetToolTip"
+            + @"|AddRow|AddField|AddGridRow|AddNote|NewLabel|NewGroup|new\s+PairingOutcome|new\s+ToolStripMenuItem|Items\.Add|Columns\.Add)\s*\(",
             RegexOptions.CultureInvariant);
+
+        // Text-like property assignment (= or +=, not == / !=); the right-hand side is read to the end of the expression.
         private static readonly Regex TextAssignment = new(
-            @"\b(?:Text|PlaceholderText|Caption|ToolTipText|BalloonTipText|BalloonTipTitle)\s*=\s*(\$?@?""(?:[^""\\]|\\.)*"")",
+            @"\b(?:Text|PlaceholderText|Caption|ToolTipText|BalloonTipText|BalloonTipTitle)\s*\+?=(?!=)",
             RegexOptions.CultureInvariant);
-        private static readonly Regex StringLiteral = new(@"\$?@?""((?:[^""\\]|\\.)*)""", RegexOptions.CultureInvariant);
+        private static readonly Regex StringLiteral = new(@"(?:\$@|@\$|\$|@)?""((?:[^""\\]|\\.)*)""", RegexOptions.CultureInvariant);
         private static readonly Regex Hole = new(@"\{[^{}]*\}", RegexOptions.CultureInvariant);
         private static readonly Regex Word = new(@"[A-Za-z]{2,}", RegexOptions.CultureInvariant);
 
@@ -550,26 +574,70 @@ namespace ResourceMonitorDaemon.Tests
             var literals = new List<string>();
             foreach (Match assignment in TextAssignment.Matches(line))
             {
-                literals.Add(assignment.Groups[1].Value);
+                literals.Add(ReadExpression(lines, index, line[(assignment.Index + assignment.Length)..], stopAtComma: true));
             }
 
-            var call = UiSinkCall.Match(line);
-            if (call.Success)
+            foreach (Match call in UiSinkCall.Matches(line))
             {
-                var statement = line[(call.Index + call.Length)..];
-                for (var next = index + 1; next < lines.Count && next <= index + 4 && !statement.Contains(';'); next++)
-                {
-                    statement += " " + lines[next];
-                }
-
-                var end = statement.IndexOf(';');
-                literals.Add(end >= 0 ? statement[..end] : statement);
+                literals.Add(ReadExpression(lines, index, line[(call.Index + call.Length)..], stopAtComma: false));
             }
 
             return literals
                 .SelectMany(text => StringLiteral.Matches(text).Select(literal => Hole.Replace(literal.Groups[1].Value, " ")))
                 .SelectMany(body => Word.Matches(body).Select(word => word.Value))
                 .Any(word => !AllowedUiWords.Contains(word));
+        }
+
+        /// <summary>
+        /// The source text from <paramref name="start"/> (continuing over at most 4 more lines) up to the
+        /// end of the expression: a ';', a closing bracket that was not opened in it, or (for an
+        /// assignment in an object initializer) a top-level ','. String literals are skipped while
+        /// counting brackets.
+        /// </summary>
+        private static string ReadExpression(IReadOnlyList<string> lines, int index, string start, bool stopAtComma)
+        {
+            var text = start;
+            for (var next = index + 1; next < lines.Count && next <= index + 4 && !text.Contains(';'); next++)
+            {
+                text += " " + lines[next];
+            }
+
+            var depth = 0;
+            for (var i = 0; i < text.Length; i++)
+            {
+                var c = text[i];
+                if (c == '"')
+                {
+                    // Skip the literal (regular or verbatim, good enough for a scan).
+                    for (i++; i < text.Length && text[i] != '"'; i++)
+                    {
+                        if (text[i] == '\\')
+                        {
+                            i++;
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (c is '(' or '[' or '{')
+                {
+                    depth++;
+                }
+                else if (c is ')' or ']' or '}')
+                {
+                    if (--depth < 0)
+                    {
+                        return text[..i];
+                    }
+                }
+                else if (c == ';' || (stopAtComma && c == ',' && depth == 0))
+                {
+                    return text[..i];
+                }
+            }
+
+            return text;
         }
 
         private static void RunSta(Action action)

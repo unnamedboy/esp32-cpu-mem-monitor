@@ -87,9 +87,10 @@ including a change made while a connect attempt is in flight. Older firmware
 that never publishes status is normal, not an error.
 
 Daemon validation: the payload must be valid UTF-8, at most 1 KB, a JSON object, and contain an
-integer `v` between 1 and the supported version (1). Invalid messages are ignored, with one local
-log line per kind of problem. Valid messages are logged locally at Debug level and, only if the
-optional Loki sink is enabled, forwarded to the stream `{app="resmon-device", kind="status"}`:
+integer `v` between 1 and the supported version (1). Invalid messages are ignored; the first one
+of each kind is logged locally at Information level and repeats at Debug. Valid messages are
+logged locally at Debug level (messages dropped by the rate limit below are only counted) and,
+only if the optional Loki sink is enabled, forwarded to the stream `{app="resmon-device", kind="status"}`:
 
 - Only the schema fields (`v`, `build`, `uptime_s`, `heap_free`, `heap_min`, `rssi`, `wifi`, `prov`,
   `dac`) are forwarded. They are re-serialized in this order, a field
