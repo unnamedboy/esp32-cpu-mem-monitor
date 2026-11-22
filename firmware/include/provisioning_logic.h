@@ -122,6 +122,23 @@ inline uint32_t nextReconnectDelayMs(uint32_t currentMs, uint32_t minMs, uint32_
     return currentMs * 2;
 }
 
+// What to do on WIFI_PROV_CRED_FAIL.
+enum class CredentialFailureAction {
+    // Before success: the client's credentials were rejected. Clear them
+    // (wifi_prov_mgr_reset_sm_state_on_failure) so the client can retry.
+    ResetForRetry,
+    // After success (BLE grace period): the network dropped, e.g. the AP
+    // rebooted. The manager still reports CRED_FAIL, but resetting would
+    // persistently wipe the just-provisioned credentials. Keep them and stop
+    // provisioning so only the firmware's reconnect policy runs.
+    KeepCredentialsAndStopProvisioning,
+};
+
+inline CredentialFailureAction decideCredentialFailureAction(bool provisioningSucceeded) {
+    return provisioningSucceeded ? CredentialFailureAction::KeepCredentialsAndStopProvisioning
+                                 : CredentialFailureAction::ResetForRetry;
+}
+
 // What to do when BLE provisioning fails to start in this boot.
 enum class ProvisioningStartRecovery {
     RestartAndRetry,        // restart (prov_req set) and try provisioning again

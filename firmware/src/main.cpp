@@ -429,6 +429,9 @@ void handleProvisioningStartFailure(const char* step, esp_err_t err, uint32_t no
         case ProvisioningStartRecovery::UseDevFallback:
             rtcProvFailCount = 0;
             printDebugLine("Provisioning: giving up on BLE; connecting with the secrets.h dev fallback");
+            // A manager may still be initialised (e.g. after the PROV_START
+            // timeout). Deinit is a no-op when it is not initialised.
+            wifi_prov_mgr_deinit();
             startDevFallback(now);
             break;
         case ProvisioningStartRecovery::GiveUp:
@@ -510,20 +513,8 @@ void consumeProvisioningEvents(uint32_t now) {
         printDebugLine("Provisioning: Wi-Fi credentials received; connecting");
     }
 
-    if (evtProvCredFailed) {
-        evtProvCredFailed = false;
-        const bool authError = evtProvFailReason == (int)WIFI_PROV_STA_AUTH_ERROR;
-        printDebugFormatted("Provisioning: Wi-Fi connection failed (%s)",
-                            authError ? "authentication error" : "network not found");
-        // Clear the rejected credentials and let the client send new ones in
-        // the same or a new session. Never reboot or leave provisioning here.
-        if (wifi_prov_mgr_reset_sm_state_on_failure() == ESP_OK) {
-            printDebugLine("Provisioning: ready for new credentials");
-        } else {
-            printDebugLine("Provisioning: could not reset state; hold BOOT 5-15 s, then release, to restart provisioning");
-        }
-    }
-
+    // Success is handled before failure: if both are pending in one pass,
+    // a drop after success must not be treated as rejected credentials.
     if (evtProvCredSuccess) {
         evtProvCredSuccess = false;
         credentialSource = CredentialSource::Stored;
@@ -531,6 +522,38 @@ void consumeProvisioningEvents(uint32_t now) {
         provSucceededAtMs = now;
         printDebugFormatted("Provisioning: credentials accepted and stored; BLE stays up for %u s",
                             (unsigned)((PROV_STOP_AFTER_SUCCESS_MS + PROV_BLE_CLEANUP_DELAY_MS) / 1000UL));
+    }
+
+    if (evtProvCredFailed) {
+        evtProvCredFailed = false;
+        const bool authError = evtProvFailReason == (int)WIFI_PROV_STA_AUTH_ERROR;
+        const char* reasonText = authError ? "authentication error" : "network not found";
+        switch (decideCredentialFailureAction(provSucceeded)) {
+            case CredentialFailureAction::ResetForRetry:
+                printDebugFormatted("Provisioning: Wi-Fi connection failed (%s)", reasonText);
+                // Clear the rejected credentials and let the client send new
+                // ones in the same or a new session. Never reboot or leave
+                // provisioning here.
+                if (wifi_prov_mgr_reset_sm_state_on_failure() == ESP_OK) {
+                    printDebugLine("Provisioning: ready for new credentials");
+                } else {
+                    printDebugLine("Provisioning: could not reset state; hold BOOT 5-15 s, then release, to restart provisioning");
+                }
+                break;
+            case CredentialFailureAction::KeepCredentialsAndStopProvisioning:
+                // The manager's Wi-Fi handler stays active until provisioning
+                // stops and reports a post-success drop as CRED_FAIL.
+                // Resetting would persistently wipe the provisioned credentials.
+                printDebugFormatted("Provisioning: Wi-Fi lost during BLE grace period (%s); credentials kept",
+                                    reasonText);
+                if (!provStopRequested) {
+                    provStopRequested = true;
+                    printDebugFormatted("Provisioning: stopping BLE now (cleanup %u ms); firmware reconnect policy takes over",
+                                        (unsigned)PROV_BLE_CLEANUP_DELAY_MS);
+                    wifi_prov_mgr_stop_provisioning();
+                }
+                break;
+        }
     }
 
     if (evtProvEnded) {

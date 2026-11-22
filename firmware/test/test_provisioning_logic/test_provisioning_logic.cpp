@@ -66,8 +66,19 @@ void test_provisioning_start_failure_retries_then_stops() {
                           (int)decideProvisioningStartRecovery(0xFFFFFFFFu, 3, false));
 }
 
+void test_credential_failure_before_success_resets_for_retry() {
+    TEST_ASSERT_EQUAL_INT((int)CredentialFailureAction::ResetForRetry, (int)decideCredentialFailureAction(false));
+}
+
+void test_credential_failure_after_success_keeps_credentials_and_stops() {
+    TEST_ASSERT_EQUAL_INT((int)CredentialFailureAction::KeepCredentialsAndStopProvisioning,
+                          (int)decideCredentialFailureAction(true));
+}
+
 void runProvisioningLogicTests() {
     UNITY_BEGIN();
+    RUN_TEST(test_credential_failure_before_success_resets_for_retry);
+    RUN_TEST(test_credential_failure_after_success_keeps_credentials_and_stops);
     RUN_TEST(test_provisioning_start_failure_retries_then_stops);
     RUN_TEST(test_provisioning_request_wins_over_everything);
     RUN_TEST(test_stored_credentials_win_over_dev_fallback);
