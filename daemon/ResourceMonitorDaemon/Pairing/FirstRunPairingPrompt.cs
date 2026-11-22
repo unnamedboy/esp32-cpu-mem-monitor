@@ -53,15 +53,38 @@ namespace ResourceMonitorDaemon.Pairing
                 processStartUtc = DateTime.UtcNow;
             }
 
-            var ranBefore = DetectEarlierRun(DaemonPaths.LogFilePath, new[] { LegacyLogFilePath }, processStartUtc);
+            var ranBefore = DetectEarlierRun(DaemonPaths.LogFilePath, LegacyLogFilePaths, processStartUtc);
             return new FirstRunPairingPrompt(DefaultMarkerPath, logger, ranBefore);
         }
 
         /// <summary>
         /// Where daemon releases before the per-user log (the first versions on main) wrote their log:
-        /// next to the executable. The current daemon never writes there.
+        /// next to the executable. The current daemon never writes there. Those releases targeted
+        /// <c>net9.0-windows</c>, while this version builds to <c>net9.0-windows10.0.19041.0</c>, so a
+        /// build run in place from the source tree also checks the sibling <c>net9.0-windows</c> folder.
         /// </summary>
-        public static string LegacyLogFilePath => Path.Combine(AppContext.BaseDirectory, "daemon.log");
+        public static IReadOnlyList<string> LegacyLogFilePaths
+        {
+            get
+            {
+                var exeDir = AppContext.BaseDirectory;
+                var paths = new List<string> { Path.Combine(exeDir, "daemon.log") };
+                try
+                {
+                    var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(exeDir));
+                    if (!string.IsNullOrEmpty(parent))
+                    {
+                        paths.Add(Path.Combine(parent, "net9.0-windows", "daemon.log"));
+                    }
+                }
+                catch (Exception)
+                {
+                    // Best effort: an unusual base directory only loses the sibling check.
+                }
+
+                return paths;
+            }
+        }
 
         /// <summary>
         /// True when a daemon log from an earlier run exists: <paramref name="logFilePath"/> created before

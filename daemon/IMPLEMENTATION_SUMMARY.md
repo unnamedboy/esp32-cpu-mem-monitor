@@ -441,9 +441,12 @@ only when all of these hold:
 - the daemon has not connected since this process started;
 - the daemon did not run before this process. That means no per-user
   `daemon.log` created before the process started, no rotated
-  `daemon.log.1`, and no legacy `daemon.log` next to the executable. Releases
-  before the per-user log wrote it there, and the current daemon never does,
-  so its mere existence counts. This covers installations that worked before
+  `daemon.log.1`, and no legacy `daemon.log` next to the executable or in the
+  sibling `net9.0-windows` build folder (older releases targeted that TFM, so a
+  rebuild run in place from the source tree lands in a different folder).
+  Releases before the per-user log wrote it there, and the current daemon never
+  does, so its mere existence counts. A copy of the new exe placed somewhere
+  else entirely is not detected; that costs at most one first-run balloon. This covers installations that worked before
   the marker existed and start while the device is off
   (`FirstRunPairingPrompt.DetectEarlierRun` takes the candidate paths).
 
