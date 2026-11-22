@@ -51,6 +51,9 @@ namespace ResourceMonitorDaemon
 
         public bool IsPaused => _isPaused;
 
+        /// <summary>True while the MQTT connection is up (read-only; used by the tray and pairing wizard).</summary>
+        public bool IsConnected => _connection.IsConnected;
+
         public override Task StartAsync(CancellationToken cancellationToken)
         {
             // Subscribe before reading CurrentValue so a reload during start-up (e.g. while the
