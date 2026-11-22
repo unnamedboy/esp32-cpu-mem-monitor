@@ -50,7 +50,14 @@ Never included: SSID, passwords, proof of possession (PoP), IP addresses, MAC ad
 Daemon validation: the payload must be valid UTF-8, at most 1 KB, a JSON object, and contain an
 integer `v` between 1 and the supported version (1). Invalid messages are ignored, with one local
 log line per kind of problem. Valid messages are logged locally at Debug level and, only if the
-optional Loki sink is enabled, forwarded unchanged to the stream `{app="resmon-device", kind="status"}`.
+optional Loki sink is enabled, forwarded to the stream `{app="resmon-device", kind="status"}`:
+
+- Only the fields in the table above are forwarded. They are re-serialized in this order, a field
+  with the wrong type is omitted, `build` is capped at 64 characters and `wifi`/`prov` at 32.
+  Unknown fields are accepted but never forwarded.
+- Forwarding is rate-limited to a burst of 3, then 1 message per 5 s. The broker is
+  unauthenticated, so a flood cannot fill the Loki queue. Excess messages are counted in the local
+  log, at most once per minute.
 
 ## Optional daemon → Grafana Loki streams
 
@@ -62,4 +69,4 @@ when `IncludeHostLabel` is set):
 | --- | --- |
 | `{app="resmon-daemon", kind="log", level="<trace\|debug\|info\|warn\|error\|critical>"}` | Daemon log line `Category: message` (local-only categories excluded) |
 | `{app="resmon-daemon", kind="metrics"}` | One JSON line per `MetricsIntervalSeconds`: `{"cpu":12.3,"mem":45.6,"mem_used_gb":7.21,"mem_total_gb":15.86,"mqtt":"connected"}` (`mqtt` is `connected`, `disconnected` or `paused`) |
-| `{app="resmon-device", kind="status"}` | The raw validated `resmon/status` JSON as received |
+| `{app="resmon-device", kind="status"}` | The validated `resmon/status` JSON, contract fields only (see above), rate-limited |

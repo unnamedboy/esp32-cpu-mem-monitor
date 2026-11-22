@@ -137,9 +137,15 @@ schedule, and never blocks the sampling loop:
 - Messages on the current status topic are raised through `MqttConnection.StatusMessageReceived`.
   The cpu/mem wire format, QoS 0 and non-retained publishing are unchanged.
 - `DeviceStatusValidator` accepts a UTF-8 JSON object of at most 1 KB with an integer `v` from 1
-  to 1 (supported version). `DeviceStatusForwarder` logs valid messages at Debug, logs one
-  Information line per kind of rejection, and forwards valid messages to Loki only when the sink
-  is enabled. Older firmware never publishes status, and that is not an error.
+  to 1 (supported version). It re-serializes only the contract fields, in contract order, with
+  type checks; `build` is capped at 64 characters and `wifi`/`prov` at 32. Unknown fields are
+  accepted but never forwarded, so nothing extra can be smuggled into Loki.
+- `DeviceStatusForwarder` logs valid messages at Debug and logs one Information line per kind of
+  rejection. It forwards valid messages to Loki only when the sink is enabled, through a token
+  bucket: a burst of 3, then 1 per 5 s; the contract interval is 10 s. The broker is
+  unauthenticated, so a flood cannot evict queued daemon logs or burn Loki ingestion. Excess
+  messages are counted and reported locally at most once per minute.
+- Older firmware never publishes status, and that is not an error.
 
 ### Optional Grafana Loki observability
 
@@ -185,7 +191,7 @@ settings or environment; the repository and `appsettings.json` hold none of it.
     `MinLevel`, formatted as `Category: message` with the exception appended.
   - `{app="resmon-daemon",kind="metrics"}`: `LokiMetricsForwarder`. `MonitorService` passes each
     existing sample through the small `IMetricsObserver` hook, so no extra counter is added.
-  - `{app="resmon-device",kind="status"}`: the raw validated status JSON.
+  - `{app="resmon-device",kind="status"}`: the normalized, rate-limited status JSON.
 - **No recursion**: the logger provider returns a no-op logger for the
   `ResourceMonitorDaemon.Observability.*` and `System.Net.Http.*` categories. All messages from
   the sink, settings warnings, the dialog and status handling therefore go to the local log only,
@@ -196,8 +202,18 @@ settings or environment; the repository and `appsettings.json` hold none of it.
   - 429, 5xx, timeouts and network errors keep the batch and retry the same batch with
     exponential backoff (`ReconnectBackoff`, 1 s doubling to 60 s). `Retry-After` is honoured up
     to 60 s.
+  - After 3 throttled (429) attempts, a batch is split in half.
+  - A batch is given up after 8 attempts or 10 minutes since its first failure; Loki rejects old
+    entries anyway. Given-up entries are counted in `DroppedByServer` and logged as a Warning once
+    until a push succeeds.
+  - Batches are capped at 1 MiB of uncompressed line data. Single lines are truncated at 16 KB
+    with a marker.
+  - 413 splits the batch in half and retries at once; a single entry that is still too large is
+    dropped.
   - Other 4xx and 3xx responses drop the batch. This is logged as a Warning once per status code
     until a push succeeds; redirects are not followed.
+  - 401/403/404 and request errors also back off, so a wrong URL or credentials are not retried
+    every flush interval.
   - When the queue is full, the oldest entries are dropped, and the number of drops is logged at
     most once per minute.
 - **Lifecycle**: `ObservabilityService` (an `IHostedLifecycleService`) is registered before
@@ -208,13 +224,24 @@ settings or environment; the repository and `appsettings.json` hold none of it.
   `Observability: Loki enabled|disabled; url host=<host[:port]>, auth=<mode>, token configured=yes|no.`
   Settings changes are logged with the same host-only description.
 - **UI**: the tray item "可观测性 (Observability)…" opens `ObservabilityForm`; see Tray Controls.
+  All user-visible texts of the dialog and its tray entry are in `ObservabilityText`, ready to move
+  to resources.
 
 Privacy notes:
 
 - Nothing is sent unless the user enables the sink and enters a URL.
 - Data is sent only to the URL the user configured.
-- Forwarded log lines are the same text as `daemon.log`, so they can contain the broker host
-  name or IP address.
+- Forwarded log lines pass through `LokiLogRedactor` first:
+  - `%LOCALAPPDATA%`, `%APPDATA%` and `%USERPROFILE%` prefixes replace the real folders;
+  - the Windows user name becomes `<user>` (whole word, case-insensitive, names of at least
+    3 characters);
+  - the PC name becomes `<host>`, unless `IncludeHostLabel` is on.
+
+  Otherwise they are the same text as `daemon.log`, so they can contain the broker host name or
+  IP address.
+- Device status is forwarded as contract fields only.
+- Credentials configured for a plain `http://` Url produce a settings warning, and the dialog asks
+  before it saves them or uses them for a Test push.
 - The device status contract excludes SSID, passwords, PoP, IP and MAC addresses.
 - The host label is opt-in.
 - Tokens are never stored in plain text and never logged.

@@ -154,11 +154,17 @@ Settings (section `Observability:Loki`; environment form `RESMON_Observability__
 
 Streams and labels are listed in [COMMUNICATION.md](COMMUNICATION.md#optional-daemon--grafana-loki-streams). What is sent:
 
-- daemon log lines at or above `MinLevel`. These are the same text as `daemon.log` and can contain the broker host or IP address you configured.
+- daemon log lines at or above `MinLevel`, redacted before they are sent:
+  - per-user folders become `%LOCALAPPDATA%`, `%APPDATA%` or `%USERPROFILE%`;
+  - the Windows user name becomes `<user>`;
+  - the PC name becomes `<host>`, unless you enabled `IncludeHostLabel`.
+
+  Apart from this, the lines are the same text as `daemon.log` and can contain the broker host or IP address you configured.
 - CPU and memory percentages, memory used/total in GB, and the MQTT state.
-- the device status JSON, which contains no SSID, password, IP or MAC address.
+- the device status, with only the documented fields and at most one message every 5 s. It contains no SSID, password, IP or MAC address.
 
 Messages from the sink itself, for example failed pushes, stay in the local log only. The sink never blocks or slows sampling or MQTT publishing. Failed pushes are retried with backoff up to 60 s, and on Exit the daemon spends at most 2 s flushing.
+A batch is at most 1 MiB and is given up after 8 attempts or 10 minutes. The given-up entries are dropped and counted in the local log.
 
 Example LogQL queries (Grafana Explore):
 
@@ -169,8 +175,9 @@ avg_over_time({app="resmon-daemon",kind="metrics"} | json | unwrap cpu [5m])
 # Peak memory %
 max_over_time({app="resmon-daemon",kind="metrics"} | json | unwrap mem [5m])
 
-# Minutes with the ESP32 broker unreachable
-sum(count_over_time({app="resmon-daemon",kind="metrics"} | json | mqtt="disconnected" [1m]))
+# Fraction of metrics samples (one per MetricsIntervalSeconds) in the last hour with the ESP32 broker unreachable
+sum(count_over_time({app="resmon-daemon",kind="metrics"} | json | mqtt="disconnected" [1h]))
+  / sum(count_over_time({app="resmon-daemon",kind="metrics"} [1h]))
 
 # Daemon warnings and errors
 {app="resmon-daemon",kind="log",level=~"warn|error|critical"}
