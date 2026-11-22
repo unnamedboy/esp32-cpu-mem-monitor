@@ -4,7 +4,7 @@
 
 static StatusSnapshot sampleSnapshot() {
     StatusSnapshot s;
-    s.build = "phase4-ble-prov";
+    s.build = "phase4-ble-prov-status";
     s.uptimeS = 1234;
     s.heapFree = 182344;
     s.heapMin = 150000;
@@ -17,7 +17,7 @@ static StatusSnapshot sampleSnapshot() {
 }
 
 static const char* const SAMPLE_PAYLOAD =
-    "{\"v\":1,\"build\":\"phase4-ble-prov\",\"uptime_s\":1234,\"heap_free\":182344,\"heap_min\":150000,"
+    "{\"v\":1,\"build\":\"phase4-ble-prov-status\",\"uptime_s\":1234,\"heap_free\":182344,\"heap_min\":150000,"
     "\"rssi\":-61,\"wifi\":\"connected\",\"prov\":\"provisioned\",\"dac\":true}";
 
 void test_sample_payload_exact_output() {
@@ -38,7 +38,7 @@ void test_rssi_omitted_when_not_available() {
     char out[257];
     const size_t n = formatStatusPayload(out, sizeof(out), s);
     TEST_ASSERT_EQUAL_STRING(
-        "{\"v\":1,\"build\":\"phase4-ble-prov\",\"uptime_s\":1234,\"heap_free\":182344,\"heap_min\":150000,"
+        "{\"v\":1,\"build\":\"phase4-ble-prov-status\",\"uptime_s\":1234,\"heap_free\":182344,\"heap_min\":150000,"
         "\"wifi\":\"connecting\",\"prov\":\"dev-fallback\",\"dac\":false}",
         out);
     TEST_ASSERT_EQUAL_UINT32(strlen(out), n);

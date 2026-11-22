@@ -14,7 +14,7 @@
 #endif
 
 // ================= 1. Build / Wi-Fi 配置 =================
-const char* FIRMWARE_BUILD_ID = "phase4-ble-prov";
+const char* FIRMWARE_BUILD_ID = "phase4-ble-prov-status";
 
 // Optional development fallback credentials (ignored firmware/src/secrets.h).
 // Used only when no BLE-provisioned credentials are stored and no

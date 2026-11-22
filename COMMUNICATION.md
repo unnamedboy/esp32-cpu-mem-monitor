@@ -27,8 +27,10 @@ The ESP32 validates each payload and ignores malformed or out-of-range values. C
   (`STATUS_PAYLOAD_MAX`), built with `snprintf` into a fixed buffer.
 
 ```json
-{"v":1,"build":"phase4-ble-prov","uptime_s":1234,"heap_free":182344,"heap_min":150000,"rssi":-61,"wifi":"connected","prov":"provisioned","dac":true}
+{"v":1,"build":"phase4-ble-prov-status","uptime_s":1234,"heap_free":182344,"heap_min":150000,"rssi":-61,"wifi":"connected","prov":"provisioned","dac":true}
 ```
+
+The example is 155 bytes.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
