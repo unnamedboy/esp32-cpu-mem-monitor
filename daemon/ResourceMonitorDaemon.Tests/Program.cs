@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ResourceMonitorDaemon;
+using ResourceMonitorDaemon.Tests;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -583,7 +584,7 @@ var tests = new (string Name, Action Run)[]
     {
         MqttConnectionScenario.LateNotificationHandler().GetAwaiter().GetResult();
     }),
-};
+}.Concat(ProvisioningTests.All).ToArray();
 
 var failed = 0;
 
