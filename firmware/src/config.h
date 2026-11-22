@@ -4,13 +4,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Log level >= 3 (info) makes the provisioning manager / WiFiProv print the
-// PoP, and level 5 (verbose) makes the Arduino core print received Wi-Fi
-// passwords. platformio.ini pins CORE_DEBUG_LEVEL=1 (errors only).
+// Log level guard. platformio.ini pins CORE_DEBUG_LEVEL=1 (errors only).
+// - Level 5 (verbose) is a real leak: the Arduino core logs the SSID and
+//   Wi-Fi password received during provisioning (WiFiGeneric.cpp,
+//   PROV_CRED_RECV log_v).
+// - Levels 3-4 leak no secrets (WiFiProv is not linked, and the precompiled
+//   ESP-IDF libraries are built with CONFIG_LOG_MAXIMUM_LEVEL=1), but they
+//   put Wi-Fi/event chatter on UART0, which also carries the RESMON?POP
+//   pairing query. They are refused as a safety margin.
 #if defined(CORE_DEBUG_LEVEL) && CORE_DEBUG_LEVEL >= 3
-#error "CORE_DEBUG_LEVEL >= 3 would log the provisioning PoP (and >= 5 the Wi-Fi password); keep it <= 2"
+#error "CORE_DEBUG_LEVEL >= 3 is refused (5 logs the provisioned Wi-Fi password; 3-4 flood the pairing UART); keep it <= 2"
 #elif !defined(CORE_DEBUG_LEVEL) && defined(CONFIG_ARDUHAL_LOG_DEFAULT_LEVEL) && CONFIG_ARDUHAL_LOG_DEFAULT_LEVEL >= 3
-#error "Arduino default log level >= 3 would log the provisioning PoP; set -DCORE_DEBUG_LEVEL=1"
+#error "Arduino default log level >= 3 is refused; set -DCORE_DEBUG_LEVEL=1"
 #endif
 
 // ================= 1. Build / Wi-Fi 配置 =================
@@ -70,6 +75,9 @@ const char* PROV_NVS_KEY_POP = "pop";
 const char* PROV_NVS_KEY_REQUEST = "prov_req";
 const uint32_t PROV_HINT_INTERVAL_MS = 30000;   // serial "Provisioning: name=.. pop=.." rate
 const uint32_t PROV_START_TIMEOUT_MS = 5000;    // no PROV_START by then -> start failure
+// An IP while provisioning normally precedes CRED_SUCCESS by milliseconds;
+// warn only if no credentials were accepted after this long.
+const uint32_t PROV_DEFERRED_CONNECT_WARN_MS = 5000;
 const uint32_t PROV_START_MAX_ATTEMPTS = 3;     // consecutive failed starts before giving up
 const uint32_t PROV_RETRY_RESTART_DELAY_MS = 3000; // log visible before the retry restart
 // Auto-stop is disabled so BLE outlives the client's Connected status read.

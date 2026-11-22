@@ -95,9 +95,10 @@ inline StatusProv statusProvFromNetwork(NetworkState state, CredentialSource sou
 }
 
 // True when the next status is due: at least intervalMs have elapsed since
-// lastMs. Wrap-safe for millis(). A lastMs up to intervalMs *later* than nowMs
-// (stamped with millis() after the caller took its loop timestamp) is "not
-// yet due" rather than a huge unsigned elapsed time. Unlike a signed
+// lastMs. Wrap-safe for millis(). Defensive: a lastMs up to intervalMs *later*
+// than nowMs (the caller stamps lastMs from its own loop timestamp, so this
+// should not happen) is "not yet due" rather than a huge unsigned elapsed
+// time. Unlike a signed
 // (int32_t) comparison, gaps longer than ~24.8 days (Wi-Fi down) still count
 // as due.
 inline bool isStatusPublishDue(uint32_t nowMs, uint32_t lastMs, uint32_t intervalMs) {

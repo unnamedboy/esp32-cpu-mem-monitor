@@ -75,8 +75,52 @@ void test_credential_failure_after_success_keeps_credentials_and_stops() {
                           (int)decideCredentialFailureAction(true));
 }
 
+void test_connected_while_provisioning_without_success_stays_provisioning() {
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::StayProvisioning,
+                          (int)decideConnectedTransition(NetworkState::Provisioning, false));
+}
+
+void test_connected_after_provisioning_success_becomes_connected_stored() {
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnectedStored,
+                          (int)decideConnectedTransition(NetworkState::Provisioning, true));
+}
+
+void test_connected_in_station_states_becomes_connected() {
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnected,
+                          (int)decideConnectedTransition(NetworkState::Connecting, false));
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnected,
+                          (int)decideConnectedTransition(NetworkState::Connecting, true));
+    TEST_ASSERT_EQUAL_INT((int)ConnectedTransition::BecomeConnected,
+                          (int)decideConnectedTransition(NetworkState::Error, false));
+}
+
+void test_deferred_connect_warning_waits_for_grace_period() {
+    TEST_ASSERT_FALSE(shouldWarnDeferredConnect(1000, 1000, 5000, false));
+    TEST_ASSERT_FALSE(shouldWarnDeferredConnect(1000, 5999, 5000, false));
+    TEST_ASSERT_TRUE(shouldWarnDeferredConnect(1000, 6000, 5000, false));
+    TEST_ASSERT_TRUE(shouldWarnDeferredConnect(1000, 600000, 5000, false));
+}
+
+void test_deferred_connect_warning_only_once() {
+    TEST_ASSERT_FALSE(shouldWarnDeferredConnect(1000, 6000, 5000, true));
+    TEST_ASSERT_FALSE(shouldWarnDeferredConnect(1000, 600000, 5000, true));
+}
+
+void test_deferred_connect_warning_is_wrap_safe() {
+    const uint32_t since = 0xFFFFFFFFu - 1000u;
+    TEST_ASSERT_FALSE(shouldWarnDeferredConnect(since, since + 4999u, 5000, false));  // wrapped past 0
+    TEST_ASSERT_TRUE(shouldWarnDeferredConnect(since, since + 5000u, 5000, false));
+    TEST_ASSERT_FALSE(shouldWarnDeferredConnect(since, 10u, 5000, false));
+}
+
 void runProvisioningLogicTests() {
     UNITY_BEGIN();
+    RUN_TEST(test_deferred_connect_warning_waits_for_grace_period);
+    RUN_TEST(test_deferred_connect_warning_only_once);
+    RUN_TEST(test_deferred_connect_warning_is_wrap_safe);
+    RUN_TEST(test_connected_while_provisioning_without_success_stays_provisioning);
+    RUN_TEST(test_connected_after_provisioning_success_becomes_connected_stored);
+    RUN_TEST(test_connected_in_station_states_becomes_connected);
     RUN_TEST(test_credential_failure_before_success_resets_for_retry);
     RUN_TEST(test_credential_failure_after_success_keeps_credentials_and_stops);
     RUN_TEST(test_provisioning_start_failure_retries_then_stops);

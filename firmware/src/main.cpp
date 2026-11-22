@@ -68,6 +68,9 @@ bool provSucceeded = false;
 bool provStopRequested = false;
 bool networkServicesStarted = false;
 bool wasWifiConnected = false;
+bool deferredConnectActive = false;   // IP while provisioning, no accepted credentials yet
+bool deferredConnectWarned = false;
+uint32_t deferredConnectSinceMs = 0;
 bool bluetoothMemoryReleased = false;
 bool connectAttemptInFlight = false;
 bool restartPending = false;
@@ -329,7 +332,8 @@ void printProvisioningHint() {
 // Persist the request, wipe stored Wi-Fi credentials, and restart into
 // provisioning mode. Triggered only by the BOOT hold-and-release gesture.
 void requestProvisioningAndRestart() {
-    printDebugLine("BOOT released after 5-15 s: clearing Wi-Fi credentials and restarting into BLE provisioning");
+    printDebugFormatted("BOOT released after %u-%u s: clearing Wi-Fi credentials and restarting into BLE provisioning",
+                        (unsigned)(BOOT_BUTTON_MIN_HOLD_MS / 1000UL), (unsigned)(BOOT_BUTTON_MAX_HOLD_MS / 1000UL));
 
     setProvisioningRequest(true);
     rtcProvFailCount = 0;  // explicit user request: start with a fresh retry budget
@@ -545,8 +549,19 @@ void consumeProvisioningEvents(uint32_t now) {
                 // provisioning here.
                 if (wifi_prov_mgr_reset_sm_state_on_failure() == ESP_OK) {
                     printDebugLine("Provisioning: ready for new credentials");
+                    // Cancel the Arduino core's one automatic retry after the
+                    // first disconnect of the boot, which would otherwise still
+                    // use the rejected credentials. The resulting ASSOC_LEAVE
+                    // disconnect is ignored by the core, the manager (state
+                    // reset) and our policy. Not done when the reset failed:
+                    // the manager may already be in SUCCESS (the retry worked),
+                    // and disconnecting would drop a correctly provisioned STA.
+                    esp_wifi_disconnect();
                 } else {
-                    printDebugLine("Provisioning: could not reset state; hold BOOT 5-15 s, then release, to restart provisioning");
+                    printDebugFormatted("Provisioning: could not reset state; hold BOOT %u-%u s, then release, "
+                                        "to restart provisioning",
+                                        (unsigned)(BOOT_BUTTON_MIN_HOLD_MS / 1000UL),
+                                        (unsigned)(BOOT_BUTTON_MAX_HOLD_MS / 1000UL));
                 }
                 break;
             case CredentialFailureAction::KeepCredentialsAndStopProvisioning:
@@ -639,10 +654,33 @@ bool readApInfo(char* ssid, size_t ssidSize, int* rssi) {
     return true;
 }
 
-void onWifiConnected(uint32_t now) {
-    if (networkState == NetworkState::Provisioning) {
-        credentialSource = CredentialSource::Stored;
+// Returns false when the transition is deferred (still provisioning without
+// accepted credentials); the caller then re-evaluates on the next loop().
+bool onWifiConnected(uint32_t now) {
+    switch (decideConnectedTransition(networkState, provSucceeded)) {
+        case ConnectedTransition::StayProvisioning:
+            // Expected for a few ms on every successful pairing (GOT_IP
+            // arrives before CRED_SUCCESS): stay silent unless it persists.
+            if (!deferredConnectActive) {
+                deferredConnectActive = true;
+                deferredConnectWarned = false;
+                deferredConnectSinceMs = now;
+            }
+            if (shouldWarnDeferredConnect(deferredConnectSinceMs, now, PROV_DEFERRED_CONNECT_WARN_MS,
+                                          deferredConnectWarned)) {
+                deferredConnectWarned = true;
+                printDebugFormatted("Wi-Fi: got an IP while provisioning, but no credentials were accepted after %u s; "
+                                    "staying in provisioning mode",
+                                    (unsigned)(PROV_DEFERRED_CONNECT_WARN_MS / 1000UL));
+            }
+            return false;
+        case ConnectedTransition::BecomeConnectedStored:
+            credentialSource = CredentialSource::Stored;
+            break;
+        case ConnectedTransition::BecomeConnected:
+            break;
     }
+    deferredConnectActive = false;
     networkState = NetworkState::Connected;
     connectAttemptInFlight = false;
     reconnectDelayMs = WIFI_RECONNECT_MIN_MS;
@@ -656,6 +694,7 @@ void onWifiConnected(uint32_t now) {
     printDebugFormatted("Wi-Fi connected: ssid=%s ip=%s rssi=%d source=%s", ssid, ip, rssi,
                         credentialSourceName(credentialSource));
     startNetworkServicesOnce(now);
+    return true;
 }
 
 void onWifiDisconnected(uint32_t now) {
@@ -682,11 +721,15 @@ void serviceNetwork(uint32_t now) {
 
     const bool connected = staHasIp;
     if (connected && !wasWifiConnected) {
-        onWifiConnected(now);
+        // A deferred transition leaves wasWifiConnected false so it is
+        // re-evaluated, e.g. once CRED_SUCCESS has been consumed.
+        wasWifiConnected = onWifiConnected(now);
     } else if (!connected && wasWifiConnected) {
         onWifiDisconnected(now);
+        wasWifiConnected = false;
+    } else if (!connected) {
+        deferredConnectActive = false;
     }
-    wasWifiConnected = connected;
 
     if (restartPending && (int32_t)(now - restartAtMs) >= 0) {
         Serial.flush();
