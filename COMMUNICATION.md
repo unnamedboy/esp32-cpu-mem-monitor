@@ -32,7 +32,7 @@ The ESP32 validates each payload and ignores malformed or out-of-range values. C
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `v` | int | Schema version, currently `1`. Consumers ignore unknown fields and reject unknown `v` greater than the version they support. |
-| `build` | string | `FIRMWARE_BUILD_ID` (JSON-escaped) |
+| `build` | string | `FIRMWARE_BUILD_ID` (JSON-escaped), ≤ 64 characters |
 | `uptime_s` | int | `millis() / 1000` (wraps after about 49 days; acceptable) |
 | `heap_free` | int | `ESP.getFreeHeap()` |
 | `heap_min` | int | `ESP.getMinFreeHeap()` |

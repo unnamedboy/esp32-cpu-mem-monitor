@@ -14,8 +14,9 @@
 #include "provisioning_logic.h"
 
 constexpr int STATUS_SCHEMA_VERSION = 1;
-// Largest escaped `build` value accepted (bytes, without quotes/NUL).
-constexpr size_t STATUS_BUILD_ESCAPED_MAX = 96;
+// Largest escaped `build` value accepted (bytes, without quotes/NUL). The
+// daemon keeps at most 64 characters of `build` (COMMUNICATION.md).
+constexpr size_t STATUS_BUILD_ESCAPED_MAX = 64;
 
 enum class StatusWifi {
     Connected,

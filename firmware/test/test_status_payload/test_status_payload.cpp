@@ -96,6 +96,9 @@ void test_buffer_too_small_fails_without_partial_json() {
 }
 
 void test_overlong_build_fails() {
+    // Matches the daemon, which keeps at most 64 characters of `build`.
+    TEST_ASSERT_EQUAL_UINT32(64, STATUS_BUILD_ESCAPED_MAX);
+
     char build[STATUS_BUILD_ESCAPED_MAX + 2];
     memset(build, 'a', sizeof(build) - 1);
     build[sizeof(build) - 1] = '\0';  // one byte more than accepted
@@ -108,6 +111,12 @@ void test_overlong_build_fails() {
 
     build[sizeof(build) - 2] = '\0';  // exactly the limit
     TEST_ASSERT_TRUE(formatStatusPayload(out, sizeof(out), s) > 0);
+
+    // The limit applies to the escaped form: 63 chars + `"` -> 65 bytes.
+    build[sizeof(build) - 3] = '"';
+    memset(out, 'x', sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(0, formatStatusPayload(out, sizeof(out), s));
+    TEST_ASSERT_EQUAL_STRING("", out);
 }
 
 void test_build_string_is_escaped() {
