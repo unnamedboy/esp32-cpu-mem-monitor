@@ -789,6 +789,56 @@ internal static class ObservabilityTests
             AssertEqual(4L, sink.DroppedByServer);
             AssertTrue(logs.Messages.Any(m => m.Contains("Loki rejected a batch of 2 entries (Loki may have accepted some entries)")), "uncounted rejection wording");
         }),
+        ("Profile-folder fallback stops at quotes, brackets, commas, semicolons and invalid file-name characters", () =>
+        {
+            var redactor = new LokiLogRedactor(Array.Empty<(string, string)>(), null, null);
+            string R(string text) => redactor.Redact(text, false);
+            AssertEqual(@"'C:\Users\<user>' (see log)", R(@"'C:\Users\carol' (see log)"));
+            AssertEqual("\"C:\\Users\\<user>\" was used", R("\"C:\\Users\\hank\" was used"));
+            AssertEqual(@"(C:\Users\<user>)", R(@"(C:\Users\ivan)"));
+            AssertEqual(@"C:\Users\<user>, next", R(@"C:\Users\judy, next"));
+            AssertEqual(@"C:\Users\<user>; next", R(@"C:\Users\kim; next"));
+            AssertEqual(@"C:\Users\<user>: done", R(@"C:\Users\bob: done"));
+            AssertEqual(@"C:\Users\<user> (see log)", R(@"C:\Users\bob (see log)"));
+            AssertEqual(@"C:\Users\<user>\x", R(@"C:\Users\Mary Ann\x"));
+            AssertEqual(@"'C:\Users\Public' stays", R(@"'C:\Users\Public' stays"));
+        }),
+        ("Batch byte cap holds for emoji, U+2028 and private-use text (escaped by the encoder)", () =>
+        {
+            var bodies = new List<byte[]>();
+            var sink = new LokiSink(new LokiEntryQueue(), NullLogger<LokiSink>.Instance, new FakeHandler(request =>
+            {
+                bodies.Add(request.Content!.ReadAsByteArrayAsync().GetAwaiter().GetResult());
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }));
+            sink.Configure(new LokiSettings { Enabled = true, Url = "http://loki.test", BatchMaxEntries = 5000, Gzip = false });
+            var originals = new List<string>();
+            for (var i = 0; i < 150; i++)
+            {
+                var line = $"{i:D3} " + string.Concat(Enumerable.Repeat("\U0001F600\u2028\uE000", 2500));
+                originals.Add(line);
+                sink.Queue.TryEnqueue(LokiStreamKind.Log, "info", line);
+            }
+
+            while (sink.FlushOnceAsync(CancellationToken.None).GetAwaiter().GetResult() != null)
+            {
+            }
+
+            AssertTrue(bodies.Count >= 3, "expected several batches, got " + bodies.Count);
+            AssertTrue(bodies.All(b => b.Length <= LokiSink.MaxBatchBytes + 4096), "escaped batch over the cap: " + string.Join(",", bodies.Select(b => b.Length)));
+            var received = bodies.SelectMany(b => JsonNode.Parse(b)!["streams"]!.AsArray().SelectMany(s => s!["values"]!.AsArray().Select(v => v![1]!.GetValue<string>()))).ToList();
+            AssertEqual(string.Join("|", originals), string.Join("|", received));
+
+            // Truncation never leaves half a surrogate pair behind.
+            var queue = new LokiEntryQueue(10);
+            queue.TryEnqueue(LokiStreamKind.Log, "info", new string('x', LokiEntryQueue.MaxLineLength - 1) + "\U0001F600 tail");
+            var truncated = queue.DequeueBatch(1).Single().Line;
+            AssertTrue(!char.IsHighSurrogate(truncated[LokiEntryQueue.MaxLineLength - 2]) && !truncated.Any(char.IsSurrogate), "split surrogate pair: " + truncated[^20..]);
+        }),
+        ("MQTT status topic changed while a connect is in flight is resubscribed on the next tick", () =>
+        {
+            StatusTopicChangeDuringConnect().GetAwaiter().GetResult();
+        }),
         ("Only a single entry still throttled (429 without Retry-After) after splitting is given up", () =>
         {
             var now = DateTimeOffset.UnixEpoch;
@@ -1220,6 +1270,42 @@ internal static class ObservabilityTests
         listener.Stop();
         await acceptLoop;
         accepted.ForEach(c => c.Dispose());
+    }
+
+    private static async Task StatusTopicChangeDuringConnect()
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var port = FreePort();
+        var settings = new DeviceSettings { Host = "127.0.0.1", Port = port, ConnectTimeoutMs = 1000 };
+        var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var connection = new MqttConnection(NullLogger<MqttConnection>.Instance, () => now);
+        connection.StatusMessageReceived += payload => received.Enqueue(Encoding.UTF8.GetString(payload));
+        connection.Configure(settings);
+        var server = await StartBrokerAsync(port);
+        try
+        {
+            // The attempt snapshots the settings when it starts, so it subscribes to the old topic.
+            connection.MaintainConnection();
+            connection.Configure(settings with { StatusTopic = "lab/status" });
+            await connection.PendingAttempt;
+            AssertTrue(connection.IsConnected, "not connected");
+
+            connection.MaintainConnection();   // next sampling tick: notices the mismatch
+            await WaitUntilAsync(async () =>
+            {
+                await PublishAsync(port, "lab/status", "{\"v\":1,\"build\":\"new\"}");
+                return received.Any(r => r.Contains("\"new\""));
+            }, "status on the topic changed during the connect");
+
+            await PublishAsync(port, "resmon/status", "{\"v\":1,\"build\":\"old\"}");
+            await Task.Delay(300);
+            AssertTrue(!received.Any(r => r.Contains("\"old\"")), "message on the old topic was delivered");
+        }
+        finally
+        {
+            await server.StopAsync();
+            server.Dispose();
+        }
     }
 
     private static async Task StatusOverMqtt()

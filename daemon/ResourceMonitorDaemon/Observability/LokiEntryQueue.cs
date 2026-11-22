@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using Microsoft.Extensions.Logging;
 
 namespace ResourceMonitorDaemon.Observability
@@ -127,7 +128,9 @@ namespace ResourceMonitorDaemon.Observability
 
             if (line.Length > MaxLineLength)
             {
-                line = line[..MaxLineLength] + "…(truncated)";
+                // Never cut a surrogate pair in half.
+                var cut = char.IsHighSurrogate(line[MaxLineLength - 1]) ? MaxLineLength - 1 : MaxLineLength;
+                line = line[..cut] + "…(truncated)";
             }
 
             bool signal;
@@ -179,26 +182,17 @@ namespace ResourceMonitorDaemon.Observability
         }
 
         /// <summary>
-        /// Uncompressed JSON size of one value as <see cref="LokiPushPayload"/> writes it: the raw
-        /// UTF-8 line, plus escapes (1 extra byte for a quote or backslash, 5 for a control character
-        /// written as \uXXXX), plus timestamp and punctuation.
+        /// Uncompressed JSON size of one value as <see cref="LokiPushPayload"/> writes it: the line
+        /// escaped by the same encoder (<see cref="JavaScriptEncoder.UnsafeRelaxedJsonEscaping"/>) in
+        /// UTF-8, plus timestamp and punctuation. This counts everything the encoder still escapes:
+        /// quotes, backslashes, control characters, characters outside the BMP such as emoji (12
+        /// bytes as a surrogate pair), U+2028/U+2029, private-use and unassigned characters.
         /// </summary>
         public static long EstimateBytes(in LokiEntry entry)
         {
-            long escapes = 0;
-            foreach (var c in entry.Line)
-            {
-                if (c is '"' or '\\')
-                {
-                    escapes += 1;
-                }
-                else if (c < ' ' || c == '\u007F')
-                {
-                    escapes += 5;
-                }
-            }
-
-            return Encoding.UTF8.GetByteCount(entry.Line) + escapes + 32;
+            // Encode returns the same instance when nothing needs escaping (plain ASCII / CJK).
+            var escaped = JavaScriptEncoder.UnsafeRelaxedJsonEscaping.Encode(entry.Line);
+            return Encoding.UTF8.GetByteCount(escaped) + 32;
         }
 
         /// <summary>Returns the drops since the previous call and resets that counter.</summary>

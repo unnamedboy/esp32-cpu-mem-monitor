@@ -45,6 +45,8 @@ namespace ResourceMonitorDaemon
         private int _outageFailures;
         private DateTimeOffset? _outageStartedAt;
         private bool _disposed;
+        private string? _subscribedTopic;   // status topic the current client subscribed to (or tried)
+        private Task? _resubscribe;
 
         public MqttConnection(ILogger<MqttConnection> logger, Func<DateTimeOffset>? clock = null)
         {
@@ -137,12 +139,32 @@ namespace ResourceMonitorDaemon
                     _backoff.Reset();
                     _logger.LogInformation("MQTT broker endpoint changed to {Endpoint}; reconnecting.", DescribeEndpoint(settings));
                 }
-                else if (previous != null && previous.StatusTopic != settings.StatusTopic && IsConnectedLocked)
+                else
                 {
-                    var client = _client!;
-                    _ = Task.Run(() => ResubscribeAsync(client, previous.StatusTopic, settings));
+                    EnsureStatusSubscriptionLocked();
                 }
             }
+        }
+
+        /// <summary>
+        /// Resubscribes in the background when the connected client's status subscription does not
+        /// match the current <see cref="DeviceSettings.StatusTopic"/>: after a topic change, also one
+        /// made while a connect attempt (which subscribes to its own snapshot) was in flight. Called
+        /// from <see cref="Configure"/> and every <see cref="MaintainConnection"/> tick.
+        /// </summary>
+        private void EnsureStatusSubscriptionLocked()
+        {
+            if (_settings == null || !IsConnectedLocked || _subscribedTopic == null
+                || _subscribedTopic == _settings.StatusTopic || _resubscribe is { IsCompleted: false })
+            {
+                return;
+            }
+
+            var client = _client!;
+            var previousTopic = _subscribedTopic;
+            var settings = _settings;
+            _subscribedTopic = settings.StatusTopic;
+            _resubscribe = Task.Run(() => ResubscribeAsync(client, previousTopic, settings));
         }
 
         /// <summary>
@@ -166,6 +188,7 @@ namespace ResourceMonitorDaemon
                 var connected = _client?.IsConnected == true && !_dropRequested;
                 if (connected && !_reconnectRequested)
                 {
+                    EnsureStatusSubscriptionLocked();
                     return;
                 }
 
@@ -335,7 +358,17 @@ namespace ResourceMonitorDaemon
                     }
 
                     // Clean session: the broker forgets subscriptions, so subscribe after every connect.
-                    await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
+                    try
+                    {
+                        await SubscribeStatusAsync(client, settings, shutdown).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // Shutdown cancelled the subscription: never leak the connected client.
+                        await CloseClientAsync(client, ShutdownDisconnectTimeoutMs, CancellationToken.None).ConfigureAwait(false);
+                        throw;
+                    }
+
                     if (!OnConnected(client, address, settings))
                     {
                         await CloseClientAsync(client, ShutdownDisconnectTimeoutMs, CancellationToken.None).ConfigureAwait(false);
@@ -439,6 +472,7 @@ namespace ResourceMonitorDaemon
 
                 _client = client;
                 _connectedAddress = address;
+                _subscribedTopic = settings.StatusTopic;
                 _wasConnected = true;
                 _backoff!.RecordConnected();
 
